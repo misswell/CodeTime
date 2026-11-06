@@ -61,7 +61,7 @@ README
 
 rm -f "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256"
 COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --keepParent "$STAGE/CodeTime.app" "$DIST/$NAME.zip"
-shasum -a 256 "$DIST/$NAME.zip" > "$DIST/$NAME.zip.sha256"
+(cd "$DIST" && shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256")
 
 echo
 echo "artifact: $DIST/$NAME.zip"
