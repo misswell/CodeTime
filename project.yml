@@ -1,0 +1,118 @@
+name: CodeTime
+configs:
+  Debug: debug
+  Release: release
+  Beta: release
+
+options:
+  bundleIdPrefix: com.codetime
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ONLY_ACTIVE_ARCH: YES
+
+packages:
+  CodeTimeKit:
+    path: Packages/CodeTimeKit
+
+targets:
+  CodeTime:
+    type: application
+    platform: macOS
+    sources:
+      - path: Apps/CodeTime
+      - path: Resources/Kopia
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: CodeTimeKit
+        product: CodeTimeCore
+      - package: CodeTimeKit
+        product: SharedModels
+      - package: CodeTimeKit
+        product: BackupEngine
+      - package: CodeTimeKit
+        product: Diagnostics
+    info:
+      path: Apps/CodeTime/Info.plist
+      properties:
+        CFBundleDisplayName: CodeTime
+        CFBundleName: CodeTime
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: "Copyright © 2026 CodeTime contributors. Apache-2.0."
+        NSHighResolutionCapable: true
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+        NSPrincipalClass: NSApplication
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.codetime.app
+        PRODUCT_NAME: CodeTime
+        CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime-Debug.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+      configs:
+        Beta:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime-Beta.entitlements
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          ENABLE_HARDENED_RUNTIME: NO
+          ONLY_ACTIVE_ARCH: NO
+          ARCHS: "arm64 x86_64"
+        Release:
+          CODE_SIGN_STYLE: Automatic
+          DEVELOPMENT_TEAM: U8U443D7ZL
+          CODE_SIGN_IDENTITY: "Developer ID Application"
+          CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime.entitlements
+          ENABLE_HARDENED_RUNTIME: YES
+          ONLY_ACTIVE_ARCH: NO
+    postBuildScripts:
+      - name: Bundle Agent and Sign Nested Binaries
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          APP_DIR="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
+          mkdir -p "$APP_DIR/Library/LaunchAgents"
+          cp -f "$SRCROOT/Resources/LaunchAgents/com.codetime.agent.plist" "$APP_DIR/Library/LaunchAgents/com.codetime.agent.plist"
+          chmod +x "$APP_DIR/Resources/Kopia/kopia" 2>/dev/null || true
+
+          IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-}"
+          if [ -z "$IDENTITY" ]; then IDENTITY="-"; fi
+          OPTS=""
+          if [ "$CONFIGURATION" = "Release" ]; then OPTS="--options runtime"; fi
+          if [ -f "$APP_DIR/Resources/Kopia/kopia" ]; then
+            if [ "$CONFIGURATION" = "Release" ]; then
+              codesign --force $OPTS --entitlements "$SRCROOT/Resources/Kopia/kopia.entitlements" --sign "$IDENTITY" "$APP_DIR/Resources/Kopia/kopia"
+            else
+              codesign --force $OPTS --sign "$IDENTITY" "$APP_DIR/Resources/Kopia/kopia"
+            fi
+          fi
+
+schemes:
+  CodeTime:
+    build:
+      targets:
+        CodeTime: all
+    run:
+      config: Debug
+    archive:
+      config: Release

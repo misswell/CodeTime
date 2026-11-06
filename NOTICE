@@ -1,0 +1,8 @@
+CodeTime
+Copyright 2026 CodeTime contributors
+
+This product includes Kopia (https://kopia.io), licensed under the
+Apache License, Version 2.0. The bundled Kopia binary and its license are
+located in Resources/Kopia/ (kopia, LICENSE, README.md).
+
+Kopia is Copyright (c) Kopia contributors.

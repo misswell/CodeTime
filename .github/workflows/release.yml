@@ -1,0 +1,57 @@
+name: Release CodeTime Beta
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codetime-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch pinned Kopia
+        run: ./Scripts/fetch_kopia.sh
+
+      - name: Tests
+        env:
+          KOPIA_PATH: ${{ github.workspace }}/Resources/Kopia/kopia
+        run: swift test --package-path Packages/CodeTimeKit
+
+      - name: Package beta
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./Scripts/package_beta.sh
+
+      - name: Publish pre-release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          NOTES="Docs/releases/${TAG}.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "missing release notes: $NOTES" >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            dist/*.zip dist/*.zip.sha256 \
+            --title "CodeTime ${TAG}" \
+            --notes-file "$NOTES" \
+            --prerelease \
+            --verify-tag

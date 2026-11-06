@@ -1,0 +1,32 @@
+[
+  {
+    "id": "node",
+    "name": "Node.js",
+    "summary": "依赖目录、构建产物与包管理器缓存",
+    "rules": ["node_modules/", ".next/", ".nuxt/", ".pnpm-store/", ".yarn/cache/", ".turbo/", "dist/", "build/", "coverage/", "*.log"]
+  },
+  {
+    "id": "java",
+    "name": "Java / Kotlin",
+    "summary": "Gradle、Maven 与构建输出",
+    "rules": ["target/", ".gradle/", "build/", "out/", "*.class", "*.jar"]
+  },
+  {
+    "id": "python",
+    "name": "Python",
+    "summary": "虚拟环境与字节码缓存",
+    "rules": [".venv/", "venv/", "__pycache__/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "*.pyc"]
+  },
+  {
+    "id": "swift",
+    "name": "Swift / Xcode",
+    "summary": "DerivedData 与 SwiftPM 构建目录",
+    "rules": ["DerivedData/", ".build/", "build/", "*.xcuserstate"]
+  },
+  {
+    "id": "common",
+    "name": "通用开发产物",
+    "summary": "日志、缩略图、系统文件与常见临时目录",
+    "rules": ["*.log", ".DS_Store", "Thumbs.db", "*.swp", "*.tmp", ".idea/workspace.xml", ".vscode/.history/"]
+  }
+]

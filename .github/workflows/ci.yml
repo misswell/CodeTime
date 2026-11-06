@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch Kopia
+        run: ./Scripts/fetch_kopia.sh
+
+      - name: Swift tests (Kopia + cloud mirror + recovery)
+        env:
+          KOPIA_PATH: ${{ github.workspace }}/Resources/Kopia/kopia
+        run: swift test --package-path Packages/CodeTimeKit
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild \
+            -project CodeTime.xcodeproj \
+            -scheme CodeTime \
+            -configuration Debug \
+            -derivedDataPath .build/DerivedData \
+            build CODE_SIGNING_ALLOWED=NO
