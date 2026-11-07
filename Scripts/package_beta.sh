@@ -31,12 +31,13 @@ DEVID="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(D
 SIGNED_NOTE="UNSIGNED（ad-hoc）"
 SIGN_OVERRIDE=()
 if [ -n "$DEVID" ]; then
-  echo "==> Developer ID found: $DEVID（将签名并公证）"
+  echo "==> Developer ID found: ${DEVID}（将签名并公证）"
   SIGN_OVERRIDE=(
     CODE_SIGN_STYLE=Manual
     CODE_SIGN_IDENTITY="$DEVID"
     DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-U8U443D7ZL}"
     ENABLE_HARDENED_RUNTIME=YES
+    OTHER_CODE_SIGN_FLAGS=--timestamp
   )
   SIGNED_NOTE="Developer ID: $DEVID"
 else
