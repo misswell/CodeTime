@@ -173,19 +173,7 @@ final class FourthRoundRegressionTests: XCTestCase {
 
     // MARK: - CT-074 Restore job identity binding
 
-    func testCT074_RestoreJobBindingValidationExists() {
-        // Verify that the recoverFromCloud function includes binding validation
-        // by checking the source contains the expected guard conditions.
-        let source = """
-        guard existing.repositoryID == recovered.repositoryID
-        guard existing.generationID == generationID
-        guard existing.sourceDeviceID == recovered.deviceID
-        guard existing.stagingPath.hasPrefix(repositoryRoot.path)
-        """
-        // This is a compile-time presence check; the actual behavioral test
-        // requires a full cloud + recovery setup which is covered by e2e.
-        XCTAssertTrue(source.contains("repositoryID"), "CT-074 绑定检查已存在")
-    }
+
 
     // MARK: - CT-076 Tag/Commit consistency in workflow
 

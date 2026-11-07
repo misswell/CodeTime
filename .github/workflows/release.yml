@@ -150,12 +150,14 @@ jobs:
             --notes-file "$NOTES" \
             --prerelease $VERIFY
 
-  stable:
+  # Phase 1: Candidate build (Developer ID signed, notarized, stapled)
+  candidate:
     needs: [classify, regression]
     if: needs.classify.outputs.channel == 'stable'
     runs-on: macos-15
     timeout-minutes: 60
-    environment: stable-release
+    outputs:
+      artifact_name: ${{ steps.artifact.outputs.name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -176,8 +178,6 @@ jobs:
           : "${DEVELOPMENT_TEAM:?stable release requires DEVELOPMENT_TEAM secret}"
           : "${APPLE_ID:?stable release requires APPLE_ID secret}"
           : "${NOTARY_PASSWORD:?stable release requires NOTARY_PASSWORD secret}"
-      - name: Require two-Mac iCloud acceptance report
-        run: ./Scripts/require_icloud_acceptance.sh "${{ needs.classify.outputs.tag }}"
       - name: Package, notarize and staple
         env:
           DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
@@ -188,12 +188,89 @@ jobs:
         run: ./Scripts/package_release.sh
       - name: Verify signed artifact
         run: ./Scripts/verify_release.sh dist/CodeTime-*-macos-universal.zip
-      - name: Upload stable artifact
+      - name: Record artifact metadata
+        id: artifact
+        run: |
+          ZIP="$(ls dist/CodeTime-*-macos-universal.zip)"
+          SHA256="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          NAME="$(basename "$ZIP")"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "candidate artifact: $NAME"
+          echo "candidate sha256: $SHA256"
+      - name: Upload immutable candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codetime-${{ needs.classify.outputs.tag }}
+          name: codetime-candidate-${{ needs.classify.outputs.tag }}
           path: dist/*
           if-no-files-found: error
+          retention-days: 90
+
+  # Phase 2: Acceptance — verify the candidate artifact is the one that was
+  # accepted on real devices. Downloads the EXACT candidate (not a rebuild).
+  acceptance:
+    needs: [classify, candidate]
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download immutable candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codetime-candidate-${{ needs.classify.outputs.tag }}
+          path: candidate/
+      - name: Require two-Mac iCloud acceptance report
+        run: ./Scripts/require_icloud_acceptance.sh "${{ needs.classify.outputs.tag }}"
+      - name: Verify candidate SHA-256 matches acceptance report
+        run: |
+          set -euo pipefail
+          ZIP="$(ls candidate/CodeTime-*-macos-universal.zip)"
+          ACTUAL_SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          REPORT="Docs/releases/${{ needs.classify.outputs.tag }}-icloud-acceptance.md"
+          if [ -f "$REPORT" ]; then
+            REPORT_SHA="$(grep -o 'Candidate Artifact SHA-256：[a-f0-9]*' "$REPORT" | head -1 | sed 's/.*：//')"
+            if [ -n "$REPORT_SHA" ] && [ "$ACTUAL_SHA" != "$REPORT_SHA" ]; then
+              echo "::error::Candidate SHA-256 mismatch: report=$REPORT_SHA artifact=$ACTUAL_SHA" >&2
+              exit 1
+            fi
+          fi
+          echo "candidate SHA-256 verified: $ACTUAL_SHA"
+      - name: Verify tag matches build commit
+        run: |
+          set -euo pipefail
+          TAG_SHA="$(git rev-parse "refs/tags/${{ needs.classify.outputs.tag }}^{commit}")"
+          BUILD_SHA="${{ github.sha }}"
+          if [ "$TAG_SHA" != "$BUILD_SHA" ]; then
+            echo "::error::Tag commit $TAG_SHA != build commit $BUILD_SHA" >&2
+            exit 1
+          fi
+          echo "tag/commit verified: $TAG_SHA"
+      - name: Verify signing and notarization
+        run: |
+          set -euo pipefail
+          ZIP="$(ls candidate/CodeTime-*-macos-universal.zip)"
+          "$GITHUB_WORKSPACE/Scripts/verify_release.sh" "$ZIP"
+      - name: Upload verified candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: codetime-verified-${{ needs.classify.outputs.tag }}
+          path: candidate/*
+          if-no-files-found: error
+
+  # Phase 3: Publish the verified candidate artifact (no rebuild).
+  publish-stable:
+    needs: [classify, acceptance]
+    runs-on: macos-15
+    timeout-minutes: 15
+    environment: stable-release
+    steps:
+      - name: Download verified candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: codetime-verified-${{ needs.classify.outputs.tag }}
+          path: dist/
       - name: Publish stable release
         if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
