@@ -1391,14 +1391,20 @@ public actor CodeTimeService {
         let entries = try await store.listGenerationEntries(repositoryId: repository.id)
         return entries.map { entry in
             if let generation = entry.generation { return generation }
-            // Keep an unreadable newest generation visible instead of silently
-            // dropping it and presenting an older version as the latest.
+            // Classify unreadable cause instead of blanket-failing everything.
+            let state: CloudGenerationState
+            switch entry.readState {
+            case .notDownloaded: state = .staging
+            case .unreadable: state = .published
+            case .corrupted, .unsupportedVersion: state = .failed
+            case .valid: state = .published
+            }
             return CloudGeneration(
                 id: entry.id,
                 repositoryID: repository.id,
                 deviceID: device?.id ?? UUID(),
                 createdAt: entry.manifestModifiedAt ?? .distantPast,
-                state: .failed,
+                state: state,
                 errorMessage: entry.detail ?? entry.readState.rawValue
             )
         }
@@ -1477,7 +1483,7 @@ public actor CodeTimeService {
                         cloudState: .synced,
                         cloudGenerationID: generationID
                     )
-                    try? await database.updateProjectRuntime(id: snapshot.projectID, status: .synced)
+                    await refreshProjectCloudStatus(projectID: snapshot.projectID)
                     await logger.warning("云端发布已确认成功，后续本地记录失败已修复")
                     return nil
                 }

@@ -416,6 +416,16 @@ public actor CloudMirrorStore: CloudStore {
         guard manifest.formatVersion == formatVersion else {
             throw CloudStoreError.manifestCorrupt("清单格式版本 \(manifest.formatVersion)")
         }
+        // Verify aggregate integrity: repositoryHash pins the exact sorted file
+        // list, totalBytes pins the total payload size.
+        let recomputedHash = Hashing.sha256Hex(try encoder.encode(manifest.repositoryFiles))
+        guard manifest.integrity.repositoryHash == recomputedHash else {
+            throw CloudStoreError.manifestCorrupt("repositoryHash 不匹配")
+        }
+        let recomputedBytes = manifest.repositoryFiles.reduce(Int64(0)) { $0 + $1.size }
+        guard manifest.integrity.totalBytes == recomputedBytes else {
+            throw CloudStoreError.manifestCorrupt("totalBytes 不匹配")
+        }
         guard manifest.objectAlgorithm == objectAlgorithm else {
             throw CloudStoreError.manifestCorrupt("对象算法 \(manifest.objectAlgorithm)")
         }
@@ -1104,6 +1114,24 @@ public actor CloudMirrorStore: CloudStore {
         let publishLock = try await acquirePublishLock()
         defer { publishLock?.release() }
         try await prepare()
+
+        // Cross-Mac safety: skip physical deletion if other devices exist.
+        let devicesDir = baseURL.appendingPathComponent("devices", isDirectory: true)
+        let allDevices = (try? fileManager.contentsOfDirectory(
+            at: devicesDir,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let otherDevices = allDevices.filter { url in
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            return isDir && url.lastPathComponent != configuration.deviceID.uuidString
+        }
+        if !otherDevices.isEmpty {
+            return CloudCleanupReport(
+                retainedGenerations: 0,
+                skippedReason: "检测到 \(otherDevices.count) 台其他设备的仓库；多设备 GC 需要分布式协调，已跳过物理删除"
+            )
+        }
 
         let now = Date()
         let loadedJournal: GCJournal?

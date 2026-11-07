@@ -144,6 +144,7 @@ jobs:
           VERIFY=""
           if [[ "$REF" == refs/tags/* ]]; then VERIFY="--verify-tag"; fi
           gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
             dist/*.zip dist/*.zip.sha256 dist/*.dmg \
             --title "CodeTime ${TAG}" \
             --notes-file "$NOTES" \
@@ -209,6 +210,7 @@ jobs:
           VERIFY=""
           if [[ "$REF" == refs/tags/* ]]; then VERIFY="--verify-tag"; fi
           gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
             dist/*.zip dist/*.zip.sha256 dist/*.dmg \
             --title "CodeTime ${TAG}" \
             --notes-file "$NOTES" \

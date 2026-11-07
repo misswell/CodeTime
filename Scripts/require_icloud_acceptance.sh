@@ -13,9 +13,9 @@ fail() { echo "iCloud 验收报告不合格：$*" >&2; exit 1; }
 [ -f "$REPORT" ] || fail "缺少 $REPORT"
 grep -q "将本文件复制为" "$REPORT" && fail "报告仍是模板原件"
 grep -Eq "PASS[[:space:]]*/[[:space:]]*FAIL|PLACEHOLDER" "$REPORT" && fail "报告含未填写占位符或 PASS / FAIL"
-grep -q "发布 tag：$TAG" "$REPORT" || fail "发布 tag 不匹配（$TAG）"
+grep -Fx -e "- 发布 tag：$TAG" "$REPORT" || fail "发布 tag 不匹配（$TAG）"
 if [ -n "${GITHUB_SHA:-}" ]; then
-  grep -q "构建 commit：$GITHUB_SHA" "$REPORT" || fail "构建 commit 不匹配（$GITHUB_SHA）"
+  grep -Fx -e "- 构建 commit：$GITHUB_SHA" "$REPORT" || fail "构建 commit 不匹配（$GITHUB_SHA）"
 fi
 grep -Eq "执行时间：[^[:space:]]+" "$REPORT" || fail "缺少执行时间"
 grep -Eq "执行人：[^[:space:]]+" "$REPORT" || fail "缺少执行人"

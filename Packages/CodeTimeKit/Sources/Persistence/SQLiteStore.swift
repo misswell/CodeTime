@@ -616,11 +616,20 @@ public actor SQLiteStore {
                    Date().timeIntervalSince(existing.startedAt ?? existing.createdAt) < 60 {
                     return nil
                 }
+                // Reclaimable: mark the old job interrupted in the same transaction
+                // so it doesn't linger as "running" forever.
+                var interrupted = existing
+                interrupted.state = .failed
+                interrupted.finishedAt = Date()
+                interrupted.errorMessage = "被新任务回收"
+                interrupted.lease = nil
+                try upsertJob(interrupted)
             }
 
             var claimedJob: BackupJob
             if let retryJobID, let existing = try self.job(id: retryJobID),
                !existing.state.isTerminal,
+               existing.type == .backup,
                existing.projectID == projectID {
                 // A retry claim may only resume a job whose previous worker is
                 // provably gone; a live lease must never be stolen by Job ID.

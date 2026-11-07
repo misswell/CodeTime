@@ -458,12 +458,11 @@ public final class RepositoryLock: @unchecked Sendable {
         }
     }
 
-    /// Acquire only when the lock file already exists. Absent means no process
-    /// has ever used that subsystem, so there is nothing to coordinate.
+    /// Acquire the lock, creating the lock file if it doesn't exist yet. This
+    /// closes the race where a process checks before another creates the file.
     @discardableResult
     public func tryAcquireIfPresent() -> Bool {
-        guard FileManager.default.fileExists(atPath: path) else { return true }
-        return tryAcquire()
+        tryAcquire()
     }
 
     @discardableResult
