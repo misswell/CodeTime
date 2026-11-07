@@ -1854,7 +1854,14 @@ public actor CodeTimeService {
                     "恢复任务 \(existing.id) 来自设备 \(existing.sourceDeviceID)，与目标 \(recovered.deviceID) 不匹配"
                 )
             }
-            guard existing.stagingPath.hasPrefix(repositoryRoot.path) else {
+            // CT-085: Standardized path comparison with symlink resolution
+            let standardizedStaging = URL(fileURLWithPath: existing.stagingPath)
+                .standardizedFileURL.resolvingSymlinksInPath().path
+            let standardizedRoot = repositoryRoot.standardizedFileURL
+                .resolvingSymlinksInPath().path
+            guard standardizedStaging.hasPrefix(standardizedRoot + "/"),
+                  URL(fileURLWithPath: existing.stagingPath).deletingLastPathComponent().path
+                    == standardizedRoot else {
                 throw CodeTimeError.restoreSourceUnavailable(
                     "恢复任务 staging 路径超出仓库范围：\(existing.stagingPath)"
                 )

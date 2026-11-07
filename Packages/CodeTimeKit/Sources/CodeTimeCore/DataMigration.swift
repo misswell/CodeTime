@@ -477,7 +477,17 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             target: target,
             replaceRoot: request.allowReplaceRoot == true
         )
-        try? FileManager.default.removeItem(at: requestURL)
+        // CT-089: Request deletion failure must not report success. If the
+        // request file persists, the next startup would re-execute the migration
+        // and overwrite Release data created after the first migration.
+        do {
+            try FileManager.default.removeItem(at: requestURL)
+        } catch {
+            throw MigrationError.verificationFailed(
+                "迁移成功但迁移请求删除失败（\(error.localizedDescription)）。"
+                + "请手动删除 \(requestURL.path) 以避免重复迁移。"
+            )
+        }
         return result
     }
 

@@ -160,6 +160,7 @@ final class AppModel: ObservableObject {
     @Published var migrationNotice: String?
 
     @Published private(set) var service: CodeTimeService?
+    private var lifecycleLock: LifecycleLock?
     private var scheduler: BackupScheduler?
     private var started = false
     private var persistedSettings: AppSettings = .default
@@ -266,7 +267,9 @@ final class AppModel: ObservableObject {
                     throw CodeTimeError.repositoryUnavailable("迁移占用生命周期锁超时")
                 }
             }
-            defer { lifecycleLock.release() }
+            // CT-083: Hold the lock for the entire UI lifetime, not just start().
+            // Release happens in deinit or explicit cleanup.
+            self.lifecycleLock = lifecycleLock
             let service = try CodeTimeService()
             self.service = service
             let report = try await service.bootstrap()

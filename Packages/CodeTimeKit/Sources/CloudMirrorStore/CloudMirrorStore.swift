@@ -1117,11 +1117,21 @@ public actor CloudMirrorStore: CloudStore {
 
         // Cross-Mac safety: skip physical deletion if other devices exist.
         let devicesDir = baseURL.appendingPathComponent("devices", isDirectory: true)
-        let allDevices = (try? fileManager.contentsOfDirectory(
-            at: devicesDir,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
+        // CT-087: Fail closed on directory read failure. Cannot determine if
+        // other devices exist; must not proceed with deletion.
+        let allDevices: [URL]
+        do {
+            allDevices = try fileManager.contentsOfDirectory(
+                at: devicesDir,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return CloudCleanupReport(
+                retainedGenerations: 0,
+                skippedReason: "无法读取设备目录（\(error.localizedDescription)），GC 已暂停"
+            )
+        }
         let otherDevices = allDevices.filter { url in
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             return isDir && url.lastPathComponent != configuration.deviceID.uuidString
