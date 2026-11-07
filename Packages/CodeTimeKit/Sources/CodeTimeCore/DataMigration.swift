@@ -323,6 +323,15 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(completion).write(to: target.appendingPathComponent(completionName), options: .atomic)
+            // CT-090: the authoritative completion record lives in the lifecycle
+            // directory, OUTSIDE the replaceable data root, so a later root swap
+            // cannot erase the idempotency guard.
+            try encoder.encode(completion).write(
+                to: lifecycleDir.appendingPathComponent(completionName), options: .atomic
+            )
+            journal.state = "completed"
+            journal.updatedAt = Date()
+            try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             try? fileManager.removeItem(at: target.appendingPathComponent(journalName))
             progress(1)
 
@@ -337,6 +346,10 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             journal.state = "failed"
             journal.updatedAt = Date()
             journal.message = error.localizedDescription
+            // Both locations: the lifecycle copy survives a whole-root swap that
+            // may already have happened, the in-target copy keeps diagnostics
+            // next to the data.
+            try? write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             try? write(journal, to: target.appendingPathComponent(journalName))
             try? fileManager.removeItem(at: staging)
             throw error
@@ -408,6 +421,56 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             .appendingPathComponent(requestName).path)
     }
 
+    /// CT-085: how long the migration waits for a live source agent to exit after
+    /// seeing the stop request (a current-version agent polls every 30s). Tests
+    /// may lower this; production keeps one full poll window.
+    public nonisolated(unsafe) static var sourceAgentExitTimeout: TimeInterval = 45
+
+    /// CT-085: acquires every source agent lock, waiting out the stop-request
+    /// window while a LIVE agent still holds the flock. Lock state is the ground
+    /// truth — a lock file's content outlives its process, so file contents are
+    /// never used to decide. Acquired locks are appended to `into` and held for
+    /// the whole migration. Different Beta versions kept the agent lock at the
+    /// data root or in the lifecycle directory; both are checked.
+    private static func acquireSourceAgentLocks(
+        sourceRoot: URL, into sourceLocks: inout [RepositoryLock]
+    ) throws {
+        let fm = FileManager.default
+        let candidates = [
+            sourceRoot.appendingPathComponent("agent.lock"),
+            sourceRoot.deletingLastPathComponent()
+                .appendingPathComponent(".codetime-lifecycle/agent.lock"),
+        ]
+        for candidate in candidates {
+            guard fm.fileExists(atPath: candidate.path) else { continue }
+            let lock = RepositoryLock(path: candidate.path)
+            if lock.tryAcquireIfPresent() {
+                sourceLocks.append(lock)
+                continue
+            }
+            // A live agent holds the flock. It received the stop request (the
+            // persisted migration request file) and a current-version agent exits
+            // within one 30s poll — wait for it, never a fixed assumption.
+            let timeout = sourceAgentExitTimeout
+            let deadline = Date().addingTimeInterval(timeout)
+            var acquired = false
+            while Date() < deadline {
+                Thread.sleep(forTimeInterval: 1)
+                if lock.tryAcquireIfPresent() {
+                    sourceLocks.append(lock)
+                    acquired = true
+                    break
+                }
+            }
+            guard acquired else {
+                throw MigrationError.targetNotEmpty(
+                    "Beta Agent 正在被旧版 CodeTime 使用：等待 \(Int(timeout)) 秒后仍未退出，"
+                        + "已取消迁移以保护数据。请退出旧版 CodeTime 后重试"
+                )
+            }
+        }
+    }
+
     /// Executes a pending request. A non-empty target database is moved aside to a
     /// timestamped directory rather than deleted; the migration then installs the
     /// old data and removes the request only after full verification.
@@ -426,6 +489,44 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         let access = SecurityScopedAccess(url: resolved.url)
         defer { access.stop() }
 
+        // CT-090: A completion record for the SAME source means this request has
+        // already run to completion. The residual request file (e.g. deletion
+        // failed after a successful migration) must never trigger a second data
+        // replacement that would overwrite newer Release data.
+        let completionURL = lifecycleDir.appendingPathComponent(completionName)
+        if let completionData = try? Data(contentsOf: completionURL),
+           let completion = try? decoder.decode(Completion.self, from: completionData),
+           URL(fileURLWithPath: completion.sourceRoot).standardizedFileURL
+               == resolved.url.standardizedFileURL {
+            do {
+                try FileManager.default.removeItem(at: requestURL)
+            } catch {
+                throw MigrationError.verificationFailed(
+                    "该迁移已完成，但残留请求删除失败（\(error.localizedDescription)）。"
+                    + "请手动删除 \(requestURL.path) 以避免重复判断。"
+                )
+            }
+            return nil
+        }
+
+        // The source Beta app may still have an Agent, scheduler or Kopia task.
+        // Acquire every existing source lock for the whole copy/switch window.
+        // Declared before the exclusive lifecycle lock so the CT-085 agent
+        // stop-protocol window can already hold the agent locks it wins.
+        var sourceLocks: [RepositoryLock] = []
+        defer { sourceLocks.forEach { $0.release() } }
+        let sourceRoot = resolved.url
+        guard sourceRoot.standardizedFileURL != target.standardizedFileURL else {
+            throw MigrationError.targetNotEmpty("源目录与目标目录相同，无法迁移")
+        }
+
+        // CT-085 (§4.1 stop protocol): the request file doubles as the agent stop
+        // signal — a current-version agent polls it and exits on its own. Here we
+        // take over the agent locks; while a live agent still holds the flock we
+        // wait one stop-request window. If it cannot exit, fail safe: no data is
+        // ever replaced underneath a live writer.
+        try acquireSourceAgentLocks(sourceRoot: sourceRoot, into: &sourceLocks)
+
         // CT-072: Exclusive lifecycle lock — blocks all shared holders (UI/Agent)
         // from opening the database while the migration is in progress. The lock
         // file lives outside the replaceable target directory.
@@ -435,15 +536,6 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         }
         defer { lifecycleLock.release() }
 
-
-        // The source Beta app may still have an Agent, scheduler or Kopia task.
-        // Acquire every existing source lock for the whole copy/switch window.
-        var sourceLocks: [RepositoryLock] = []
-        defer { sourceLocks.forEach { $0.release() } }
-        let sourceRoot = resolved.url
-        guard sourceRoot.standardizedFileURL != target.standardizedFileURL else {
-            throw MigrationError.targetNotEmpty("源目录与目标目录相同，无法迁移")
-        }
         func lockSource(_ url: URL, label: String) throws {
             let lock = RepositoryLock(path: url.path)
             guard lock.tryAcquireIfPresent() else {
@@ -451,7 +543,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             }
             sourceLocks.append(lock)
         }
-        try lockSource(sourceRoot.appendingPathComponent("agent.lock"), label: "Beta Agent")
+        // Agent locks were already taken above (CT-085 stop-protocol window).
         try lockSource(sourceRoot.appendingPathComponent("scheduler.lock"), label: "Beta Scheduler")
         let sourceRepositories = sourceRoot.appendingPathComponent("repositories", isDirectory: true)
         if FileManager.default.fileExists(atPath: sourceRepositories.path) {

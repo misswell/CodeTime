@@ -593,6 +593,20 @@ public actor SQLiteStore {
         }
     }
 
+    /// The live (running, lease not reclaimable) job for a project, if any.
+    /// CT-091: used by the unified status recompute so a live backup pins the
+    /// project status and a late upload callback cannot clobber it.
+    public func liveRunningJob(projectID: UUID) throws -> BackupJob? {
+        let rows = try query(
+            "SELECT payload FROM jobs WHERE project_id=? AND state='running'",
+            [.text(projectID.uuidString)]
+        ).compactMap { row -> BackupJob? in
+            guard case .blob(let data) = row[0] else { return nil }
+            return try decode(BackupJob.self, from: data)
+        }
+        return rows.first { $0.lease?.isReclaimable() == false }
+    }
+
     /// Atomically claim a backup job for a project: no live job may exist for the
     /// project, and the selected job's lease is taken in the same write transaction.
     public func claimBackupJob(
@@ -923,6 +937,69 @@ public actor SQLiteStore {
 
     public func deleteCloudRestoreJob(id: UUID) throws {
         try upsert("DELETE FROM cloud_restore_jobs WHERE id=?", [.text(id.uuidString)])
+    }
+
+    // MARK: Cloud restore lease (CT-087, Goal §3.2)
+
+    /// Atomically takes the exclusive lease on a cloud restore job. Refuses
+    /// terminal jobs and jobs whose lease is still held by a live owner. Two
+    /// processes racing on the same job produce exactly one winner.
+    public func claimCloudRestoreJob(
+        id: UUID, owner: ProcessIdentity, expiresAt: Date
+    ) throws -> CloudRestoreJob? {
+        try transactionResult {
+            guard var job = try self.cloudRestoreJob(id: id), !job.state.isTerminal else { return nil }
+            if let existing = job.lease, !existing.isReclaimable() { return nil }
+            job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            job.updatedAt = Date()
+            try self.upsertCloudRestoreJob(job)
+            return job
+        }
+    }
+
+    /// Heartbeat: renews the lease only for the current owner.
+    public func renewCloudRestoreLease(
+        id: UUID, owner: ProcessIdentity, expiresAt: Date
+    ) throws -> Bool {
+        try transactionResult {
+            guard var job = try self.cloudRestoreJob(id: id), let lease = job.lease else { return false }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            try self.upsertCloudRestoreJob(job)
+            return true
+        }
+    }
+
+    /// Owner-checked write. A stale worker whose lease was taken over can no
+    /// longer persist progress or state. The row's CURRENT lease is preserved in
+    /// the written payload — callers pass possibly-stale copies (lease absent or
+    /// outdated), and only the store may touch lease state. Returns false when
+    /// the write was refused.
+    @discardableResult
+    public func upsertCloudRestoreJob(_ job: CloudRestoreJob, owner: ProcessIdentity) throws -> Bool {
+        try transactionResult {
+            guard let current = try self.cloudRestoreJob(id: job.id), let lease = current.lease else {
+                return false
+            }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            var payload = job
+            payload.lease = lease
+            try self.upsertCloudRestoreJob(payload)
+            return true
+        }
+    }
+
+    /// Owner-checked lease release (completion / cancellation).
+    public func releaseCloudRestoreLease(id: UUID, owner: ProcessIdentity) throws {
+        try transaction {
+            guard var job = try self.cloudRestoreJob(id: id), let lease = job.lease else { return }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return }
+            job.lease = nil
+            try self.upsertCloudRestoreJob(job)
+        }
     }
 
     // MARK: - Garbage collection journals (§4.5)

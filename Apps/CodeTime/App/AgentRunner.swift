@@ -77,8 +77,22 @@ enum AgentRunner {
             _ = wakeObserver
 
             await scheduler.start()
+            // CT-085 (§4.1 agent stop protocol): the persisted migration request
+            // doubles as the stop signal. The agent polls it every 30s; on request
+            // it stops accepting new tasks, waits for the in-flight task to reach
+            // a safe state, releases the locks and exits — the migration UI waits
+            // for the agent lock to be released before touching any data.
             while true {
-                try? await Task.sleep(nanoseconds: 3_600_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if DataMigrator.hasPendingRequest(target: paths.root) {
+                    FileHandle.standardError.write(
+                        Data("收到数据迁移请求：Agent 停止调度并退出。\n".utf8)
+                    )
+                    await scheduler.stop()
+                    instanceLock?.release()
+                    lifecycleLock.release()
+                    exit(0)
+                }
             }
         } catch {
             FileHandle.standardError.write(Data("CodeTimeAgent 启动失败：\(error.localizedDescription)\n".utf8))

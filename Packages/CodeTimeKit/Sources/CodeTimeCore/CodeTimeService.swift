@@ -241,6 +241,20 @@ public actor CodeTimeService {
                 await logger.warning("更新项目状态失败：\(error.localizedDescription)")
             }
         }
+        // Local restore jobs stuck in `running` after a crash are failed here so
+        // they never linger as "running" forever.
+        do {
+            let reclaimed = try await database.recoverInterruptedRestoreJobs()
+            if !reclaimed.isEmpty {
+                await logger.warning("已回收 \(reclaimed.count) 个中断的本地恢复任务")
+            }
+        } catch {
+            await logger.warning("回收中断恢复任务失败：\(error.localizedDescription)")
+        }
+        // Abandoned cloud-restore staging directories (crash before commit, job
+        // already terminal) are reclaimed. Only validated direct children named
+        // `restore-*` that no resumable job references are ever touched.
+        await reclaimAbandonedRestoreStaging()
         let version = await KopiaBinary.version(at: engineBinaryURL())
         var bootState = await engine.repositoryState()
         if bootState == .uninitialized, repositoryWasRegistered { bootState = .missing }
@@ -763,14 +777,14 @@ public actor CodeTimeService {
             if project.lastSnapshotID != newest.id {
                 try await database.updateProjectRuntime(
                     id: projectID,
-                    status: (newest.cloudState == .synced || newest.cloudState == .localOnly)
-                        ? .synced
-                        : (newest.cloudState == .failed ? .warning : .idle),
                     lastBackupAt: newest.createdAt,
                     lastSnapshotID: newest.id
                 )
             }
         }
+        // CT-091: one status rule everywhere (the old inline mapping showed
+        // localOnly as synced — inconsistent with projectStatus(for:)).
+        await recomputeProjectStatus(projectID: projectID)
         await refreshRepositoryStateCache()
         return merged.sorted { $0.createdAt > $1.createdAt }
     }
@@ -899,13 +913,15 @@ public actor CodeTimeService {
             }
             try await database.upsertSnapshot(snapshot)
 
+            // CT-091: runtime fields are written together with the recompute;
+            // the status itself is derived, never decided here.
             try await database.updateProjectRuntime(
                 id: projectID,
-                status: snapshot.status == .complete ? .idle : .warning,
                 lastBackupAt: snapshot.createdAt,
                 lastSnapshotID: snapshot.id,
                 clearLastError: true
             )
+            await recomputeProjectStatus(projectID: projectID)
 
             heartbeat.cancel()
             try await finishJob(job.id, state: .succeeded, owner: owner)
@@ -921,14 +937,11 @@ public actor CodeTimeService {
             ))
 
             let cloudError = await publishIfConfigured(snapshot: snapshot)
+            // CT-091: the post-publish status comes from the unified recompute —
+            // which reads the NEWEST snapshot, so a concurrent newer snapshot's
+            // failure cannot be masked by this (older) upload finishing.
+            await recomputeProjectStatus(projectID: projectID)
             if let refreshed = try await database.snapshot(id: snapshot.id) {
-                let status: ProjectStatus
-                switch refreshed.cloudState {
-                case .synced: status = .synced
-                case .localOnly: status = .localOnly
-                default: status = .warning
-                }
-                try await database.updateProjectRuntime(id: projectID, status: status)
                 notifyChange()
                 return BackupOutcome(snapshot: refreshed, cloudError: cloudError)
             }
@@ -1128,6 +1141,12 @@ public actor CodeTimeService {
                 }
             case .copy, .wholeProject:
                 let path = request.mode == .wholeProject ? nil : request.relativePath
+                // CT-086: the user-chosen destination must not point into the
+                // app's data root (repositories / recovery / cache / database).
+                try SafePath.validateRestoreDestination(
+                    request.destination,
+                    protectedRoots: [paths.root]
+                )
                 let destinationAccess = SecurityScopedAccess(url: request.destination)
                 defer { destinationAccess.stop() }
                 try await engine.restore(
@@ -1141,6 +1160,8 @@ public actor CodeTimeService {
             job.status = .completed
             job.finishedAt = Date()
             try await database.upsertRestoreJob(job)
+            // CT-091: restore outcome routes through the unified status recompute.
+            await recomputeProjectStatus(projectID: request.projectID)
             try await recordActivity(ActivityEvent(
                 kind: .restore,
                 level: .success,
@@ -1553,17 +1574,47 @@ public actor CodeTimeService {
 
     /// Retries a cloud publish independently of local snapshots. The lease prevents
     /// UI and Agent from uploading the same generation at the same time.
+    /// CT-097: the lease is short-lived and renewed by a heartbeat — a dead
+    /// uploader never blocks the retry for an hour, and a worker whose lease was
+    /// taken over never commits state it no longer owns.
     @discardableResult
     public func retryCloudPublish(job: BackupJob) async -> Bool {
         guard let generationID = job.generationID, let repository else { return false }
         let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
+        let uploadLeaseDuration: TimeInterval = 90
         guard (try? await database.acquireJobLease(
             id: job.id,
             owner: owner,
-            expiresAt: Date().addingTimeInterval(3_600)
+            expiresAt: Date().addingTimeInterval(uploadLeaseDuration)
         )) != nil else {
             return false
         }
+        let uploadLeaseState = LeaseState()
+        let uploadHeartbeat = Task { [database, logger] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
+                if Task.isCancelled { return }
+                do {
+                    let renewed = try await database.renewJobLease(
+                        id: job.id,
+                        owner: owner,
+                        expiresAt: Date().addingTimeInterval(uploadLeaseDuration)
+                    )
+                    if !renewed {
+                        uploadLeaseState.markLost()
+                        await logger.error("云端发布任务租约已丢失，正在停止当前上传")
+                        return
+                    }
+                } catch {
+                    await logger.warning("云端发布心跳写入失败：\(error.localizedDescription)")
+                }
+            }
+        }
+        defer { uploadHeartbeat.cancel() }
         do {
             let settings = try await currentSettings()
             guard let store = try await makeCloudStoreIfConfigured(settings: settings) else {
@@ -1573,6 +1624,10 @@ public actor CodeTimeService {
                 throw CodeTimeError.generationNotFound(generationID.uuidString)
             }
             try await store.publish(repositoryId: repository.id, generation: generation)
+            // CT-097: an irreversible publish must not be committed by a stale owner.
+            guard !uploadLeaseState.isLost else {
+                throw CodeTimeError.leaseConflict(owner: "云端发布任务租约已被接管")
+            }
             generation.state = .published
             generation.publishedAt = generation.publishedAt ?? Date()
             generation.errorMessage = nil
@@ -1584,7 +1639,7 @@ public actor CodeTimeService {
                     cloudGenerationID: generationID
                 )
             }
-            await refreshProjectCloudStatus(projectID: job.projectID)
+            await recomputeProjectStatus(projectID: job.projectID)
             try await finishJob(job.id, state: .succeeded, owner: owner)
             try await recordActivity(ActivityEvent(
                 kind: .upload,
@@ -1612,6 +1667,7 @@ public actor CodeTimeService {
                     )
                 }
                 try? await finishJob(job.id, state: .succeeded, owner: owner)
+                await recomputeProjectStatus(projectID: job.projectID)
                 return true
             }
             let errorClass = RetryPolicy.classify(error)
@@ -1647,23 +1703,48 @@ public actor CodeTimeService {
         }
     }
 
-    /// Project status is derived from its newest snapshot, never from an older
-    /// upload job that happens to finish later.
-    func refreshProjectCloudStatus(projectID: UUID, fallbackError: String? = nil) async {
+    /// CT-091: single source of truth for project sync status. Every terminal or
+    /// transitional business outcome (backup success/failure, publish success/
+    /// failure, retry, restore, snapshot refresh) must route through here instead
+    /// of deciding the final status itself.
+    ///
+    /// Rules (Goal §7.2):
+    /// - A live (non-reclaimable) backup job pins `.backingUp` — an old upload
+    ///   callback can never flip a running project to synced.
+    /// - The NEWEST snapshot decides the sync state — an old snapshot's upload
+    ///   finishing last can never override a newer snapshot's failure.
+    /// - A newest snapshot with partial read failures stays `.warning` even when
+    ///   its cloud state is synced.
+    /// - Deleted / disabled projects are never resurrected by a recompute.
+    func recomputeProjectStatus(projectID: UUID, fallbackError: String? = nil) async {
         do {
+            guard let project = try await database.project(id: projectID),
+                  project.lifecycle == .active else { return }
+            if let live = try await database.liveRunningJob(projectID: projectID),
+               live.type == .backup {
+                try await database.updateProjectRuntime(id: projectID, status: .backingUp)
+                return
+            }
             guard let latest = try await database.snapshots(projectID: projectID, limit: 1).first else {
                 return
             }
-            let status = Self.projectStatus(for: latest.cloudState)
+            var status = Self.projectStatus(for: latest.cloudState)
+            if latest.status != .complete { status = .warning }
             try await database.updateProjectRuntime(
                 id: projectID,
                 status: status,
-                lastError: status == .synced ? nil : fallbackError,
-                clearLastError: status == .synced
+                lastError: status == .synced || status == .localOnly ? nil : fallbackError,
+                clearLastError: status == .synced || status == .localOnly
             )
         } catch {
-            await logger.warning("无法刷新项目云端状态：\(error.localizedDescription)")
+            await logger.warning("无法重算项目状态：\(error.localizedDescription)")
         }
+    }
+
+    /// Legacy entry point kept for existing callers; delegates to the unified
+    /// recompute.
+    func refreshProjectCloudStatus(projectID: UUID, fallbackError: String? = nil) async {
+        await recomputeProjectStatus(projectID: projectID, fallbackError: fallbackError)
     }
 
     private func iCloudMirrorPath(settings: AppSettings) async -> String? {
@@ -1854,19 +1935,36 @@ public actor CodeTimeService {
                     "恢复任务 \(existing.id) 来自设备 \(existing.sourceDeviceID)，与目标 \(recovered.deviceID) 不匹配"
                 )
             }
-            // CT-085: Standardized path comparison with symlink resolution
-            let standardizedStaging = URL(fileURLWithPath: existing.stagingPath)
-                .standardizedFileURL.resolvingSymlinksInPath().path
-            let standardizedRoot = repositoryRoot.standardizedFileURL
-                .resolvingSymlinksInPath().path
-            guard standardizedStaging.hasPrefix(standardizedRoot + "/"),
-                  URL(fileURLWithPath: existing.stagingPath).deletingLastPathComponent().path
-                    == standardizedRoot else {
-                throw CodeTimeError.restoreSourceUnavailable(
-                    "恢复任务 staging 路径超出仓库范围：\(existing.stagingPath)"
-                )
-            }
+            // CT-086: The persisted staging path must be a direct child of the
+            // repository root — validated component-wise on the standardized path
+            // AND on the symlink-resolved real path (no hasPrefix, no symlink escape).
+            _ = try SafePath.containedDirectChild(existing.stagingPath, within: repositoryRoot)
             job = existing
+            // CT-086 §3.1(8/9): staging directories are derived from the repository
+            // and job IDs. Legacy `restore-<8hex>` rows are reconciled to the
+            // derived name once, then the database must always match the derivation.
+            let derived = SafePath.stagingURL(
+                in: repositoryRoot,
+                repositoryID: recovered.repositoryID,
+                jobID: existing.id
+            )
+            if job.stagingPath != derived.path {
+                let legacyExists = FileManager.default.fileExists(atPath: job.stagingPath)
+                let derivedExists = FileManager.default.fileExists(atPath: derived.path)
+                if legacyExists && !derivedExists {
+                    // Rename is same-directory; only a validated direct child is moved.
+                    try SafePath.assertRealDirectoryNotSymlink(job.stagingPath)
+                    try FileManager.default.moveItem(
+                        at: URL(fileURLWithPath: job.stagingPath, isDirectory: true),
+                        to: derived
+                    )
+                } else if legacyExists && derivedExists {
+                    throw CodeTimeError.restoreInterrupted(
+                        "恢复暂存目录与派生目录同时存在，请手动处理 \(repositoryRoot.path)"
+                    )
+                }
+                job.stagingPath = derived.path
+            }
             if !FileManager.default.fileExists(atPath: job.stagingPath) {
                 try FileManager.default.createDirectory(
                     atPath: job.stagingPath,
@@ -1877,21 +1975,67 @@ public actor CodeTimeService {
             job.lastError = nil
             job.retryCount += 1
         } else {
-            job = CloudRestoreJob(
+            // CT-086: fresh jobs always derive the staging path from the
+            // repository ID and job ID — never from user or database input.
+            let fresh = CloudRestoreJob(
                 repositoryID: recovered.repositoryID,
                 generationID: generationID,
                 sourceDeviceID: recovered.deviceID,
                 state: .preparing,
-                stagingPath: repositoryRoot
-                    .appendingPathComponent("restore-\(UUID().uuidString.prefix(8))", isDirectory: true)
-                    .path
+                stagingPath: "" // derived below
             )
+            let derived = SafePath.stagingURL(
+                in: repositoryRoot,
+                repositoryID: fresh.repositoryID,
+                jobID: fresh.id
+            )
+            job = fresh
+            job.stagingPath = derived.path
             try FileManager.default.createDirectory(atPath: job.stagingPath, withIntermediateDirectories: true)
         }
         job.updatedAt = Date()
         try await database.upsertCloudRestoreJob(job)
         progress?(job)
         let started = Date()
+
+        // CT-087: claim the exclusive cross-process lease before any download or
+        // filesystem work. A second process racing on the same job loses here.
+        let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
+        let restoreLeaseDuration: TimeInterval = 90
+        let claimedJob = try await database.claimCloudRestoreJob(
+            id: job.id,
+            owner: owner,
+            expiresAt: Date().addingTimeInterval(restoreLeaseDuration)
+        )
+        guard claimedJob != nil else {
+            throw CodeTimeError.leaseConflict(owner: "另一个恢复任务")
+        }
+        let restoreLeaseState = LeaseState()
+        let restoreHeartbeat = Task { [database, logger] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
+                if Task.isCancelled { return }
+                do {
+                    let renewed = try await database.renewCloudRestoreLease(
+                        id: job.id,
+                        owner: owner,
+                        expiresAt: Date().addingTimeInterval(restoreLeaseDuration)
+                    )
+                    if !renewed {
+                        restoreLeaseState.markLost()
+                        await logger.error("恢复任务租约已丢失，正在停止当前任务")
+                        return
+                    }
+                } catch {
+                    await logger.warning("恢复任务心跳写入失败：\(error.localizedDescription)")
+                }
+            }
+        }
+        defer { restoreHeartbeat.cancel() }
 
         let store = CloudMirrorStore(configuration: .init(
             storageRoot: storageRoot,
@@ -1918,7 +2062,8 @@ public actor CodeTimeService {
         do {
             if stagingExists {
                 job.state = .downloading
-                try await database.upsertCloudRestoreJob(job)
+                job.updatedAt = Date()
+                _ = try await database.upsertCloudRestoreJob(job, owner: owner)
 
                 try await store.restoreRepository(
                     generationId: generationID,
@@ -1928,6 +2073,7 @@ public actor CodeTimeService {
                     guard let self else { return }
                     await self.recordCloudRestoreProgress(
                         jobID: restoreJobID,
+                        owner: owner,
                         update: update,
                         progress: progress
                     )
@@ -1943,8 +2089,14 @@ public actor CodeTimeService {
                 }
                 job.state = .verifying
                 job.updatedAt = Date()
-                try await database.upsertCloudRestoreJob(job)
+                _ = try await database.upsertCloudRestoreJob(job, owner: owner)
                 progress?(job)
+            }
+
+            // CT-087: the lease must still be ours before the destructive commit.
+            // A worker whose lease was lost (heartbeat failure / takeover) stops here.
+            guard !restoreLeaseState.isLost else {
+                throw CodeTimeError.leaseConflict(owner: "恢复任务租约已丢失")
             }
 
             // A crash may have happened after the repository move. In that case
@@ -1964,10 +2116,34 @@ public actor CodeTimeService {
 
             job.state = .committing
             job.updatedAt = Date()
-            try await database.upsertCloudRestoreJob(job)
+            _ = try await database.upsertCloudRestoreJob(job, owner: owner)
             progress?(job)
 
+            // CT-086 §3.2: the commit journal lives OUTSIDE the staging directory
+            // (the staging directory is about to be moved away) and records the
+            // crash position explicitly:
+            //   prepared → staging ready, repository not yet replaced
+            //   replaced → repository replaced, database completion pending
+            let commitJournalURL = repositoryRoot.appendingPathComponent(
+                "restore-commit-\(job.id.uuidString.prefix(8)).json", isDirectory: false
+            )
+            func writeCommitJournal(_ phase: String) throws {
+                let payload: [String: String] = [
+                    "jobID": job.id.uuidString,
+                    "phase": phase,
+                    "stagingPath": job.stagingPath,
+                    "repositoryURL": repositoryURL.path,
+                    "updatedAt": ISO8601DateFormatter().string(from: Date())
+                ]
+                let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                try data.write(to: commitJournalURL, options: .atomic)
+            }
+
             if stagingExists {
+                // CT-086 TOCTOU probe: the staging directory must be a real
+                // directory, not a symlink swap, before anything is moved.
+                try SafePath.assertRealDirectoryNotSymlink(staging.path)
+                try writeCommitJournal("prepared")
                 if FileManager.default.fileExists(atPath: repositoryURL.path) {
                     let contents = try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
                     guard contents.isEmpty else {
@@ -1976,6 +2152,18 @@ public actor CodeTimeService {
                     try FileManager.default.removeItem(at: repositoryURL)
                 }
                 try FileManager.default.moveItem(at: staging, to: repositoryURL)
+                try writeCommitJournal("replaced")
+            } else if FileManager.default.fileExists(atPath: commitJournalURL.path) {
+                // Crash after the replace (journal exists, staging gone): the
+                // repository in place IS the restored data — nothing to move.
+                let journalData = try Data(contentsOf: commitJournalURL)
+                if let journal = try JSONSerialization.jsonObject(with: journalData) as? [String: String],
+                   journal["phase"] == "prepared", journal["stagingPath"] == job.stagingPath {
+                    // Journal says prepared but staging is gone and the repository
+                    // marker check above passed: the move DID happen (crash between
+                    // moveItem and the journal update). Continue below.
+                    try writeCommitJournal("replaced")
+                }
             }
 
             // Secrets and the repository record are part of the commit. Re-running
@@ -1995,7 +2183,9 @@ public actor CodeTimeService {
             job.lastError = error.localizedDescription
             job.updatedAt = Date()
             do {
-                try await database.upsertCloudRestoreJob(job)
+                // Owner-checked: a stale worker cannot overwrite the state of a
+                // job another process has claimed.
+                _ = try await database.upsertCloudRestoreJob(job, owner: owner)
             } catch {
                 await logger.error("无法记录云端恢复失败状态：\(error.localizedDescription)")
             }
@@ -2028,7 +2218,8 @@ public actor CodeTimeService {
             job.state = .failed
             job.lastError = "仓库恢复后校验失败：\(error.localizedDescription)"
             job.updatedAt = Date()
-            try await database.upsertCloudRestoreJob(job)
+            _ = try? await database.upsertCloudRestoreJob(job, owner: owner)
+            try? await database.releaseCloudRestoreLease(id: job.id, owner: owner)
             throw CodeTimeError.restoreVerificationFailed(job.lastError ?? error.localizedDescription)
         }
 
@@ -2050,14 +2241,25 @@ public actor CodeTimeService {
             job.state = .failed
             job.lastError = "恢复后校验未通过"
             job.updatedAt = Date()
-            try await database.upsertCloudRestoreJob(job)
+            _ = try? await database.upsertCloudRestoreJob(job, owner: owner)
+            try? await database.releaseCloudRestoreLease(id: job.id, owner: owner)
             throw CodeTimeError.restoreVerificationFailed(job.lastError ?? "恢复后校验未通过")
         }
 
+        // CT-087: a stale worker must never claim completion after losing the lease.
+        guard !restoreLeaseState.isLost else {
+            throw CodeTimeError.leaseConflict(owner: "恢复任务租约已丢失")
+        }
         job.state = .completed
         job.updatedAt = Date()
-        try await database.upsertCloudRestoreJob(job)
+        _ = try await database.upsertCloudRestoreJob(job, owner: owner)
+        try await database.releaseCloudRestoreLease(id: job.id, owner: owner)
         progress?(job)
+        // The commit journal is only removed after the database state is complete.
+        let commitJournalURL = repositoryRoot.appendingPathComponent(
+            "restore-commit-\(job.id.uuidString.prefix(8)).json", isDirectory: false
+        )
+        try? FileManager.default.removeItem(at: commitJournalURL)
 
         let verification = VerificationResult(
             generationID: generationID,
@@ -2086,6 +2288,7 @@ public actor CodeTimeService {
 
     private func recordCloudRestoreProgress(
         jobID: UUID,
+        owner: ProcessIdentity,
         update: CloudMirrorStore.RestoreProgress,
         progress: (@Sendable (CloudRestoreJob) -> Void)?
     ) async {
@@ -2098,10 +2301,59 @@ public actor CodeTimeService {
             job.completedBytes = update.completedBytes
             job.currentObject = update.currentPath
             job.updatedAt = Date()
-            try await database.upsertCloudRestoreJob(job)
+            // Owner-checked: a stale worker whose lease was taken over must not
+            // keep writing progress over the new owner's row.
+            _ = try await database.upsertCloudRestoreJob(job, owner: owner)
             progress?(job)
         } catch {
             await logger.warning("云端恢复进度写入失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// Reclaims abandoned cloud-restore staging directories. A `restore-*`
+    /// directory is only removed when it is a validated direct child of a
+    /// repository root, no resumable job references it, and no commit journal
+    /// exists that may still need it. Everything else is kept — 宁可保留.
+    private func reclaimAbandonedRestoreStaging() async {
+        let fm = FileManager.default
+        do {
+            let repositoryDirs = try fm.contentsOfDirectory(
+                at: paths.repositories, includingPropertiesForKeys: [.isDirectoryKey]
+            )
+            let jobs = try await database.cloudRestoreJobs(limit: 200)
+            let liveStaging = Set(
+                jobs.filter { !$0.state.isTerminal }.map(\.stagingPath)
+            )
+            for repositoryDir in repositoryDirs {
+                guard (try? repositoryDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else {
+                    continue
+                }
+                let children = (try? fm.contentsOfDirectory(
+                    at: repositoryDir, includingPropertiesForKeys: nil
+                )) ?? []
+                // A commit journal means a crash inside the commit window — the
+                // resumable job logic owns that directory, never the janitor.
+                let hasCommitJournal = children.contains {
+                    SafePath.isStagingName($0.lastPathComponent) == false &&
+                    $0.lastPathComponent.hasPrefix("restore-commit-") &&
+                    $0.lastPathComponent.hasSuffix(".json")
+                }
+                guard !hasCommitJournal else { continue }
+                for child in children where SafePath.isStagingName(child.lastPathComponent) {
+                    guard liveStaging.contains(child.path) == false else { continue }
+                    do {
+                        // Never recurse into an unvalidated path.
+                        try SafePath.assertRealDirectoryNotSymlink(child.path)
+                        try SafePath.containedDirectChild(child.path, within: paths.repositories)
+                        try fm.removeItem(at: child)
+                        await logger.warning("已回收遗留恢复暂存目录：\(child.lastPathComponent)")
+                    } catch {
+                        await logger.warning("遗留暂存目录保留（\(child.lastPathComponent)）：\(error.localizedDescription)")
+                    }
+                }
+            }
+        } catch {
+            await logger.warning("恢复暂存目录回收扫描失败：\(error.localizedDescription)")
         }
     }
 

@@ -265,6 +265,12 @@ final class ThirdRoundRegressionTests: XCTestCase {
 
         let sourceAgentLock = RepositoryLock(path: source.appendingPathComponent("agent.lock").path)
         XCTAssertTrue(sourceAgentLock.tryAcquire())
+        // CT-085: the migration waits for the stop-request window before failing;
+        // inject a short timeout so the test exercises the protocol without the
+        // production 45s wait.
+        let productionTimeout = DataMigrator.sourceAgentExitTimeout
+        DataMigrator.sourceAgentExitTimeout = 2
+        defer { DataMigrator.sourceAgentExitTimeout = productionTimeout }
         do {
             _ = try DataMigrator.performPending(target: target)
             XCTFail("源 Beta Agent 持锁时迁移必须被拒绝")

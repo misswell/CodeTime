@@ -297,6 +297,10 @@ public struct CloudRestoreJob: Codable, Identifiable, Hashable, Sendable {
     public var retryCount: Int
     /// Hashes already downloaded AND verified; these are reused on resume.
     public var verifiedHashes: [String]
+    /// CT-087: Cross-process exclusive lease. Only the lease owner may update the
+    /// job; a stale worker's writes are refused by the owner-checked store APIs.
+    /// Optional so legacy payloads (without the key) decode as nil.
+    public var lease: JobLease?
 
     public init(
         id: UUID = UUID(),
@@ -314,7 +318,8 @@ public struct CloudRestoreJob: Codable, Identifiable, Hashable, Sendable {
         updatedAt: Date = Date(),
         lastError: String? = nil,
         retryCount: Int = 0,
-        verifiedHashes: [String] = []
+        verifiedHashes: [String] = [],
+        lease: JobLease? = nil
     ) {
         self.id = id
         self.repositoryID = repositoryID
@@ -332,6 +337,7 @@ public struct CloudRestoreJob: Codable, Identifiable, Hashable, Sendable {
         self.lastError = lastError
         self.retryCount = retryCount
         self.verifiedHashes = verifiedHashes
+        self.lease = lease
     }
 
     public var progress: Double {
