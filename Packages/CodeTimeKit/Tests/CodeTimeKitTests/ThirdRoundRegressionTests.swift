@@ -81,6 +81,9 @@ final class ThirdRoundRegressionTests: XCTestCase {
         }
         lines.append("- 发布 tag：\(tag)")
         if let commit { lines.append("- 构建 commit：\(commit)") }
+        // CT-077: the report must bind the immutable candidate artifact.
+        lines.append("- Candidate Artifact：CodeTime-9.9.9-macos-universal.zip")
+        lines.append("- Candidate Artifact SHA-256：\(String(repeating: "ab", count: 32))")
         lines.append("- 执行时间：2026-11-07 14:00:00")
         lines.append("- 执行人：regression-operator")
         lines.append("- Mac A：MacBook Pro / macOS 15.0 / 构建 100")
@@ -757,15 +760,28 @@ final class ThirdRoundRegressionTests: XCTestCase {
 
     // MARK: - CT-069 regression gate
 
-    private func gateTranscript(including ids: ClosedRange<Int> = 1...69, skipped: [String] = []) -> String {
+    /// Builds a synthetic gate transcript from the REAL registered test names in
+    /// REGRESSION_INDEX.json. `excluding` drops one entry to simulate a missing
+    /// regression.
+    private func gateTranscript(
+        excluding excludedID: String? = nil,
+        skipped: [String] = []
+    ) throws -> String {
+        let indexURL = packageRoot.appendingPathComponent("REGRESSION_INDEX.json")
+        let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [[String: Any]]
         var lines: [String] = []
-        for number in ids {
-            lines.append("Test Case '-[CodeTimeKitTests.RegressionTests testCT\(String(format: "%03d", number))_x]' passed (0.1 seconds).")
+        var count = 0
+        for entry in raw ?? [] {
+            guard let id = entry["id"] as? String, id != excludedID,
+                  let test = entry["test"] as? String else { continue }
+            lines.append("Test Case '-[CodeTimeKitTests.RegressionTests \(test)]' passed (0.1 seconds).")
+            count += 1
         }
         for name in skipped {
             lines.append("Test Case '-[CodeTimeKitTests.RegressionTests \(name)]' skipped (0.00 seconds).")
+            count += 1
         }
-        lines.append("Executed \(ids.count + skipped.count) tests, with 0 failures (0 unexpected) in 1.0 seconds")
+        lines.append("Executed \(count) tests, with 0 failures (0 unexpected) in 1.0 seconds")
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -782,25 +798,25 @@ final class ThirdRoundRegressionTests: XCTestCase {
     func testCT069_GateRejectsMissingTestsAndUnexpectedSkips() throws {
         // Complete transcript: only documented skips are allowed.
         let complete = try runGate(
-            output: gateTranscript(skipped: ["testSingleMacICloudRoundTrip", "testCT036_LargeFileSet"])
+            output: try gateTranscript(skipped: ["testSingleMacICloudRoundTrip", "testCT036_HundredThousandFilesPreview"])
         )
         XCTAssertEqual(complete.status, 0, complete.output)
         XCTAssertTrue(complete.output.contains("regression gate: PASS"), complete.output)
 
         // A missing permanent regression fails the gate.
-        let missing = try runGate(output: gateTranscript(including: 1...68))
+        let missing = try runGate(output: try gateTranscript(excluding: "CT-069"))
         XCTAssertNotEqual(missing.status, 0, missing.output)
         XCTAssertTrue(missing.output.contains("CT-069"), missing.output)
 
         // An undocumented skip fails the gate even though the test name exists.
         let undocumentedSkip = try runGate(
-            output: gateTranscript(skipped: ["testCT010_LegacyBehavior"])
+            output: try gateTranscript(skipped: ["testCT010_LegacyBehavior"])
         )
         XCTAssertNotEqual(undocumentedSkip.status, 0, undocumentedSkip.output)
         XCTAssertTrue(undocumentedSkip.output.contains("unexpected skipped test"), undocumentedSkip.output)
 
         // A failing suite still fails the gate.
-        let failing = gateTranscript().replacingOccurrences(of: "with 0 failures", with: "with 1 failure")
+        let failing = try gateTranscript().replacingOccurrences(of: "with 0 failures", with: "with 1 failure")
         let failedGate = try runGate(output: failing)
         XCTAssertNotEqual(failedGate.status, 0, failedGate.output)
     }

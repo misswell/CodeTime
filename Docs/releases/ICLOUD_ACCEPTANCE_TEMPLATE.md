@@ -1,9 +1,12 @@
 # iCloud 双 Mac 验收记录模板
 
-将本文件复制为 `Docs/releases/<tag>-icloud-acceptance.md`，由实际执行人填写并提交；没有真实执行记录时不得发布 Stable。
+将本文件复制为 `Docs/releases/<tag>-icloud-acceptance.md`，由实际执行人填写并提交到独立的 `release-acceptance` 分支（不要提交到发布 tag 对应的源 commit，否则会改变构建 commit 造成循环依赖）；没有真实执行记录时不得发布 Stable。
 
 - 发布 tag：TAG_PLACEHOLDER
 - 构建 commit：COMMIT_PLACEHOLDER
+- Candidate Artifact：CodeTime-VERSION-macos-universal.zip
+- Candidate Artifact SHA-256：64HEX_PLACEHOLDER
+- Candidate Workflow Run：RUN_ID_PLACEHOLDER
 - 构建类型：Developer ID Release / 其他（说明）
 - iCloud 容器：`iCloud.com.codetime.app`
 - 执行时间：TIME_PLACEHOLDER

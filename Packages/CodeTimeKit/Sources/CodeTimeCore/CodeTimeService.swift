@@ -2436,20 +2436,43 @@ public actor CodeTimeService {
         return DiagnosticsReport(checks: checks.map { (name: $0.0, passed: $0.1, detail: $0.2) })
     }
 
-    private var usageCache: (date: Date, bytes: Int64)?
+    private var usageCache: (date: Date, rootModifiedAt: Date, bytes: Int64)?
 
-    /// Bounded scan: a million-file repository must not stall every dashboard refresh.
-    /// A failure to enumerate is reported as an error, not as "0 bytes used".
+    /// CT-096: bounded, fail-closed repository usage scan.
+    /// - Hidden files ARE counted (the migration path counts them; both sides
+    ///   must agree, and a Kopia repository keeps most data in plain names but
+    ///   that is not guaranteed).
+    /// - Any enumeration error aborts with `nil` (unknown) — a partial walk is
+    ///   never reported as a smaller-but-valid total.
+    /// - The cache is bound to the repositories root path, so a relocated data
+    ///   directory can never serve another root's number.
+    /// - Exceeding the entry cap returns `nil` instead of a truncated value.
     public func repositoryUsage() async -> Int64? {
-        if let usageCache, Date().timeIntervalSince(usageCache.date) < 300 {
+        let fm = FileManager.default
+        let root = paths.repositories
+        // CT-096: the cache is bound to the repositories root AND its structural
+        // change date — adding/removing repository entries invalidates the cache
+        // immediately; deep file changes refresh via the TTL.
+        let rootModifiedAt = ((try? FileManager.default.attributesOfItem(
+            atPath: root.path
+        )[.modificationDate]) as? Date) ?? Date()
+        if let usageCache,
+           Date().timeIntervalSince(usageCache.date) < 300,
+           usageCache.rootModifiedAt == rootModifiedAt {
             return usageCache.bytes
         }
-        let fm = FileManager.default
+        // An enumeration error only SKIPS the failed subtree — the walk would
+        // otherwise return a silently partial total. Any error invalidates the
+        // whole result: the usage becomes "unknown", never "smaller but valid".
+        var scanFailed = false
         guard let enumerator = fm.enumerator(
-            at: paths.repositories,
+            at: root,
             includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles],
-            errorHandler: { _, _ in true }
+            options: [],
+            errorHandler: { _, _ in
+                scanFailed = true
+                return false
+            }
         ) else {
             return nil
         }
@@ -2463,10 +2486,12 @@ public actor CodeTimeService {
                 if values.isDirectory == true { continue }
                 total += Int64(values.fileSize ?? 0)
             } catch {
+                // A single unreadable entry makes the total unknown — fail closed.
                 return nil
             }
         }
-        usageCache = (Date(), total)
+        if scanFailed { return nil }
+        usageCache = (Date(), rootModifiedAt, total)
         return total
     }
 

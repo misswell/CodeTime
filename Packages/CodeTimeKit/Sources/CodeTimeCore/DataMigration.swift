@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import CSQLite
 import SharedModels
 import CodeTimeSecurity
@@ -71,6 +72,18 @@ public enum DataMigrator {
     public static let journalName = "migration-journal.json"
     public static let completionName = "migration-complete.json"
     public static let requestName = "migration-request.json"
+
+    /// CT-098 test hook: when set to a phase name, the process SIGKILLs itself
+    /// at that migration phase — a real process death, not an in-process
+    /// simulation. Production always leaves it nil.
+    /// Phases: before-copy, during-copy, after-verify, before-replace,
+    /// after-replace, after-complete.
+    public nonisolated(unsafe) static var crashPointForTesting: String?
+
+    static func maybeCrash(at point: String) {
+        guard crashPointForTesting == point else { return }
+        kill(ProcessInfo.processInfo.processIdentifier, SIGKILL)
+    }
 
     private struct Request: Codable {
         var sourcePath: String
@@ -216,6 +229,7 @@ public enum DataMigrator {
             message: nil
         )
 try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
+        maybeCrash(at: "before-copy")
 
         do {
             let files = try regularFiles(under: plan.sourceRoot)
@@ -240,6 +254,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
                 } else {
                     try fileManager.copyItem(at: file, to: destination)
                 }
+                maybeCrash(at: "during-copy")
                 let values = try destination.resourceValues(forKeys: [.fileSizeKey])
                 copied[relative] = Int64(values.fileSize ?? 0)
                 copiedCount += 1
@@ -276,12 +291,14 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
                 }
                 progress(0.9 + Double(index + 1) / Double(max(1, files.count)) * 0.1)
             }
+            maybeCrash(at: "after-verify")
 
             journal.state = "installing"
             journal.updatedAt = Date()
             journal.targetPath = target.path
     try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             progress(0.95)
+            maybeCrash(at: "before-replace")
 
             if replaceRoot {
                 let targetExists = fileManager.fileExists(atPath: target.path)
@@ -311,6 +328,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
                 }
                 try? fileManager.removeItem(at: staging)
             }
+            maybeCrash(at: "after-replace")
 
             let completion = Completion(
                 jobID: jobID,
@@ -569,6 +587,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             target: target,
             replaceRoot: request.allowReplaceRoot == true
         )
+        maybeCrash(at: "after-complete")
         // CT-089: Request deletion failure must not report success. If the
         // request file persists, the next startup would re-execute the migration
         // and overwrite Release data created after the first migration.

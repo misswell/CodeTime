@@ -15,6 +15,10 @@ on:
         description: "Marketing version, e.g. 1.0.0"
         type: string
         required: true
+      release_tag:
+        description: "Existing git tag to publish (e.g. v1.0.0-beta.1). Must point at this commit."
+        type: string
+        required: true
       prerelease:
         description: "Beta/RC number, e.g. 1"
         type: string
@@ -45,27 +49,45 @@ jobs:
       channel: ${{ steps.channel.outputs.channel }}
       tag: ${{ steps.channel.outputs.tag }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Classify tag
         id: channel
         env:
           TAG: ${{ github.ref_name }}
           INPUT_CHANNEL: ${{ inputs.channel }}
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
           CHANNEL=""
           RESOLVED_TAG="$TAG"
           if [ -n "${INPUT_VERSION:-}" ]; then
-            # Manual dispatch from a branch: build the tag from the requested
-            # version instead of using the branch name.
+            # Manual dispatch from a branch. CT-079: the dispatch MUST name an
+            # EXISTING tag and that tag must point at this build's commit — a
+            # manual run never fabricates a tag for the wrong commit.
             CHANNEL="$INPUT_CHANNEL"
+            RESOLVED_TAG="${INPUT_RELEASE_TAG:-}"
+            if [ -z "$RESOLVED_TAG" ]; then
+              echo "手动发布必须填写 release_tag（要发布的既有 git tag）" >&2
+              exit 1
+            fi
             case "$CHANNEL" in
-              beta) RESOLVED_TAG="v${INPUT_VERSION}-beta.${INPUT_PRERELEASE:-1}" ;;
-              rc) RESOLVED_TAG="v${INPUT_VERSION}-rc.${INPUT_PRERELEASE:-1}" ;;
-              stable) RESOLVED_TAG="v${INPUT_VERSION}" ;;
+              beta) [[ "$RESOLVED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]] || { echo "beta 渠道 tag 格式必须为 vX.Y.Z-beta.N：$RESOLVED_TAG" >&2; exit 1; } ;;
+              rc) [[ "$RESOLVED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]] || { echo "rc 渠道 tag 格式必须为 vX.Y.Z-rc.N：$RESOLVED_TAG" >&2; exit 1; } ;;
+              stable) [[ "$RESOLVED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "stable 渠道 tag 格式必须为 vX.Y.Z：$RESOLVED_TAG" >&2; exit 1; } ;;
               *) echo "无法识别的手动发布渠道：$CHANNEL" >&2; exit 1 ;;
             esac
+            git fetch --force origin "refs/tags/$RESOLVED_TAG:refs/tags/$RESOLVED_TAG" 2>/dev/null \
+              || { echo "release_tag 不存在：$RESOLVED_TAG — 请先创建并推送该 tag" >&2; exit 1; }
+            # CT-079: shared validator (unit-tested by testCT079_*).
+            "$GITHUB_WORKSPACE/Scripts/validate_release_tag.sh" "$RESOLVED_TAG" "$GITHUB_SHA"
+            if [ -n "${INPUT_VERSION:-}" ] && [[ "$RESOLVED_TAG" != "v${INPUT_VERSION}"* ]]; then
+              echo "release_tag $RESOLVED_TAG 与 version ${INPUT_VERSION} 不一致" >&2
+              exit 1
+            fi
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
             CHANNEL="beta"
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
@@ -221,22 +243,32 @@ jobs:
         with:
           name: codetime-candidate-${{ needs.classify.outputs.tag }}
           path: candidate/
-      - name: Require two-Mac iCloud acceptance report
-        run: ./Scripts/require_icloud_acceptance.sh "${{ needs.classify.outputs.tag }}"
-      - name: Verify candidate SHA-256 matches acceptance report
+      - name: Fetch acceptance report from release-acceptance branch
+        env:
+          TAG: ${{ needs.classify.outputs.tag }}
         run: |
           set -euo pipefail
+          # CT-083: the report lives on the protected `release-acceptance`
+          # branch — NEVER in the release tag's source commit (committing it
+          # there would change the build commit and recreate the circular
+          # dependency where the candidate must contain its own acceptance).
+          git fetch --force origin release-acceptance:refs/remotes/origin/release-acceptance \
+            || { echo "缺少 release-acceptance 分支（验收报告存储位置）" >&2; exit 1; }
+          REPORT="Docs/releases/${TAG}-icloud-acceptance.md"
+          git show "origin/release-acceptance:$REPORT" > acceptance-report.md \
+            || { echo "release-acceptance 分支缺少 $REPORT" >&2; exit 1; }
+          echo "ICLOUD_ACCEPTANCE_REPORT=$PWD/acceptance-report.md" >> "$GITHUB_ENV"
+      - name: Verify candidate SHA-256 and require two-Mac iCloud acceptance report
+        env:
+          TAG: ${{ needs.classify.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # CT-077: the SHA-256 of the EXACT downloaded artifact is compared
+          # against the report — missing or mismatched SHA blocks the release.
           ZIP="$(ls candidate/CodeTime-*-macos-universal.zip)"
-          ACTUAL_SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
-          REPORT="Docs/releases/${{ needs.classify.outputs.tag }}-icloud-acceptance.md"
-          if [ -f "$REPORT" ]; then
-            REPORT_SHA="$(grep -o 'Candidate Artifact SHA-256：[a-f0-9]*' "$REPORT" | head -1 | sed 's/.*：//')"
-            if [ -n "$REPORT_SHA" ] && [ "$ACTUAL_SHA" != "$REPORT_SHA" ]; then
-              echo "::error::Candidate SHA-256 mismatch: report=$REPORT_SHA artifact=$ACTUAL_SHA" >&2
-              exit 1
-            fi
-          fi
-          echo "candidate SHA-256 verified: $ACTUAL_SHA"
+          export EXPECTED_ARTIFACT_SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          echo "candidate artifact: $(basename "$ZIP") sha256=$EXPECTED_ARTIFACT_SHA"
+          ./Scripts/require_icloud_acceptance.sh "$TAG"
       - name: Verify tag matches build commit
         run: |
           set -euo pipefail

@@ -17,6 +17,16 @@ grep -Fx -e "- 发布 tag：$TAG" "$REPORT" || fail "发布 tag 不匹配（$TAG
 if [ -n "${GITHUB_SHA:-}" ]; then
   grep -Fx -e "- 构建 commit：$GITHUB_SHA" "$REPORT" || fail "构建 commit 不匹配（$GITHUB_SHA）"
 fi
+# CT-077/CT-083: the acceptance report MUST bind the exact immutable candidate
+# artifact. A missing or malformed SHA-256 blocks the release — an acceptance
+# without a pinned artifact proves nothing about what was actually tested.
+REPORT_SHA="$( { grep -o 'Candidate Artifact SHA-256：[a-fA-F0-9]\{64\}' "$REPORT" || true; } | head -1 | sed 's/.*：//')"
+[ -n "$REPORT_SHA" ] || fail "缺少 Candidate Artifact SHA-256（64 位十六进制）"
+if [ -n "${EXPECTED_ARTIFACT_SHA:-}" ]; then
+  [ "$REPORT_SHA" = "$EXPECTED_ARTIFACT_SHA" ] \
+    || fail "Candidate Artifact SHA-256 不一致：报告=$REPORT_SHA 期望=$EXPECTED_ARTIFACT_SHA"
+fi
+grep -Eq "^- Candidate Artifact：.+\.zip$" "$REPORT" || fail "缺少 Candidate Artifact 名称"
 grep -Eq "执行时间：[^[:space:]]+" "$REPORT" || fail "缺少执行时间"
 grep -Eq "执行人：[^[:space:]]+" "$REPORT" || fail "缺少执行人"
 grep -Eq "Mac A：.+macOS .+构建 .+" "$REPORT" || fail "缺少 Mac A 设备信息"

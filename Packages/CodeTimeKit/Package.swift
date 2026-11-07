@@ -34,6 +34,13 @@ let package = Package(
                 "CloudMirrorStore", "GitIntegration", "Diagnostics",
             ]
         ),
+        // CT-098: standalone child process used by regression tests to exercise
+        // real SIGKILL crash recovery (migration phases, lifecycle locks). It is
+        // a test harness, not a product.
+        .executableTarget(
+            name: "CodeTimeCrashChild",
+            dependencies: ["CodeTimeCore", "SharedModels", "BackupEngine"]
+        ),
         .testTarget(
             name: "CodeTimeKitTests",
             dependencies: ["CodeTimeCore", "SharedModels", "Persistence", "CodeTimeSecurity", "BackupEngine", "CloudMirrorStore", "CSQLite"]

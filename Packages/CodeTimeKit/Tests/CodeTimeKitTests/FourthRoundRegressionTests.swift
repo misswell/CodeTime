@@ -231,24 +231,10 @@ final class FourthRoundRegressionTests: XCTestCase {
     }
 
     // MARK: - CT-081 Cloud unreadable state classification
-
-    func testCT081_UnreadableStatesAreClassified() {
-        // Verify that different readState values map to different CloudGenerationState.
-        let mapping: [GenerationReadState: CloudGenerationState] = [
-            .notDownloaded: .staging,
-            .unreadable: .published,
-            .corrupted: .failed,
-            .unsupportedVersion: .failed,
-            .valid: .published,
-        ]
-        // Ensure that corrupted and notDownloaded map to DIFFERENT states.
-        XCTAssertNotEqual(
-            mapping[.corrupted], mapping[.notDownloaded],
-            "损坏和未下载必须映射到不同的状态"
-        )
-        // Ensure that corrupted maps to failed.
-        XCTAssertEqual(mapping[.corrupted], .failed)
-    }
+    // The original hand-constructed dictionary "test" verified nothing about
+    // production code. The production-path replacement lives in
+    // FifthRoundRegressionTests.testCT081_UnreadableStatesClassifiedByProductionListing,
+    // which drives the real listGenerationEntries() against a corrupt manifest.
 }
 
 // MARK: - CT-072 Lifecycle lock architecture

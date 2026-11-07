@@ -158,10 +158,42 @@ public actor CloudMirrorStore: CloudStore {
         }
         try await access.ensureDirectory(objectsURL)
         try await access.ensureDirectory(commitsURL)
+        try await writeDeviceRegistryEntry()
         if !fileManager.fileExists(atPath: recoveryInfoURL.path) {
             try await writeRecoveryInfo()
         } else {
             _ = try await readRecoveryInfo()
+        }
+    }
+
+    /// CT-089: persistent per-device registry entry. Every device that publishes
+    /// to this storage root records its identity and last-seen time under
+    /// `devices/<deviceID>/device-info.json`. GC NEVER deletes a device that has
+    /// not provably retired — the registry makes "another device exists"
+    /// independent of whether that device happens to be online right now, and
+    /// gives the multi-device guard durable evidence even before the other
+    /// device has synced any repository data.
+    private func writeDeviceRegistryEntry() async {
+        let deviceDir = baseURL.appendingPathComponent(
+            "devices/\(configuration.deviceID.uuidString)", isDirectory: true
+        )
+        do {
+            try await access.ensureDirectory(deviceDir)
+            let info: [String: String] = [
+                "deviceID": configuration.deviceID.uuidString,
+                "deviceName": configuration.deviceName ?? "未知设备",
+                "lastSeenAt": ISO8601DateFormatter().string(from: Date()),
+            ]
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try await access.writeAtomically(
+                try encoder.encode(info),
+                to: deviceDir.appendingPathComponent("device-info.json")
+            )
+        } catch {
+            // The registry is safety-relevant metadata, not a publish dependency:
+            // a write failure must not break uploads, but it is reported loudly.
+            configuration.warningHandler?("无法写入设备注册信息：\(error.localizedDescription)")
         }
     }
 
@@ -1113,12 +1145,11 @@ public actor CloudMirrorStore: CloudStore {
         // lock is the synchronization point with an in-flight upload.
         let publishLock = try await acquirePublishLock()
         defer { publishLock?.release() }
-        try await prepare()
 
-        // Cross-Mac safety: skip physical deletion if other devices exist.
+        // Cross-Mac safety FIRST (CT-087/CT-089, before any prepare side
+        // effects): skip physical deletion if other devices exist, and fail
+        // closed when the device directory itself cannot be read.
         let devicesDir = baseURL.appendingPathComponent("devices", isDirectory: true)
-        // CT-087: Fail closed on directory read failure. Cannot determine if
-        // other devices exist; must not proceed with deletion.
         let allDevices: [URL]
         do {
             allDevices = try fileManager.contentsOfDirectory(
@@ -1142,6 +1173,8 @@ public actor CloudMirrorStore: CloudStore {
                 skippedReason: "检测到 \(otherDevices.count) 台其他设备的仓库；多设备 GC 需要分布式协调，已跳过物理删除"
             )
         }
+
+        try await prepare()
 
         let now = Date()
         let loadedJournal: GCJournal?
