@@ -1993,14 +1993,15 @@ public actor CodeTimeService {
             job.stagingPath = derived.path
             try FileManager.default.createDirectory(atPath: job.stagingPath, withIntermediateDirectories: true)
         }
-        job.updatedAt = Date()
-        try await database.upsertCloudRestoreJob(job)
-        progress?(job)
-        let started = Date()
-
-        // CT-087: claim the exclusive cross-process lease before any download or
-        // filesystem work. A second process racing on the same job loses here.
+        // CT-087/P2: claim the exclusive cross-process lease BEFORE persisting
+        // any state change. The pre-claim write previously used an unchecked
+        // upsert whose payload could erase another process's live lease; now
+        // the state update happens owner-checked after the claim, and a fresh
+        // job row (id known only to this process) is inserted without a lease.
         let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
+        if resumable == nil || !(resumable?.state.isResumable ?? false) {
+            try await database.upsertCloudRestoreJob(job)
+        }
         let restoreLeaseDuration: TimeInterval = 90
         let claimedJob = try await database.claimCloudRestoreJob(
             id: job.id,
@@ -2010,6 +2011,10 @@ public actor CodeTimeService {
         guard claimedJob != nil else {
             throw CodeTimeError.leaseConflict(owner: "另一个恢复任务")
         }
+        job.updatedAt = Date()
+        _ = try await database.upsertCloudRestoreJob(job, owner: owner)
+        progress?(job)
+        let started = Date()
         let restoreLeaseState = LeaseState()
         let restoreHeartbeat = Task { [database, logger] in
             while !Task.isCancelled {
@@ -2321,8 +2326,11 @@ public actor CodeTimeService {
                 at: paths.repositories, includingPropertiesForKeys: [.isDirectoryKey]
             )
             let jobs = try await database.cloudRestoreJobs(limit: 200)
+            // Standardize both sides: a symlinked prefix (/tmp vs /private/tmp)
+            // must not make a live staging path look abandoned.
             let liveStaging = Set(
-                jobs.filter { !$0.state.isTerminal }.map(\.stagingPath)
+                jobs.filter { !$0.state.isTerminal }
+                    .map { URL(fileURLWithPath: $0.stagingPath).standardizedFileURL.path }
             )
             for repositoryDir in repositoryDirs {
                 guard (try? repositoryDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else {
@@ -2332,19 +2340,24 @@ public actor CodeTimeService {
                     at: repositoryDir, includingPropertiesForKeys: nil
                 )) ?? []
                 // A commit journal means a crash inside the commit window — the
-                // resumable job logic owns that directory, never the janitor.
+                // resumable job logic owns every staging dir in this repository
+                // root, never the janitor. (Journal files are named
+                // `restore-commit-<jobID8>.json`; do NOT match them with
+                // isStagingName — every restore-* name shares that prefix.)
                 let hasCommitJournal = children.contains {
-                    SafePath.isStagingName($0.lastPathComponent) == false &&
                     $0.lastPathComponent.hasPrefix("restore-commit-") &&
                     $0.lastPathComponent.hasSuffix(".json")
                 }
                 guard !hasCommitJournal else { continue }
                 for child in children where SafePath.isStagingName(child.lastPathComponent) {
-                    guard liveStaging.contains(child.path) == false else { continue }
+                    let childStandardized = child.standardizedFileURL.path
+                    guard liveStaging.contains(childStandardized) == false else { continue }
                     do {
-                        // Never recurse into an unvalidated path.
+                        // Never recurse into an unvalidated path. Staging dirs
+                        // are direct children of THIS repository dir, not of the
+                        // repositories root.
                         try SafePath.assertRealDirectoryNotSymlink(child.path)
-                        try SafePath.containedDirectChild(child.path, within: paths.repositories)
+                        try SafePath.containedDirectChild(child.path, within: repositoryDir)
                         try fm.removeItem(at: child)
                         await logger.warning("已回收遗留恢复暂存目录：\(child.lastPathComponent)")
                     } catch {

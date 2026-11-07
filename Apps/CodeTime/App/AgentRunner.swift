@@ -79,9 +79,13 @@ enum AgentRunner {
             await scheduler.start()
             // CT-085 (§4.1 agent stop protocol): the persisted migration request
             // doubles as the stop signal. The agent polls it every 30s; on request
-            // it stops accepting new tasks, waits for the in-flight task to reach
-            // a safe state, releases the locks and exits — the migration UI waits
-            // for the agent lock to be released before touching any data.
+            // it stops accepting NEW tasks and exits. A task already in flight is
+            // NOT awaited here — instead its Kopia repository lock stays held by
+            // the running child, and the migration's source-side lockSource()
+            // re-check refuses to start (or the post-copy verification fails on a
+            // torn pack), so a mid-flight migration fails safely and can be
+            // retried once the task finishes. The migration never replaces data
+            // under a live writer.
             while true {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
                 if DataMigrator.hasPendingRequest(target: paths.root) {
