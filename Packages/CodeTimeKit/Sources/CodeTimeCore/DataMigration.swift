@@ -414,15 +414,14 @@ public enum DataMigrator {
         let access = SecurityScopedAccess(url: resolved.url)
         defer { access.stop() }
 
-        // A second process (old Beta app, Agent, or another UI) must not write the
-        // database while it is being snapshotted and swapped.
-        let migrationLock = RepositoryLock(
-            path: lifecycleDir.appendingPathComponent("migration.lock").path
-        )
-        guard migrationLock.tryAcquire() else {
-            throw MigrationError.targetNotEmpty("另一个数据迁移正在进行")
+        // CT-072: Exclusive lifecycle lock — blocks all shared holders (UI/Agent)
+        // from opening the database while the migration is in progress. The lock
+        // file lives outside the replaceable target directory.
+        let lifecycleLock = LifecycleLock(path: lifecycleDir.appendingPathComponent("lifecycle.lock").path)
+        guard lifecycleLock.tryAcquire(.exclusive) else {
+            throw MigrationError.targetNotEmpty("另一个数据迁移正在进行，或 UI/Agent 仍在运行")
         }
-        defer { migrationLock.release() }
+        defer { lifecycleLock.release() }
         let agentLock = RepositoryLock(
             path: target.appendingPathComponent("agent.lock").path
         )

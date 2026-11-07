@@ -16,6 +16,8 @@ public struct AppPaths: Sendable {
     public let lifecycleDir: URL
     public let migrationLock: URL
     public let migrationRequest: URL
+    /// The unified shared/exclusive lifecycle lock file path.
+    public let lifecycleLockPath: URL
 
     public init(root: URL) {
         self.root = root
@@ -33,6 +35,7 @@ public struct AppPaths: Sendable {
         self.agentLock = lifecycleDir.appendingPathComponent("agent.lock")
         self.migrationLock = lifecycleDir.appendingPathComponent("migration.lock")
         self.migrationRequest = lifecycleDir.appendingPathComponent("migration-request.json")
+        self.lifecycleLockPath = lifecycleDir.appendingPathComponent("lifecycle.lock")
     }
 
     public static func standard() throws -> AppPaths {

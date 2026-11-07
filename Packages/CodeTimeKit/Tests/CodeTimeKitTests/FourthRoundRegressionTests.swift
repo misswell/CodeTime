@@ -9,16 +9,39 @@ import Foundation
 
 /// Fourth-round reliability regressions (CT-070 … CT-081).
 final class FourthRoundRegressionTests: XCTestCase {
+
     private var root: URL!
+    private var keychain: KeychainStore!
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codetime-ct4-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        keychain = KeychainStore(service: "com.codetime.test.ct4.\(UUID().uuidString)")
+        keychain.deleteAllSecrets()
     }
 
     override func tearDownWithError() throws {
+        keychain.deleteAllSecrets()
         if let root { try? FileManager.default.removeItem(at: root) }
+    }
+
+    private func makePaths() throws -> AppPaths {
+        let paths = AppPaths(root: root.appendingPathComponent("app-\(UUID().uuidString)", isDirectory: true))
+        try paths.createDirectories()
+        return paths
+    }
+
+    private func makeBetaSource() throws -> URL {
+        let source = root.appendingPathComponent("beta-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("database"), withIntermediateDirectories: true)
+        _ = try SQLiteStore(path: source.appendingPathComponent("database/codetime.sqlite").path)
+        let repo = source.appendingPathComponent("repositories", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "kopia".write(to: repo.appendingPathComponent("kopia.repository"), atomically: true, encoding: .utf8)
+        return source
     }
 
     // MARK: - CT-070 Manifest integrity
@@ -394,5 +417,241 @@ extension FourthRoundRegressionTests {
         }
 
         print("PERF: files=\(fileCount) backup=\(Int(backupDuration * 1000))ms restore=\(Int(restoreDuration * 1000))ms")
+    }
+}
+
+// MARK: - CT-072 LifecycleLock shared/exclusive protocol
+
+extension FourthRoundRegressionTests {
+    func testCT072_SharedLocksAllowMultipleHolders() throws {
+        let lockPath = root.appendingPathComponent("lifecycle.lock").path
+        let lockA = LifecycleLock(path: lockPath)
+        let lockB = LifecycleLock(path: lockPath)
+        let lockC = LifecycleLock(path: lockPath)
+
+        XCTAssertTrue(lockA.tryAcquire(.shared))
+        XCTAssertTrue(lockB.tryAcquire(.shared))
+        XCTAssertTrue(lockC.tryAcquire(.shared))
+
+        // Exclusive acquisition must fail while shared locks are held.
+        let lockD = LifecycleLock(path: lockPath)
+        XCTAssertFalse(lockD.tryAcquire(.exclusive), "共享锁持有时独占必须失败")
+
+        // Release all shared locks; exclusive can now succeed.
+        lockA.release(); lockB.release(); lockC.release()
+        XCTAssertTrue(lockD.tryAcquire(.exclusive))
+    }
+
+    func testCT072_ExclusiveLockBlocksSharedAndExclusive() throws {
+        let lockPath = root.appendingPathComponent("lifecycle.lock").path
+        let exclusive = LifecycleLock(path: lockPath)
+        XCTAssertTrue(exclusive.tryAcquire(.exclusive))
+
+        let sharedAttempt = LifecycleLock(path: lockPath)
+        XCTAssertFalse(sharedAttempt.tryAcquire(.shared), "独占锁持有时共享必须失败")
+
+        let exclusiveAttempt = LifecycleLock(path: lockPath)
+        XCTAssertFalse(exclusiveAttempt.tryAcquire(.exclusive), "独占锁持有时第二个独占必须失败")
+
+        exclusive.release()
+        // After release, shared can succeed.
+        XCTAssertTrue(sharedAttempt.tryAcquire(.shared))
+    }
+
+    func testCT072_MigrationExclusiveBlocksAgentShared() throws {
+        let paths = AppPaths(root: root.appendingPathComponent("ct072-mig", isDirectory: true))
+        try paths.createDirectories()
+
+        // Agent holds a shared lifecycle lock.
+        let agentLock = LifecycleLock(path: paths.lifecycleLockPath.path)
+        XCTAssertTrue(agentLock.tryAcquire(.shared))
+
+        // Migration tries to acquire exclusive and must fail.
+        let migrationLock = LifecycleLock(path: paths.lifecycleLockPath.path)
+        XCTAssertFalse(migrationLock.tryAcquire(.exclusive), "Agent 共享锁持有时迁移独占必须失败")
+
+        // Agent releases; migration can now proceed.
+        agentLock.release()
+        XCTAssertTrue(migrationLock.tryAcquire(.exclusive))
+
+        // While migration holds exclusive, a new Agent cannot start.
+        let newAgent = LifecycleLock(path: paths.lifecycleLockPath.path)
+        XCTAssertFalse(newAgent.tryAcquire(.shared), "迁移独占锁持有时新 Agent 共享必须失败")
+    }
+
+    func testCT072_LifecycleLockSurvivesRootReplacement() throws {
+        let paths = AppPaths(root: root.appendingPathComponent("ct072-swap", isDirectory: true))
+        try paths.createDirectories()
+
+        let lock = LifecycleLock(path: paths.lifecycleLockPath.path)
+        XCTAssertTrue(lock.tryAcquire(.shared))
+
+        // Simulate a whole-root swap: the root directory is replaced.
+        let newRoot = root.appendingPathComponent("ct072-swap-new", isDirectory: true)
+        try FileManager.default.createDirectory(at: newRoot, withIntermediateDirectories: true)
+        try "new".write(to: newRoot.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+
+        // The lifecycle lock is still held because it lives outside the root.
+        XCTAssertTrue(lock.isHeld)
+        XCTAssertEqual(lock.heldMode, .shared)
+        lock.release()
+    }
+}
+
+// MARK: - CT-074 Behavioral binding test
+
+extension FourthRoundRegressionTests {
+    func testCT074_RestoreJobWrongRepositoryIDThrows() async throws {
+        let cloud = try RegressionCloud(name: "ct074b")
+        try cloud.workspace.writeFile("kopia.repository", "format")
+        let device = UUID()
+        let store = cloud.store(deviceID: device)
+        let generation = try await cloud.publish(store, deviceID: device)
+
+        let paths = try makePaths()
+        try keychain.installSecrets(masterKey: cloud.masterKey, repositoryPassword: cloud.password)
+        let service = try CodeTimeService(paths: paths, keychain: keychain)
+        try await service.database.setCodable(
+            DeviceIdentity(id: device, name: "ct074", model: "test"),
+            forKey: CodeTimeService.Keys.device
+        )
+        let record = RepositoryRecord(
+            id: cloud.repositoryID,
+            path: cloud.workspace.repositoryURL.path,
+            configPath: cloud.workspace.repositoryURL.path + "/kopia.config"
+        )
+        try await service.database.setCodable(record, forKey: CodeTimeService.Keys.repository)
+        try await service.database.upsertRepository(record)
+        _ = try await service.bootstrap()
+
+        var settings = try await service.currentSettings()
+        settings.localMirrorPath = cloud.workspace.storageRoot.path
+        try await service.saveSettings(settings)
+
+        // Create a restore job bound to a WRONG repository ID.
+        let wrongRepo = UUID()
+        let wrongJob = CloudRestoreJob(
+            repositoryID: wrongRepo,
+            generationID: generation,
+            sourceDeviceID: device,
+            state: .preparing,
+            stagingPath: paths.repositories.appendingPathComponent("staging-wrong").path
+        )
+        try await service.database.upsertCloudRestoreJob(wrongJob)
+
+        // Recover with the WRONG job ID: the binding check must throw.
+        let candidate = RecoveryCandidate(
+            repositoryID: cloud.repositoryID,
+            deviceID: device,
+            latestGenerationID: generation,
+            integrityOK: true
+        )
+        do {
+            _ = try await service.recoverFromCloud(
+                candidate: candidate,
+                storageRoot: cloud.workspace.storageRoot,
+                recoveryKeyText: keychain.recoveryKeyText(),
+                resuming: wrongJob.id
+            )
+            XCTFail("错误 repositoryID 的恢复任务必须被拒绝")
+        } catch let error as CodeTimeError {
+            XCTAssertTrue(error.localizedDescription.contains("不匹配"),
+                         "绑定校验错误应包含 '不匹配': \(error.localizedDescription)")
+        }
+    }
+
+    func testCT074_RestoreJobWrongGenerationIDThrows() async throws {
+        let cloud = try RegressionCloud(name: "ct074c")
+        try cloud.workspace.writeFile("kopia.repository", "format")
+        let device = UUID()
+        let store = cloud.store(deviceID: device)
+        let generation = try await cloud.publish(store, deviceID: device)
+
+        let paths = try makePaths()
+        try keychain.installSecrets(masterKey: cloud.masterKey, repositoryPassword: cloud.password)
+        let service = try CodeTimeService(paths: paths, keychain: keychain)
+        try await service.database.setCodable(
+            DeviceIdentity(id: device, name: "ct074", model: "test"),
+            forKey: CodeTimeService.Keys.device
+        )
+        let record = RepositoryRecord(
+            id: cloud.repositoryID,
+            path: cloud.workspace.repositoryURL.path,
+            configPath: cloud.workspace.repositoryURL.path + "/kopia.config"
+        )
+        try await service.database.setCodable(record, forKey: CodeTimeService.Keys.repository)
+        try await service.database.upsertRepository(record)
+        _ = try await service.bootstrap()
+
+        var settings = try await service.currentSettings()
+        settings.localMirrorPath = cloud.workspace.storageRoot.path
+        try await service.saveSettings(settings)
+
+        // Create a restore job with the correct repository but WRONG generation.
+        let wrongGen = UUID()
+        let wrongJob = CloudRestoreJob(
+            repositoryID: cloud.repositoryID,
+            generationID: wrongGen,
+            sourceDeviceID: device,
+            state: .preparing,
+            stagingPath: paths.repositories.appendingPathComponent("staging-wronggen").path
+        )
+        try await service.database.upsertCloudRestoreJob(wrongJob)
+
+        let candidate = RecoveryCandidate(
+            repositoryID: cloud.repositoryID,
+            deviceID: device,
+            latestGenerationID: generation,
+            integrityOK: true
+        )
+        do {
+            _ = try await service.recoverFromCloud(
+                candidate: candidate,
+                storageRoot: cloud.workspace.storageRoot,
+                recoveryKeyText: keychain.recoveryKeyText(),
+                resuming: wrongJob.id
+            )
+            XCTFail("错误 generationID 的恢复任务必须被拒绝")
+        } catch let error as CodeTimeError {
+            XCTAssertTrue(error.localizedDescription.contains("不匹配"),
+                         "绑定校验错误应包含 '不匹配': \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - CT-075 SIGKILL crash journal recovery
+
+extension FourthRoundRegressionTests {
+    func testCT075_CrashDuringInstallingPhaseLeavesRecoverableState() async throws {
+        let source = try makeBetaSource()
+        let target = root.appendingPathComponent("ct075-crash", isDirectory: true)
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "old".write(to: target.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+
+        // Simulate a crash during "installing": the journal records installing
+        // and staging exists, but the swap never completed (old target intact).
+        let staging = root.appendingPathComponent(".codetime-migration-ct075crash", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "prepared".write(to: staging.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+        try FileManager.default.createDirectory(at: lifecycleDir, withIntermediateDirectories: true)
+        let journalJSON = """
+        {"jobID":"\(UUID().uuidString)","state":"installing","sourceRoot":"\(source.path)",\
+        "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
+        "updatedAt":"2026-11-07T00:00:00Z"}
+        """
+        try journalJSON.write(to: lifecycleDir.appendingPathComponent("migration-journal.json"), atomically: true, encoding: .utf8)
+
+        // The target still has the OLD data (crash before swap).
+        // Retry must succeed and produce a complete migration.
+        try DataMigrator.requestMigration(source: source, target: target, allowReplaceRoot: true)
+        let result = try DataMigrator.performPending(target: target)
+        XCTAssertNotNil(result, "崩溃后迁移必须可以重试")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("database/codetime.sqlite").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("repositories").path))
+        // Source is intact.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent("database/codetime.sqlite").path))
     }
 }

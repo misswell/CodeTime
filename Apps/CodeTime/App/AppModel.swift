@@ -253,6 +253,20 @@ final class AppModel: ObservableObject {
                     throw CodeTimeError.migrationFailed(error.localizedDescription)
                 }
             }
+            // CT-072: Acquire a shared lifecycle lock. Migration holds exclusive.
+            let lifecycleLock = LifecycleLock(path: paths.lifecycleLockPath.path)
+            if !lifecycleLock.tryAcquire(.shared) {
+                // Migration holds the exclusive lock; wait for it to complete.
+                var acquired = false
+                for _ in 0..<120 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if lifecycleLock.tryAcquire(.shared) { acquired = true; break }
+                }
+                guard acquired else {
+                    throw CodeTimeError.repositoryUnavailable("迁移占用生命周期锁超时")
+                }
+            }
+            defer { lifecycleLock.release() }
             let service = try CodeTimeService()
             self.service = service
             let report = try await service.bootstrap()

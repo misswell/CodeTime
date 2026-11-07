@@ -22,8 +22,14 @@ enum AgentRunner {
     private static func runAsync() async {
         do {
             let paths = try AppPaths.standard()
-            if DataMigrator.hasPendingRequest(target: paths.root)
-                || FileManager.default.fileExists(atPath: paths.migrationLock.path) {
+            // CT-072: Acquire a shared lifecycle lock. Migration holds exclusive.
+            let lifecycleLock = LifecycleLock(path: paths.lifecycleLockPath.path)
+            guard lifecycleLock.tryAcquire(.shared) else {
+                FileHandle.standardError.write(Data("生命周期锁被迁移持有，Agent 退出。\n".utf8))
+                exit(0)
+            }
+            defer { lifecycleLock.release() }
+            if DataMigrator.hasPendingRequest(target: paths.root) {
                 FileHandle.standardError.write(Data("待处理的数据迁移请求，Agent 退出以避免占用迁移锁。\n".utf8))
                 exit(0)
             }
