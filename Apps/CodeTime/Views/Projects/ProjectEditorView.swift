@@ -12,6 +12,7 @@ struct ProjectEditorView: View {
     @State private var preview: ExclusionPreview?
     @State private var isPreviewing = false
     @State private var isLoading = true
+    @State private var policyLoadError: String?
 
     private let presets = ExclusionPresets.load()
 
@@ -65,7 +66,7 @@ struct ProjectEditorView: View {
                                 .labelsHidden()
                                 .frame(width: 160)
                             }
-                            Text("激活 FSEvents 触发时会合并变更，并受最小间隔约束；睡眠后只补跑一次。")
+                            Text("自动备份按上面的频率在后台轮询执行；睡眠唤醒后只补跑一次，不会为每次写入扫描。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -170,7 +171,7 @@ struct ProjectEditorView: View {
                                 .disabled(isPreviewing)
                                 Spacer()
                                 if let preview {
-                                    Text("备份 \(preview.includedFiles) 个文件 · 排除 \(preview.excludedFiles) 个")
+                                    Text("备份 \(preview.includedFiles) 个文件 · 排除 \(preview.excludedFiles) 个 · 已扫描 \(preview.scannedFiles) 项")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -179,6 +180,28 @@ struct ProjectEditorView: View {
                                 HStack(spacing: 24) {
                                     PreviewMetric(title: "将备份", value: "\(preview.includedFiles) 个文件", caption: CodeTimeFormat.bytes(preview.includedBytes))
                                     PreviewMetric(title: "已排除", value: "\(preview.excludedFiles) 个文件", caption: CodeTimeFormat.bytes(preview.excludedBytes))
+                                }
+                                if !preview.isComplete {
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(CT.warning)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("预览不完整，不能据此判断完整备份范围")
+                                                .font(.caption.weight(.semibold))
+                                            if let reason = preview.truncatedReason {
+                                                Text(reason)
+                                                    .font(.caption2)
+                                            }
+                                            if preview.permissionErrors > 0 {
+                                                Text("\(preview.permissionErrors) 个路径无法读取，例如 \(preview.failedPaths.prefix(3).joined(separator: "、"))")
+                                                    .font(.caption2)
+                                                    .lineLimit(2)
+                                            }
+                                        }
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    .padding(10)
+                                    .background(RoundedRectangle(cornerRadius: 8).fill(CT.warning.opacity(0.1)))
                                 }
                                 if !preview.samples.isEmpty {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -206,6 +229,12 @@ struct ProjectEditorView: View {
                     }
                     .padding(22)
                 }
+            } else if let policyLoadError {
+                EmptyStateView(
+                    symbol: "exclamationmark.triangle",
+                    title: "无法读取备份策略",
+                    message: "\(policyLoadError)\n关闭后重试；为避免覆盖现有策略，保存已禁用。"
+                )
             } else {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -234,14 +263,19 @@ struct ProjectEditorView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(policy == nil)
+                .disabled(policy == nil || policyLoadError != nil)
             }
             .padding(18)
         }
         .frame(width: 760, height: 780)
         .task {
             guard isLoading else { return }
-            policy = await model.policy(for: project.id)
+            do {
+                policy = try await model.policy(for: project.id)
+            } catch {
+                policyLoadError = error.localizedDescription
+                model.showToast("读取备份策略失败：\(error.localizedDescription)", style: .error)
+            }
             isLoading = false
         }
     }

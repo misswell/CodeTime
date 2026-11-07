@@ -118,6 +118,18 @@ public enum BackupJobType: String, Codable, Sendable {
     case verify
     case cleanup
     case restore
+    case migrate
+
+    public var unifiedType: CodeTimeJobType {
+        switch self {
+        case .backup: return .backup
+        case .upload: return .publish
+        case .verify: return .verify
+        case .cleanup: return .cleanup
+        case .restore: return .restore
+        case .migrate: return .migrate
+        }
+    }
 }
 
 public enum BackupJobState: String, Codable, Sendable {
@@ -126,8 +138,11 @@ public enum BackupJobState: String, Codable, Sendable {
     case succeeded
     case failed
     case cancelled
+    case interrupted
 
-    public var isTerminal: Bool { self == .succeeded || self == .failed || self == .cancelled }
+    public var isTerminal: Bool {
+        self == .succeeded || self == .failed || self == .cancelled || self == .interrupted
+    }
 }
 
 public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
@@ -142,6 +157,12 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
     public var attempt: Int
     public var errorMessage: String?
     public var checkpoint: Data?
+    public var repositoryID: UUID?
+    public var lease: JobLease?
+    public var retryCount: Int
+    public var nextRetryAt: Date?
+    public var progress: Double
+    public var errorClass: RetryErrorClass?
 
     public init(
         id: UUID = UUID(),
@@ -154,7 +175,13 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
         finishedAt: Date? = nil,
         attempt: Int = 1,
         errorMessage: String? = nil,
-        checkpoint: Data? = nil
+        checkpoint: Data? = nil,
+        repositoryID: UUID? = nil,
+        lease: JobLease? = nil,
+        retryCount: Int = 0,
+        nextRetryAt: Date? = nil,
+        progress: Double = 0,
+        errorClass: RetryErrorClass? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -167,5 +194,38 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
         self.attempt = attempt
         self.errorMessage = errorMessage
         self.checkpoint = checkpoint
+        self.repositoryID = repositoryID
+        self.lease = lease
+        self.retryCount = retryCount
+        self.nextRetryAt = nextRetryAt
+        self.progress = progress
+        self.errorClass = errorClass
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectID, type, state, trigger, createdAt, startedAt, finishedAt
+        case attempt, errorMessage, checkpoint, repositoryID, lease
+        case retryCount, nextRetryAt, progress, errorClass
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        projectID = try c.decode(UUID.self, forKey: .projectID)
+        type = try c.decode(BackupJobType.self, forKey: .type)
+        state = try c.decodeIfPresent(BackupJobState.self, forKey: .state) ?? .queued
+        trigger = try c.decodeIfPresent(BackupTrigger.self, forKey: .trigger) ?? .scheduled
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
+        finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+        attempt = try c.decodeIfPresent(Int.self, forKey: .attempt) ?? 1
+        errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        checkpoint = try c.decodeIfPresent(Data.self, forKey: .checkpoint)
+        repositoryID = try c.decodeIfPresent(UUID.self, forKey: .repositoryID)
+        lease = try c.decodeIfPresent(JobLease.self, forKey: .lease)
+        retryCount = try c.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
+        nextRetryAt = try c.decodeIfPresent(Date.self, forKey: .nextRetryAt)
+        progress = try c.decodeIfPresent(Double.self, forKey: .progress) ?? 0
+        errorClass = try c.decodeIfPresent(RetryErrorClass.self, forKey: .errorClass)
     }
 }

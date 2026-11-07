@@ -12,6 +12,10 @@ else
   PRERELEASE_ID="${PRERELEASE_ID:-beta.1}"
 fi
 TAG="${TAG:-v${VERSION}-${PRERELEASE_ID}}"
+if [[ "$TAG" != *"-beta."* && "$TAG" != *"-rc."* ]]; then
+  echo "package_beta.sh 只用于 beta/rc 预发布，收到 tag: $TAG" >&2
+  exit 1
+fi
 DIST="$ROOT/dist"
 STAGE="$DIST/CodeTime-beta"
 NAME="CodeTime-${VERSION}-${PRERELEASE_ID}-macos-universal"
@@ -32,6 +36,12 @@ xcodebuild \
 
 APP=".build/Beta/Build/Products/Beta/CodeTime.app"
 [ -d "$APP" ] || { echo "missing built app: $APP" >&2; exit 1; }
+PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+[ "$PLIST_VERSION" = "$VERSION" ] || {
+  echo "版本不一致：project.yml=$VERSION Info.plist=$PLIST_VERSION" >&2
+  exit 1
+}
+"$ROOT/Scripts/validate_entitlements.sh"
 codesign --verify --deep --strict "$APP"
 xattr -cr "$APP" 2>/dev/null || true
 

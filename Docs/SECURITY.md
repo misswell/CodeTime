@@ -66,10 +66,16 @@
 | 配置 | Sandbox | iCloud | Hardened Runtime | 签名 |
 | --- | --- | --- | --- | --- |
 | Debug | 否 | 否 | 否 | ad-hoc |
+| Beta | 否 | 否（脚本拒绝声明） | 否 | ad-hoc |
 | Release | 是 | 是（`iCloud.com.codetime.app`） | 是 | Developer ID + provisioning |
 
 Release 下内置 Kopia 以 `com.apple.security.inherit` 签名，从而继承父进程沙箱与
 用户选择目录的安全扩展。Kopia 只读写仓库与项目目录，不需要网络。
+
+Release entitlements 同时包含 App Group `U8U443D7ZL.com.codetime.app` 与
+Keychain Access Group，用于 UI 与后台 Agent 共享数据库、书签和密钥。
+`Scripts/validate_entitlements.sh` 在打包与发布时静态校验这些键；Beta 不得声明
+iCloud 容器。Debug/Beta 的授权行为与 Release 不同，不能替代 Sandbox 验收。
 
 ## 6. 威胁模型
 

@@ -1,11 +1,17 @@
 import Foundation
 import AppKit
 import CodeTimeCore
+import BackupEngine
 
 /// Runs the background agent inside the app executable. Sharing the exact same
 /// signed binary keeps the Keychain item ACL valid for both the UI and the
 /// LaunchAgent process.
 enum AgentRunner {
+    /// Held for the whole process lifetime: a duplicate LaunchAgent (manual start,
+    /// stale registration, or a second copy of the app) must not run a second
+    /// scheduler against the same database.
+    private static var instanceLock: RepositoryLock?
+
     static func run() {
         Task.detached(priority: .utility) {
             await runAsync()
@@ -16,6 +22,15 @@ enum AgentRunner {
     private static func runAsync() async {
         do {
             let service = try CodeTimeService()
+            let lock = RepositoryLock(path: service.paths.agentLock.path)
+            guard lock.tryAcquire() else {
+                let owner = lock.currentOwner()
+                let detail = owner.map { "（PID \($0.pid)）" } ?? ""
+                FileHandle.standardError.write(Data("已有 CodeTimeAgent 实例在运行\(detail)，退出。\n".utf8))
+                exit(0)
+            }
+            instanceLock = lock
+
             _ = try await service.bootstrap()
             let scheduler = BackupScheduler(service: service, lockPath: service.paths.schedulerLock.path)
 

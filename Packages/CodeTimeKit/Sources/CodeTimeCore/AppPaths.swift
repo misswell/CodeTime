@@ -10,6 +10,7 @@ public struct AppPaths: Sendable {
     public let logs: URL
     public let recovery: URL
     public let schedulerLock: URL
+    public let agentLock: URL
 
     public init(root: URL) {
         self.root = root
@@ -20,6 +21,7 @@ public struct AppPaths: Sendable {
         self.logs = root.appendingPathComponent("logs", isDirectory: true)
         self.recovery = root.appendingPathComponent("recovery", isDirectory: true)
         self.schedulerLock = root.appendingPathComponent("scheduler.lock")
+        self.agentLock = root.appendingPathComponent("agent.lock")
     }
 
     public static func standard() throws -> AppPaths {

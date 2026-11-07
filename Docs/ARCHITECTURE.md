@@ -118,10 +118,12 @@ KopiaBackupEngine.createSnapshot
 1. 枚举本地 Kopia 仓库文件，计算 SHA-256。
 2. 按内容哈希写入 `objects/<前两位>/<sha256>`，**不覆盖已存在对象**。
 3. 等待所有对象被存储层确认上传（iCloud：`ubiquitousItemIsUploadedKey`）。
-4. 用 AES-256-GCM 加密版本清单，写入 `commits/<generation>.ctm`（最后一步）。
-5. 更新 `recovery-info.json`（含加密的 Kopia 仓库密码）。
+   元数据不可读、文件不在 iCloud 容器或上传未确认时抛错，不视为成功。
+4. 用 AES-256-GCM 加密版本清单，写入临时文件后原子移动到 `commits/<generation>.ctm`。
+5. 等待清单上传确认，再回读并解密，比对 Generation ID 与对象集合；不一致则移除未验证清单并报错。
+6. 更新 `recovery-info.json`（含加密的 Kopia 仓库密码）与对象索引。
 
-任何一步失败都不会产生新的可见版本；旧清单继续有效。
+任何一步失败都不会产生新的可见版本；旧清单继续有效。清单是唯一提交点。
 
 `CloudMirrorStore` 的存储根可以是：
 
@@ -137,7 +139,7 @@ KopiaBackupEngine.createSnapshot
 - 每 30 秒检查一次“是否有项目已超过下次应执行时间”。
 - 每项目使用 `lastBackupAt + interval` 判断，避免重复扫描。
 - 睡眠唤醒后只补跑一次，不补齐每个时间刻度。
-- 失败由下一次 tick 重试；同一项目用 `activeProjects` 去重。
+- 失败任务按 60/300/900/1800/3600 秒指数退避（带抖动），永久错误不重试；同一项目用 `activeProjects` 去重。
 - 低电量模式 + `pauseOnBattery` 时暂停自动任务。
 - 领导锁保证 UI 与 agent 不会同时创建快照。
 
@@ -160,6 +162,11 @@ SQLite（WAL）保存元数据，不进入 iCloud：
 | `verification_results` | 本地/云端/异机校验结果 |
 | `activities` | 活动日志（自动裁剪） |
 | `repositories` | 本机仓库记录 |
+| `cloud_restore_jobs` | 云端恢复任务、staging 路径与进度 |
+| `gc_journals` | 云端清理阶段与删除记录 |
+| `maintenance_state` | 验证/清理下次运行时间与结果 |
+| `object_hash_cache` | 按文件身份的增量哈希 |
+| `cloud_object_index` | 仓库文件与对象映射 |
 | `kv` | 设备 ID、设置、调度/校验时间戳 |
 
 模型均为 `Codable`，整条记录存于 `payload` BLOB，同时冗余索引列用于查询；
@@ -175,6 +182,7 @@ SQLite（WAL）保存元数据，不进入 iCloud：
 | 恢复副本 | 写入用户选择的新位置，默认推荐 |
 | 覆盖 | 仅单文件；先复制当前文件到 `recovery/`，失败则中止 |
 | 整项目 | 恢复到空目录，包含目录结构与 `.git` |
+| 跨设备 | 先写入 staging 仓库，逐对象校验，完成仓库/快照校验后再切换；支持中断续跑 |
 
 路径安全：
 
@@ -198,13 +206,18 @@ SQLite（WAL）保存元数据，不进入 iCloud：
 
 ## 9. 架构门禁与验证现状
 
-原设计的三个架构级风险：
+v1.0.0 整改后的验证状态：
 
-1. **Kopia 仓库能否安全重组**：已验证。`RepositoryReplicationTests` 与
-   `ServiceEndToEndTests` 把仓库经 CloudMirrorStore 往返后重新连接并读取快照。
-2. **iCloud 对象规模与同步语义**：代码路径已实现，尚未在注册容器的签名构建上
-   实测；本地镜像只验证格式与恢复，不等价于 iCloud 验收。
-3. **云端空间回收**：`CloudMirrorStoreTests` 验证宽限期清理不会删除被保留版本
-   引用的对象；真实 iCloud 的容量释放仍待实测。
+1. **Kopia 仓库能否安全重组**：已验证。`RepositoryReplicationTests`、
+   `ServiceEndToEndTests` 与 CT-013…CT-020 覆盖发布、恢复、断点续跑与失败不污染。
+2. **GC 安全性**：CT-001…CT-003、CT-012 与 `CloudMirrorStoreTests` 验证完整枚举、
+   引用保护、墓碑恢复与重新验证；真实 iCloud 容量释放仍待双机验收。
+3. **iCloud 同步语义**：上传确认、元数据失败与不可读文件均失败关闭
+   （CT-005…CT-007）；真实双 Mac 验收未执行，见 `Engineering/KNOWN_LIMITATIONS.md`。
+4. **多进程一致性**：CT-021…CT-028、CT-041 覆盖租约、领导选举、旧回调与 PID 复用。
+5. **Sandbox 与迁移**：CT-029…CT-035 覆盖 Beta → Release、Bookmark 与仓库丢失；
+   Release 公证与安装升级仍需人工执行。
 
-未通过第 2、3 项真实环境验收前，不应把版本标记为“生产可用”。
+完整状态表见 [`Engineering/IMPLEMENTATION_STATUS.md`](Engineering/IMPLEMENTATION_STATUS.md)，
+测试矩阵见 [`Engineering/REGRESSION_MATRIX.md`](Engineering/REGRESSION_MATRIX.md)。
+未完成真实 iCloud、公证与安装升级验收前，不应把版本标记为 Stable 已完整验收。

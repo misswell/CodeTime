@@ -86,7 +86,47 @@ public enum PerformanceProfile: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    public var uploadParallelism: Int { backupParallelism }
+    public var uploadParallelism: Int {
+        switch self {
+        case .eco: return 1
+        case .balanced: return 3
+        case .high: return 6
+        }
+    }
+
+    public var hashParallelism: Int {
+        switch self {
+        case .eco: return 1
+        case .balanced: return 2
+        case .high: return 4
+        }
+    }
+
+    public var scanParallelism: Int {
+        switch self {
+        case .eco: return 1
+        case .balanced: return 2
+        case .high: return 4
+        }
+    }
+
+    /// Upper bound on in-flight object bytes, so a large repository cannot exhaust memory.
+    public var maxMemoryUsage: Int64 {
+        switch self {
+        case .eco: return 64 * 1024 * 1024
+        case .balanced: return 256 * 1024 * 1024
+        case .high: return 512 * 1024 * 1024
+        }
+    }
+
+    /// Upper bound on staging/restore temporary space before the operation is refused.
+    public var maxTemporaryStorage: Int64 {
+        switch self {
+        case .eco: return 2 * 1024 * 1024 * 1024
+        case .balanced: return 10 * 1024 * 1024 * 1024
+        case .high: return 50 * 1024 * 1024 * 1024
+        }
+    }
 
     public var pauseOnBattery: Bool { self != .high }
 }
@@ -330,12 +370,35 @@ public struct SnapshotDiff: Codable, Hashable, Sendable {
     public var removed: Int
     public var modified: Int
     public var files: [ChangedFile]
+    /// The engine stops after a fixed number of entries; the UI must say so rather
+    /// than implying the list is the complete change set.
+    public var isTruncated: Bool
 
-    public init(added: Int = 0, removed: Int = 0, modified: Int = 0, files: [ChangedFile] = []) {
+    public init(
+        added: Int = 0,
+        removed: Int = 0,
+        modified: Int = 0,
+        files: [ChangedFile] = [],
+        isTruncated: Bool = false
+    ) {
         self.added = added
         self.removed = removed
         self.modified = modified
         self.files = files
+        self.isTruncated = isTruncated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case added, removed, modified, files, isTruncated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        added = try c.decodeIfPresent(Int.self, forKey: .added) ?? 0
+        removed = try c.decodeIfPresent(Int.self, forKey: .removed) ?? 0
+        modified = try c.decodeIfPresent(Int.self, forKey: .modified) ?? 0
+        files = try c.decodeIfPresent([ChangedFile].self, forKey: .files) ?? []
+        isTruncated = try c.decodeIfPresent(Bool.self, forKey: .isTruncated) ?? false
     }
 
     public var totalChanges: Int { added + removed + modified }

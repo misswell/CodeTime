@@ -9,55 +9,93 @@ public actor CloudMirrorStore: CloudStore {
         public var repositoryID: UUID
         public var repositoryURL: URL
         public var deviceID: UUID
+        public var deviceName: String?
         public var masterKeyProvider: any MasterKeyProviding
         public var passwordProvider: any RepositoryPasswordProviding
         public var uploadTracker: any CloudUploadTracking
         public var coordinatedIO: Bool
         public var uploadTimeout: TimeInterval
         public var lockURL: URL?
+        public var journalStore: any GCJournalProviding
+        public var indexStore: any CloudObjectIndexProviding
+        public var hashCacheStore: any ObjectHashCacheProviding
+        /// Minimum delay between tombstoning and object sweeping. Generation
+        /// retention uses the caller's grace period; this protects in-flight
+        /// uploads from other devices.
+        public var sweepGrace: TimeInterval
+        public var maxScannedFiles: Int
+        /// Bounded concurrency for object copy/verify and hashing during publish.
+        public var uploadParallelism: Int
 
         public init(
             storageRoot: URL,
             repositoryID: UUID,
             repositoryURL: URL,
             deviceID: UUID,
+            deviceName: String? = nil,
             masterKeyProvider: any MasterKeyProviding,
             passwordProvider: any RepositoryPasswordProviding,
             uploadTracker: any CloudUploadTracking = NoopUploadTracker(),
             coordinatedIO: Bool = false,
             uploadTimeout: TimeInterval = 900,
-            lockURL: URL? = nil
+            lockURL: URL? = nil,
+            journalStore: any GCJournalProviding = NoopGCJournalStore(),
+            indexStore: any CloudObjectIndexProviding = NoopObjectIndexStore(),
+            hashCacheStore: any ObjectHashCacheProviding = NoopHashCacheStore(),
+            sweepGrace: TimeInterval = 3_600,
+            maxScannedFiles: Int = 2_000_000,
+            uploadParallelism: Int = 4
         ) {
             self.storageRoot = storageRoot
             self.repositoryID = repositoryID
             self.repositoryURL = repositoryURL
             self.deviceID = deviceID
+            self.deviceName = deviceName
             self.masterKeyProvider = masterKeyProvider
             self.passwordProvider = passwordProvider
             self.uploadTracker = uploadTracker
             self.coordinatedIO = coordinatedIO
             self.uploadTimeout = uploadTimeout
             self.lockURL = lockURL
+            self.journalStore = journalStore
+            self.indexStore = indexStore
+            self.hashCacheStore = hashCacheStore
+            self.sweepGrace = sweepGrace
+            self.maxScannedFiles = maxScannedFiles
+            self.uploadParallelism = max(1, uploadParallelism)
         }
     }
 
-    private struct CachedHash {
+    /// Stabilized file identity used by the hash cache and by the scan-to-upload
+    /// consistency check.
+    private struct FileStamp: Hashable {
+        var identity: String
         var size: Int64
-        var modifiedAt: Date?
+        var modifiedAt: Date
+    }
+
+    private struct ScanItem {
+        var relativePath: String
+        var url: URL
+        var stamp: FileStamp
         var hash: String
     }
 
     private let configuration: Configuration
     private let fileManager = FileManager.default
-    private var hashCache: [String: CachedHash] = [:]
+    private let access: any CloudFileAccess
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
     private let formatName = "codetime-cloud-format"
-    private let formatVersion = 1
+    private let formatVersion = 2
+    private let objectAlgorithm = "sha256"
 
     public init(configuration: Configuration) {
         self.configuration = configuration
+        self.access = configuration.coordinatedIO
+            ? ICloudCoordinatedFileAccess()
+            : LocalFileAccess()
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.sortedKeys]
         self.encoder.dateEncodingStrategy = .iso8601
@@ -76,39 +114,53 @@ public actor CloudMirrorStore: CloudStore {
             .appendingPathComponent(configuration.repositoryID.uuidString, isDirectory: true)
     }
     private var objectsURL: URL { deviceRepositoryURL.appendingPathComponent("objects", isDirectory: true) }
+    private var quarantineURL: URL { objectsURL.appendingPathComponent("quarantine", isDirectory: true) }
     private var commitsURL: URL { deviceRepositoryURL.appendingPathComponent("commits", isDirectory: true) }
+    private var tombstonesURL: URL { commitsURL.appendingPathComponent("tombstones", isDirectory: true) }
     private var recoveryInfoURL: URL { deviceRepositoryURL.appendingPathComponent("recovery-info.json") }
 
     // MARK: - Format
 
-    private func prepare() throws {
-        try fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
+    private func prepare() async throws {
+        try await access.ensureDirectory(baseURL)
         let formatURL = baseURL.appendingPathComponent("format.json")
         if fileManager.fileExists(atPath: formatURL.path) {
-            let data = try Data(contentsOf: formatURL)
+            let data: Data
+            do { data = try await access.read(formatURL) }
+            catch { throw CloudStoreError.invalidFormat("无法读取格式文件：\(error.localizedDescription)") }
             let format = try decoder.decode(CloudFormatFile.self, from: data)
-            guard format.format == formatName, format.version == formatVersion else {
-                throw CloudStoreError.invalidFormat("不支持的版本 \(format.version)")
+            guard format.format == formatName else {
+                throw CloudStoreError.invalidFormat("不是 CodeTime 云端目录")
+            }
+            guard format.version <= formatVersion else {
+                throw CloudStoreError.unsupportedFormat("版本 \(format.version)")
             }
         } else {
-            let format = CloudFormatFile(format: formatName, version: formatVersion, createdAt: Date())
-            let data = try encoder.encode(format)
-            try CoordinatedIO.writeData(data, to: formatURL, coordinated: configuration.coordinatedIO)
+            let format = CloudFormatFile(
+                format: formatName,
+                version: formatVersion,
+                objectAlgorithm: objectAlgorithm,
+                createdAt: Date()
+            )
+            try await access.writeAtomically(try encoder.encode(format), to: formatURL)
         }
-        try fileManager.createDirectory(at: objectsURL, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: commitsURL, withIntermediateDirectories: true)
+        try await access.ensureDirectory(objectsURL)
+        try await access.ensureDirectory(commitsURL)
         if !fileManager.fileExists(atPath: recoveryInfoURL.path) {
-            try writeRecoveryInfo()
+            try await writeRecoveryInfo()
+        } else {
+            _ = try await readRecoveryInfo()
         }
     }
 
-    private func writeRecoveryInfo() throws {
+    private func writeRecoveryInfo() async throws {
         let masterKey = try configuration.masterKeyProvider.masterKey()
         let payload = RecoveryPayload(
             repositoryId: configuration.repositoryID,
             repositoryPassword: try configuration.passwordProvider.repositoryPassword(),
             formatVersion: formatVersion,
-            createdAt: Date()
+            createdAt: Date(),
+            keyFingerprint: Self.keyFingerprint(masterKey)
         )
         let payloadData = try encoder.encode(payload)
         let sealed = try CryptoBox.seal(
@@ -120,11 +172,26 @@ public actor CloudMirrorStore: CloudStore {
             formatVersion: formatVersion,
             repositoryId: configuration.repositoryID,
             deviceId: configuration.deviceID,
+            deviceName: configuration.deviceName,
             createdAt: Date(),
+            keyFingerprint: Self.keyFingerprint(masterKey),
             payload: sealed
         )
-        let data = try encoder.encode(info)
-        try CoordinatedIO.writeData(data, to: recoveryInfoURL, coordinated: configuration.coordinatedIO)
+        try await access.writeAtomically(try encoder.encode(info), to: recoveryInfoURL)
+    }
+
+    private func readRecoveryInfo() async throws -> RecoveryInfoFile {
+        let data = try await access.read(recoveryInfoURL)
+        let info = try decoder.decode(RecoveryInfoFile.self, from: data)
+        // A recovery file sealed by a different key must be surfaced, not ignored.
+        guard info.repositoryId == configuration.repositoryID else {
+            throw CloudStoreError.invalidFormat("recovery-info 仓库不匹配")
+        }
+        return info
+    }
+
+    private static func keyFingerprint(_ masterKey: Data) -> String {
+        String(Hashing.sha256Hex(masterKey).prefix(24))
     }
 
     // MARK: - Publish
@@ -135,27 +202,46 @@ public actor CloudMirrorStore: CloudStore {
         }
         let lock = try await acquireRepositoryLock()
         defer { lock?.release() }
-        try prepare()
+        try await prepare()
         guard fileManager.fileExists(atPath: configuration.repositoryURL.path) else {
             throw CloudStoreError.invalidFormat("本地仓库不存在")
         }
 
-        let manifestFiles = try repositoryFiles()
-        var uniqueObjects: [String: (source: URL, size: Int64)] = [:]
-        for file in manifestFiles {
-            let source = configuration.repositoryURL.appendingPathComponent(file.relativePath)
-            uniqueObjects[file.contentHash] = (source, file.size)
+        let scan = try await scanRepository(previousEntries: nil)
+        guard scan.result.isComplete else {
+            throw CloudStoreError.objectCorrupt(
+                "仓库扫描不完整（\(scan.result.errorCount) 个错误），拒绝发布：\(scan.result.skippedPaths.prefix(3).joined(separator: "、"))"
+            )
         }
 
-        for (hash, object) in uniqueObjects {
-            try await storeObject(hash: hash, source: object.source, size: object.size)
-        }
-        for hash in uniqueObjects.keys {
-            try await configuration.uploadTracker.waitForUpload(objectURL(hash), timeout: configuration.uploadTimeout)
+        var uniqueObjects: [String: ScanItem] = [:]
+        for item in scan.items {
+            uniqueObjects[item.hash] = item
         }
 
+        // 1. Copy every missing object and verify content on arrival.
+        let objectList = Array(uniqueObjects.values)
+        try await forEachConcurrently(objectList) { item in
+            try await self.storeObject(hash: item.hash, source: item.url, expected: item.stamp)
+        }
+        // 2. Wait for the provider to confirm every object.
+        try await forEachConcurrently(Array(uniqueObjects.keys)) { hash in
+            try await self.configuration.uploadTracker.waitForUpload(
+                self.objectURL(hash),
+                timeout: self.configuration.uploadTimeout
+            )
+        }
+        // 3. Independently re-verify size and SHA-256 before committing the manifest.
+        try await forEachConcurrently(objectList) { item in
+            try await self.verifyStoredObject(hash: item.hash, expectedSize: item.stamp.size)
+        }
+
+        let manifestFiles = scan.items
+            .map { ManifestFile(relativePath: $0.relativePath, contentHash: $0.hash, size: $0.stamp.size, fileIdentity: $0.stamp.identity) }
+            .sorted { $0.relativePath < $1.relativePath }
         let integrity = ManifestIntegrity(
             fileCount: manifestFiles.count,
+            uniqueObjectCount: uniqueObjects.count,
             totalBytes: manifestFiles.reduce(0) { $0 + $1.size },
             repositoryHash: Hashing.sha256Hex(try encoder.encode(manifestFiles))
         )
@@ -164,45 +250,151 @@ public actor CloudMirrorStore: CloudStore {
             repositoryId: configuration.repositoryID,
             generationId: generation.id,
             deviceId: configuration.deviceID,
+            deviceName: configuration.deviceName,
             createdAt: generation.createdAt,
             sourceSnapshotIds: generation.snapshotIDs,
             repositoryFiles: manifestFiles,
-            integrity: integrity
+            integrity: integrity,
+            objectAlgorithm: objectAlgorithm
         )
-        let manifestData = try encoder.encode(manifest)
+        try validate(manifest: manifest)
+
         let masterKey = try configuration.masterKeyProvider.masterKey()
         let sealed = try CryptoBox.seal(
-            manifestData,
+            try encoder.encode(manifest),
             masterKey: masterKey,
-            context: manifestContext(generationID: generation.id, repositoryID: configuration.repositoryID)
+            context: manifestContext(generationID: generation.id)
         )
 
-        let commitURL = commitsURL.appendingPathComponent("\(generation.id.uuidString).ctm")
-        guard !fileManager.fileExists(atPath: commitURL.path) else {
-            throw CloudStoreError.invalidFormat("版本清单已存在，拒绝覆盖")
+        let commit = commitURL(generation.id)
+        guard !fileManager.fileExists(atPath: commit.path) else {
+            throw CloudStoreError.manifestExists(generation.id.uuidString)
         }
-        try CoordinatedIO.writeData(sealed, to: commitURL, coordinated: configuration.coordinatedIO)
-        try await configuration.uploadTracker.waitForUpload(commitURL, timeout: configuration.uploadTimeout)
+        let temp = commitsURL.appendingPathComponent(".tmp-\(generation.id.uuidString)")
+        try await access.writeAtomically(sealed, to: temp)
+        do {
+            try await access.move(temp, to: commit)
+            try await configuration.uploadTracker.waitForUpload(commit, timeout: configuration.uploadTimeout)
+            // The manifest is the transaction commit point: it only counts as
+            // published once it can be read back and decrypted.
+            let readBack = try await loadManifest(generationID: generation.id)
+            guard readBack.generationId == generation.id,
+                  readBack.uniqueObjectHashes == Set(uniqueObjects.keys) else {
+                throw CloudStoreError.manifestCorrupt("清单回读不一致")
+            }
+        } catch {
+            let publishError = error
+            if fileManager.fileExists(atPath: commit.path) {
+                do {
+                    try await access.remove(commit)
+                } catch {
+                    // A manifest that failed read-back must not remain visible as a
+                    // published generation; if it cannot be removed, say so loudly.
+                    throw CloudStoreError.manifestCorrupt(
+                        "发布失败且无法移除未验证清单：\(error.localizedDescription)；原始错误：\(publishError.localizedDescription)"
+                    )
+                }
+            }
+            try? await access.remove(temp)
+            throw publishError
+        }
 
-        try writeRecoveryInfo()
+        try await writeRecoveryInfo()
+        try await configuration.indexStore.saveObjectIndex(scan.result.entries, repositoryID: configuration.repositoryID)
     }
 
-    private func repositoryFiles() throws -> [ManifestFile] {
-        let root = configuration.repositoryURL
-        let rootPath = root.standardizedFileURL.path
+    /// Bounded fan-out. Publish touches thousands of small objects; doing that
+    /// strictly serially wastes the provider's parallel upload capacity, while
+    /// unbounded tasks exhaust file descriptors.
+    private func forEachConcurrently<T: Sendable>(
+        _ items: [T],
+        limit: Int? = nil,
+        _ body: @Sendable @escaping (T) async throws -> Void
+    ) async throws {
+        guard !items.isEmpty else { return }
+        let width = max(1, min(limit ?? configuration.uploadParallelism, items.count))
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var index = 0
+            for _ in 0..<width {
+                let item = items[index]
+                index += 1
+                group.addTask { try await body(item) }
+            }
+            while let _ = try await group.next() {
+                if index < items.count {
+                    let item = items[index]
+                    index += 1
+                    group.addTask { try await body(item) }
+                }
+            }
+        }
+    }
+
+    /// Enforces the publish invariants before the manifest becomes visible.
+    private func validate(manifest: CloudManifest) throws {
+        guard manifest.formatVersion == formatVersion else {
+            throw CloudStoreError.manifestCorrupt("清单格式版本 \(manifest.formatVersion)")
+        }
+        guard manifest.objectAlgorithm == objectAlgorithm else {
+            throw CloudStoreError.manifestCorrupt("对象算法 \(manifest.objectAlgorithm)")
+        }
+        guard manifest.integrity.fileCount == manifest.repositoryFiles.count else {
+            throw CloudStoreError.manifestCorrupt("文件数量不一致")
+        }
+        let unique = manifest.uniqueObjectHashes
+        guard unique.count == manifest.integrity.uniqueObjectCount else {
+            throw CloudStoreError.manifestCorrupt("对象数量不一致")
+        }
+        guard !manifest.repositoryFiles.isEmpty else {
+            throw CloudStoreError.manifestCorrupt("清单为空")
+        }
+        var seen = Set<String>()
+        for file in manifest.repositoryFiles {
+            _ = try Self.validatedRelativePath(file.relativePath)
+            guard seen.insert(file.relativePath).inserted else {
+                throw CloudStoreError.manifestCorrupt("重复路径 \(file.relativePath)")
+            }
+            guard file.size >= 0 else {
+                throw CloudStoreError.manifestCorrupt("非法大小 \(file.relativePath)")
+            }
+        }
+    }
+
+    // MARK: - Repository scan and object storage
+
+    private func scanRepository(previousEntries: [CloudObjectIndexEntry]?) async throws -> (result: RepositoryScanResult, items: [ScanItem]) {
+        let root = configuration.repositoryURL.standardizedFileURL
+        let rootPath = root.path
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]
+
+        var index: [String: CloudObjectIndexEntry] = [:]
+        if let previousEntries {
+            for entry in previousEntries { index[entry.relativePath] = entry }
+        } else {
+            for entry in (try? await configuration.indexStore.loadObjectIndex(repositoryID: configuration.repositoryID)) ?? [] {
+                index[entry.relativePath] = entry
+            }
+        }
+
+        var enumerationErrors: [String] = []
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in true }
+            errorHandler: { url, error in
+                enumerationErrors.append("\(url.lastPathComponent)：\(error.localizedDescription)")
+                return true
+            }
         ) else {
-            throw CloudStoreError.invalidFormat("无法读取本地仓库")
+            throw CloudStoreError.objectCorrupt("无法读取本地仓库目录")
         }
 
-        var files: [ManifestFile] = []
-        var seenPaths = Set<String>()
+        var items: [ScanItem] = []
         while let object = enumerator.nextObject() {
+            if items.count >= configuration.maxScannedFiles {
+                enumerationErrors.append("扫描文件数超过上限 \(configuration.maxScannedFiles)")
+                break
+            }
             guard let url = object as? URL else { continue }
             let values = try? url.resourceValues(forKeys: Set(keys))
             if values?.isDirectory == true { continue }
@@ -212,118 +404,348 @@ public actor CloudMirrorStore: CloudStore {
             relative = String(relative.dropFirst(rootPath.count))
             if relative.hasPrefix("/") { relative.removeFirst() }
             guard !relative.isEmpty, !relative.hasSuffix(".tmp") else { continue }
-            guard seenPaths.insert(relative).inserted else { continue }
+            guard !relative.split(separator: "/").contains(".tmp") else { continue }
 
-            let size = Int64(values?.fileSize ?? 0)
-            let modified = values?.contentModificationDate
-            let hash: String
-            if let cached = hashCache[relative], cached.size == size, cached.modifiedAt == modified {
-                hash = cached.hash
-            } else {
-                hash = try Hashing.sha256Hex(fileURL: url)
-                hashCache[relative] = CachedHash(size: size, modifiedAt: modified, hash: hash)
+            guard let stamp = Self.stamp(of: url) else {
+                enumerationErrors.append("\(relative)：无法读取文件属性")
+                continue
             }
-            files.append(ManifestFile(relativePath: relative, contentHash: hash, size: size))
+
+            var hash: String?
+            if let cached = index[relative],
+               cached.matches(identity: stamp.identity, size: stamp.size, modifiedAt: stamp.modifiedAt) {
+                hash = cached.sha256
+            }
+            if hash == nil,
+               let cached = try? await configuration.hashCacheStore.loadHashCache(
+                   repositoryID: configuration.repositoryID,
+                   paths: [relative]
+               )[relative],
+               cached.matches(identity: stamp.identity, size: stamp.size, modifiedAt: stamp.modifiedAt) {
+                hash = cached.contentHash
+            }
+            if hash == nil {
+                hash = try await hashStable(url: url, initial: stamp, relativePath: relative)
+            }
+            items.append(ScanItem(relativePath: relative, url: url, stamp: stamp, hash: hash!))
         }
-        return files.sorted { $0.relativePath < $1.relativePath }
+
+        let entries = items.map { item in
+            CloudObjectIndexEntry(
+                relativePath: item.relativePath,
+                size: item.stamp.size,
+                modifiedAt: item.stamp.modifiedAt,
+                fileIdentity: item.stamp.identity,
+                sha256: item.hash,
+                lastVerifiedAt: Date(),
+                uploadState: .pending
+            )
+        }
+        try? await configuration.hashCacheStore.saveHashCache(
+            items.map { item in
+                ObjectHashCacheEntry(
+                    relativePath: item.relativePath,
+                    fileIdentity: item.stamp.identity,
+                    size: item.stamp.size,
+                    modifiedAt: item.stamp.modifiedAt,
+                    contentHash: item.hash,
+                    verifiedAt: Date()
+                )
+            },
+            repositoryID: configuration.repositoryID
+        )
+        let result = RepositoryScanResult(
+            entries: entries,
+            isComplete: enumerationErrors.isEmpty,
+            skippedPaths: enumerationErrors,
+            errorCount: enumerationErrors.count,
+            scannedAt: Date()
+        )
+        return (result, items)
     }
 
-    private func storeObject(hash: String, source: URL, size: Int64) async throws {
+    /// Hashes a file and fails if the file changes while it is being read.
+    private func hashStable(url: URL, initial: FileStamp, relativePath: String) async throws -> String {
+        let first = try await access.hash(url)
+        guard let after = Self.stamp(of: url) else {
+            throw CloudStoreError.objectCorrupt("文件在哈希期间消失：\(relativePath)")
+        }
+        if after != initial {
+            let second = try await access.hash(url)
+            guard let final = Self.stamp(of: url), final == after else {
+                throw CloudStoreError.objectCorrupt("文件在哈希期间持续变化：\(relativePath)")
+            }
+            return second
+        }
+        return first
+    }
+
+    private func storeObject(hash: String, source: URL, expected: FileStamp) async throws {
         let target = objectURL(hash)
         if fileManager.fileExists(atPath: target.path) {
-            let existingSize = (try? target.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-            guard Int64(existingSize) == size else {
-                throw CloudStoreError.objectCorrupt(hash)
+            let existing: String
+            do {
+                existing = try await access.hash(target)
+            } catch {
+                // An unverifiable existing object is preserved in quarantine and
+                // reported, never overwritten or silently accepted.
+                try await quarantine(objectHash: hash)
+                throw CloudStoreError.objectCorrupt("无法校验已存在对象 \(hash)：\(error.localizedDescription)")
             }
-            return
+            if existing == hash { return }
+            try await quarantine(objectHash: hash)
+            throw CloudStoreError.objectQuarantined(hash)
         }
 
-        try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let temp = target.deletingLastPathComponent()
-            .appendingPathComponent(".tmp-\(UUID().uuidString)")
-        try fileManager.copyItem(at: source, to: temp)
-        defer { try? fileManager.removeItem(at: temp) }
-
-        try CoordinatedIO.write(to: target, coordinated: configuration.coordinatedIO) { actualURL in
-            if fileManager.fileExists(atPath: actualURL.path) {
-                return
+        try await access.ensureDirectory(target.deletingLastPathComponent())
+        let temp = target.deletingLastPathComponent().appendingPathComponent(".tmp-\(UUID().uuidString)")
+        do {
+            try await access.copy(source, to: temp)
+            let tempHash = try await access.hash(temp)
+            guard tempHash == hash else {
+                throw CloudStoreError.objectCorrupt("源文件在复制期间变化：\(hash)")
             }
-            try fileManager.moveItem(at: temp, to: actualURL)
+            guard let current = Self.stamp(of: source), current == expected else {
+                throw CloudStoreError.objectCorrupt("源文件在复制期间变化：\(hash)")
+            }
+            if fileManager.fileExists(atPath: target.path) {
+                // Another writer won the race; keep the verified copy only if it matches.
+                let existing: String
+                do {
+                    existing = try await access.hash(target)
+                } catch {
+                    try await quarantine(objectHash: hash)
+                    throw CloudStoreError.objectCorrupt("无法校验并发写入对象 \(hash)：\(error.localizedDescription)")
+                }
+                if existing == hash {
+                    try? await access.remove(temp)
+                    return
+                }
+                try await quarantine(objectHash: hash)
+                throw CloudStoreError.objectQuarantined(hash)
+            }
+            try await access.move(temp, to: target)
+        } catch {
+            try? await access.remove(temp)
+            throw error
         }
+    }
+
+    private func quarantine(objectHash: String) async throws {
+        let target = objectURL(objectHash)
+        guard fileManager.fileExists(atPath: target.path) else { return }
+        try await access.ensureDirectory(quarantineURL)
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let destination = quarantineURL.appendingPathComponent("\(objectHash)-\(stamp)")
+        try await access.move(target, to: destination)
+    }
+
+    private func verifyStoredObject(hash: String, expectedSize: Int64) async throws {
+        let url = objectURL(hash)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw CloudStoreError.objectMissing(hash)
+        }
+        guard let stamp = Self.stamp(of: url), stamp.size == expectedSize else {
+            throw CloudStoreError.objectCorrupt(hash)
+        }
+        let actual = try await access.hash(url)
+        guard actual == hash else {
+            throw CloudStoreError.objectCorrupt(hash)
+        }
+    }
+
+    private static func stamp(of url: URL) -> FileStamp? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        let seconds = Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        return FileStamp(
+            identity: "\(info.st_dev):\(info.st_ino)",
+            size: Int64(info.st_size),
+            modifiedAt: Date(timeIntervalSince1970: seconds)
+        )
     }
 
     // MARK: - Listing and manifests
 
-    public func listGenerations(repositoryId: UUID) async throws -> [CloudGeneration] {
-        try prepare()
-        let urls = (try? fileManager.contentsOfDirectory(
-            at: commitsURL,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        var generations: [(generation: CloudGeneration, commitDate: Date)] = []
-        for url in urls where url.pathExtension == "ctm" {
-            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else { continue }
-            try? await UbiquitousFiles.ensureDownloaded(url)
-            guard let manifest = try? loadManifest(generationID: id) else { continue }
-            let hash = try? Hashing.sha256Hex(fileURL: url)
-            let uniqueCount = Set(manifest.repositoryFiles.map(\.contentHash)).count
-            let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                ?? manifest.createdAt
-            generations.append((
-                CloudGeneration(
+    /// Full enumeration. A listing failure is an error, never an empty result.
+    private func manifestURLs() async throws -> [URL] {
+        try await access.list(commitsURL, keys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey])
+            .filter { $0.pathExtension == "ctm" }
+    }
+
+    private func tombstoneURLs() async throws -> [URL] {
+        // A missing tombstones directory simply means no GC has tombstoned yet.
+        guard fileManager.fileExists(atPath: tombstonesURL.path) else { return [] }
+        return try await access.list(tombstonesURL, keys: [.isRegularFileKey]).filter { $0.pathExtension == "ctm" }
+    }
+
+    public func listGenerationEntries(repositoryId: UUID) async throws -> [CloudGenerationEntry] {
+        try await prepare()
+        var entries: [CloudGenerationEntry] = []
+        for url in try await manifestURLs() {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
+                continue
+            }
+            if let state = Self.unreadableState(of: url), state != .current {
+                if state == .notDownloaded || state == .downloading {
+                    do {
+                        try await access.download(url, timeout: 120)
+                    } catch {
+                        entries.append(CloudGenerationEntry(
+                            id: id,
+                            readState: .notDownloaded,
+                            detail: error.localizedDescription,
+                            manifestPath: url.path
+                        ))
+                        continue
+                    }
+                } else if case .unavailable(let detail) = state {
+                    entries.append(CloudGenerationEntry(
+                        id: id,
+                        readState: .unreadable,
+                        detail: detail,
+                        manifestPath: url.path
+                    ))
+                    continue
+                }
+            }
+            do {
+                let manifest = try await loadManifest(generationID: id)
+                let hash: String
+                let hashDetail: String?
+                do {
+                    hash = try await access.hash(url)
+                    hashDetail = nil
+                } catch {
+                    // The generation is decryptable, but its bytes could not be
+                    // re-read for verification. Report that instead of pretending
+                    // an empty hash is a real digest.
+                    hash = ""
+                    hashDetail = "无法计算清单哈希：\(error.localizedDescription)"
+                }
+                let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? manifest.createdAt
+                let generation = CloudGeneration(
                     id: id,
                     repositoryID: manifest.repositoryId,
                     deviceID: manifest.deviceId,
                     createdAt: manifest.createdAt,
                     publishedAt: commitDate,
                     state: .published,
-                    manifestHash: hash ?? "",
-                    objectCount: uniqueCount,
+                    manifestHash: hash,
+                    objectCount: manifest.integrity.uniqueObjectCount,
                     byteSize: manifest.integrity.totalBytes,
                     snapshotIDs: manifest.sourceSnapshotIds,
-                    uploadedObjectCount: uniqueCount,
+                    uploadedObjectCount: manifest.integrity.uniqueObjectCount,
                     verifiedAt: nil
-                ),
-                commitDate
-            ))
+                )
+                entries.append(CloudGenerationEntry(
+                    id: id,
+                    generation: generation,
+                    readState: .valid,
+                    detail: hashDetail,
+                    manifestPath: url.path
+                ))
+            } catch let error as CloudStoreError {
+                let state: GenerationReadState
+                switch error {
+                case .manifestNotDownloaded: state = .notDownloaded
+                case .unsupportedFormat: state = .unsupportedVersion
+                default: state = .corrupted
+                }
+                entries.append(CloudGenerationEntry(
+                    id: id,
+                    readState: state,
+                    detail: error.localizedDescription,
+                    manifestPath: url.path
+                ))
+            } catch {
+                entries.append(CloudGenerationEntry(
+                    id: id,
+                    readState: .corrupted,
+                    detail: error.localizedDescription,
+                    manifestPath: url.path
+                ))
+            }
         }
-        return generations.sorted { lhs, rhs in
-            if lhs.generation.createdAt != rhs.generation.createdAt {
-                return lhs.generation.createdAt > rhs.generation.createdAt
+        // Manifest timestamps are ISO-8601 with second precision, so two versions
+        // published in the same second tie. Commit-file modification time is the
+        // real publication order and breaks the tie deterministically.
+        return entries.sorted {
+            let left = $0.generation
+            let right = $1.generation
+            let leftDate = left?.publishedAt ?? left?.createdAt ?? .distantPast
+            let rightDate = right?.publishedAt ?? right?.createdAt ?? .distantPast
+            if leftDate == rightDate { return $0.id.uuidString > $1.id.uuidString }
+            return leftDate > rightDate
+        }
+    }
+
+    public func listGenerations(repositoryId: UUID) async throws -> [CloudGeneration] {
+        try await listGenerationEntries(repositoryId: repositoryId)
+            .compactMap(\.generation)
+            .sorted {
+                let leftDate = $0.publishedAt ?? $0.createdAt
+                let rightDate = $1.publishedAt ?? $1.createdAt
+                if leftDate == rightDate { return $0.id.uuidString > $1.id.uuidString }
+                return leftDate > rightDate
             }
-            if lhs.commitDate != rhs.commitDate {
-                return lhs.commitDate > rhs.commitDate
-            }
-            return lhs.generation.id.uuidString > rhs.generation.id.uuidString
-        }.map(\.generation)
+    }
+
+    private func commitModificationDate(_ id: UUID) -> Date? {
+        (try? commitURL(id).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    private static func unreadableState(of url: URL) -> CloudItemState? {
+        let state = UbiquitousFiles.state(of: url)
+        switch state {
+        case .local, .current: return .current
+        default: return state
+        }
     }
 
     private func commitURL(_ generationID: UUID) -> URL {
         commitsURL.appendingPathComponent("\(generationID.uuidString).ctm")
     }
 
-    private func loadManifest(generationID: UUID) throws -> CloudManifest {
-        let commitURL = commitURL(generationID)
-        guard fileManager.fileExists(atPath: commitURL.path) else {
+    private func loadManifest(generationID: UUID) async throws -> CloudManifest {
+        let commit = commitURL(generationID)
+        guard fileManager.fileExists(atPath: commit.path) else {
             throw CloudStoreError.manifestUnavailable(generationID.uuidString)
         }
-        let sealed = try Data(contentsOf: commitURL)
+        switch UbiquitousFiles.state(of: commit) {
+        case .notDownloaded, .downloading:
+            do { try await access.download(commit, timeout: 120) }
+            catch { throw CloudStoreError.manifestNotDownloaded(generationID.uuidString) }
+        case .unavailable(let detail):
+            throw CloudStoreError.manifestUnavailable(detail)
+        default:
+            break
+        }
+        let sealed: Data
+        do { sealed = try await access.read(commit) }
+        catch { throw CloudStoreError.manifestUnavailable(error.localizedDescription) }
+
         let key = try configuration.masterKeyProvider.masterKey()
         let data: Data
         do {
             data = try CryptoBox.open(
                 sealed,
                 masterKey: key,
-                context: manifestContext(generationID: generationID, repositoryID: configuration.repositoryID)
+                context: manifestContext(generationID: generationID)
             )
         } catch {
             throw CloudStoreError.manifestCorrupt("无法解密清单（密钥不匹配或文件损坏）")
         }
-        let manifest = try decoder.decode(CloudManifest.self, from: data)
+        let manifest: CloudManifest
+        do { manifest = try decoder.decode(CloudManifest.self, from: data) }
+        catch { throw CloudStoreError.manifestCorrupt("清单无法解析") }
+
+        guard manifest.formatVersion == formatVersion else {
+            throw CloudStoreError.unsupportedFormat("清单版本 \(manifest.formatVersion)")
+        }
         guard manifest.repositoryId == configuration.repositoryID,
-              manifest.generationId == generationID,
-              manifest.formatVersion == formatVersion else {
+              manifest.generationId == generationID else {
             throw CloudStoreError.manifestCorrupt("清单元数据不一致")
         }
         return manifest
@@ -331,108 +753,167 @@ public actor CloudMirrorStore: CloudStore {
 
     // MARK: - Restore
 
+    public struct RestoreProgress: Sendable {
+        public var totalFiles: Int
+        public var completedFiles: Int
+        public var totalBytes: Int64
+        public var completedBytes: Int64
+        public var currentPath: String?
+    }
+
+    /// Protocol entry point: no resume, no progress reporting.
     public func restoreRepository(generationId: UUID, destination: URL) async throws {
-        try prepare()
-        try? await UbiquitousFiles.ensureDownloaded(commitURL(generationId))
-        let manifest = try loadManifest(generationID: generationId)
+        try await restoreRepository(
+            generationId: generationId,
+            destination: destination,
+            allowResume: false,
+            progress: nil
+        )
+    }
+
+    /// Restores into a staging directory. Existing files inside the destination are
+    /// re-verified and reused, which makes an interrupted restore resumable without
+    /// trusting unverified content.
+    public func restoreRepository(
+        generationId: UUID,
+        destination: URL,
+        allowResume: Bool = false,
+        progress: (@Sendable (RestoreProgress) async -> Void)? = nil
+    ) async throws {
+        try await prepare()
+        let manifest = try await loadManifest(generationID: generationId)
+        try validate(manifest: manifest)
+
         let dest = destination.standardizedFileURL
         if fileManager.fileExists(atPath: dest.path) {
             let contents = try fileManager.contentsOfDirectory(atPath: dest.path)
-            guard contents.isEmpty else {
+            if !contents.isEmpty && !allowResume {
                 throw CodeTimeError.destinationExists(dest.path)
             }
         } else {
-            try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
+            try await access.ensureDirectory(dest)
         }
 
+        let total = manifest.repositoryFiles.count
+        var completed = 0
+        var completedBytes: Int64 = 0
+        await progress?(RestoreProgress(
+            totalFiles: total,
+            completedFiles: 0,
+            totalBytes: manifest.integrity.totalBytes,
+            completedBytes: 0,
+            currentPath: nil
+        ))
+
         for file in manifest.repositoryFiles {
+            try Task.checkCancellation()
             let relative = try Self.validatedRelativePath(file.relativePath)
             let object = objectURL(file.contentHash)
             guard fileManager.fileExists(atPath: object.path) else {
                 throw CloudStoreError.objectMissing(file.contentHash)
             }
-            try await UbiquitousFiles.ensureDownloaded(object)
-            let size = (try object.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? -1
-            guard Int64(size) == file.size else {
-                throw CloudStoreError.objectCorrupt(file.contentHash)
+            switch UbiquitousFiles.state(of: object) {
+            case .notDownloaded, .downloading:
+                do { try await access.download(object, timeout: 300) }
+                catch { throw CloudStoreError.notDownloaded(file.contentHash) }
+            case .unavailable(let detail):
+                throw CloudStoreError.notDownloaded(detail)
+            default:
+                break
             }
-            let actual = try Hashing.sha256Hex(fileURL: object)
-            guard actual == file.contentHash else {
-                throw CloudStoreError.objectCorrupt(file.contentHash)
-            }
+
             let target = dest.appendingPathComponent(relative)
-            try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fileManager.fileExists(atPath: target.path) {
+                if allowResume {
+                    let existingHash = try await access.hash(target)
+                    if existingHash == file.contentHash {
+                        completed += 1
+                        completedBytes += file.size
+                        await progress?(RestoreProgress(
+                            totalFiles: total,
+                            completedFiles: completed,
+                            totalBytes: manifest.integrity.totalBytes,
+                            completedBytes: completedBytes,
+                            currentPath: relative
+                        ))
+                        continue
+                    }
+                }
                 throw CodeTimeError.destinationExists(target.path)
             }
-            try fileManager.copyItem(at: object, to: target)
+
+            try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
+            try await access.ensureDirectory(target.deletingLastPathComponent())
+            do {
+                try await access.copy(object, to: target)
+            } catch {
+                throw CloudStoreError.restoreInterrupted("\(relative)：\(error.localizedDescription)")
+            }
+            guard let stamp = Self.stamp(of: target), stamp.size == file.size else {
+                throw CloudStoreError.restoreInterrupted("复制后大小不一致：\(relative)")
+            }
+            let copiedHash = try await access.hash(target)
+            guard copiedHash == file.contentHash else {
+                try? await access.remove(target)
+                throw CloudStoreError.restoreInterrupted("复制后哈希不一致：\(relative)")
+            }
+            completed += 1
+            completedBytes += file.size
+            await progress?(RestoreProgress(
+                totalFiles: total,
+                completedFiles: completed,
+                totalBytes: manifest.integrity.totalBytes,
+                completedBytes: completedBytes,
+                currentPath: relative
+            ))
         }
     }
 
     // MARK: - Verification
 
     public func verifyGeneration(_ generationId: UUID) async throws -> VerificationResult {
-        try prepare()
-        try? await UbiquitousFiles.ensureDownloaded(commitURL(generationId))
-        let manifest = try loadManifest(generationID: generationId)
-        var bytes: Int64 = 0
-        for file in manifest.repositoryFiles {
-            let object = objectURL(file.contentHash)
-            guard fileManager.fileExists(atPath: object.path) else {
-                return VerificationResult(
-                    generationID: generationId,
-                    level: .cloudIntegrity,
-                    outcome: .failed,
-                    details: "对象缺失：\(file.contentHash)"
-                )
-            }
-            try await UbiquitousFiles.ensureDownloaded(object)
-            let size = (try? object.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? -1
-            guard Int64(size) == file.size else {
-                return VerificationResult(
-                    generationID: generationId,
-                    level: .cloudIntegrity,
-                    outcome: .failed,
-                    details: "对象大小不匹配：\(file.relativePath)"
-                )
-            }
-            let hash = try Hashing.sha256Hex(fileURL: object)
-            guard hash == file.contentHash else {
-                return VerificationResult(
-                    generationID: generationId,
-                    level: .cloudIntegrity,
-                    outcome: .failed,
-                    details: "对象哈希不匹配：\(file.relativePath)"
-                )
-            }
-            bytes += file.size
+        try await prepare()
+        let manifest: CloudManifest
+        do { manifest = try await loadManifest(generationID: generationId) }
+        catch {
+            return VerificationResult(
+                generationID: generationId,
+                level: .cloudIntegrity,
+                outcome: .failed,
+                details: "清单不可用：\(error.localizedDescription)"
+            )
         }
+        var bytes: Int64 = 0
+        var verified = 0
+        var failures: [String] = []
+        for file in manifest.repositoryFiles {
+            do {
+                try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
+                verified += 1
+                bytes += file.size
+            } catch {
+                failures.append("\(file.relativePath)：\(error.localizedDescription)")
+            }
+        }
+        let complete = failures.isEmpty && verified == manifest.repositoryFiles.count && !manifest.repositoryFiles.isEmpty
         return VerificationResult(
             generationID: generationId,
             level: .cloudIntegrity,
-            outcome: .passed,
-            details: "校验 \(manifest.repositoryFiles.count) 个对象",
+            outcome: complete ? .passed : .failed,
+            details: complete
+                ? "校验 \(manifest.repositoryFiles.count) 个对象、\(manifest.integrity.uniqueObjectCount) 个唯一哈希"
+                : "校验失败（\(failures.count) 项）：\(failures.prefix(3).joined(separator: "；"))",
             bytesChecked: bytes
         )
     }
 
     public func storageSummary(repositoryId: UUID) async throws -> CloudStorageSummary {
-        try prepare()
+        try await prepare()
         let generations = try await listGenerations(repositoryId: repositoryId)
-        let objects = (try? fileManager.contentsOfDirectory(
-            at: objectsURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
         var count = 0
         var bytes: Int64 = 0
-        for prefix in objects {
-            guard (try? prefix.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
-            let files = (try? fileManager.contentsOfDirectory(
-                at: prefix,
-                includingPropertiesForKeys: [.fileSizeKey],
-                options: [.skipsHiddenFiles]
-            )) ?? []
+        for prefix in try await accessingObjectPrefixes() {
+            let files = try await access.list(prefix, keys: [.fileSizeKey])
             for file in files where !file.lastPathComponent.hasPrefix(".tmp-") {
                 count += 1
                 bytes += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
@@ -447,101 +928,313 @@ public actor CloudMirrorStore: CloudStore {
         )
     }
 
-    // MARK: - Cleanup
+    private func accessingObjectPrefixes() async throws -> [URL] {
+        let entries = try await access.list(objectsURL, keys: [.isDirectoryKey])
+        return entries.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                && url.lastPathComponent != quarantineURL.lastPathComponent
+        }
+    }
+
+    // MARK: - Garbage collection (§3.7)
 
     public func cleanup(
         repositoryId: UUID,
         gracePeriod: TimeInterval,
         minimumGenerations: Int
     ) async throws -> CloudCleanupReport {
+        guard repositoryId == configuration.repositoryID else {
+            throw CloudStoreError.invalidFormat("仓库 ID 与存储配置不匹配")
+        }
         let lock = try await acquireRepositoryLock()
         defer { lock?.release() }
-        try prepare()
-        let generations = try await listGenerations(repositoryId: repositoryId)
-        let minimum = max(2, minimumGenerations)
-        guard generations.count > 0 else {
-            return CloudCleanupReport(skippedReason: "没有云端版本")
-        }
+        try await prepare()
 
-        var manifests: [UUID: CloudManifest] = [:]
-        for generation in generations {
+        let now = Date()
+        let loadedJournal: GCJournal?
+        do {
+            loadedJournal = try await configuration.journalStore.loadUnfinishedGCJournal(repositoryID: repositoryId)
+        } catch {
+            // Starting over would forget which manifests were already tombstoned
+            // and which objects were already deleted, so this must fail closed.
+            throw CloudStoreError.gcJournalCorrupted("无法读取清理日志：\(error.localizedDescription)")
+        }
+        var gc = loadedJournal ?? GCJournal(repositoryID: repositoryId, startedAt: now)
+        // `gracePeriod` is the user retention window for generations. The delay
+        // before deleting objects is the separate synchronization grace: it must
+        // never shrink to zero just because the user chose a zero-day retention.
+        let sweepGrace = max(0, configuration.sweepGrace)
+        let cutoff = now.addingTimeInterval(-max(0, gracePeriod))
+
+        func persist(_ phase: GCPhase, error: String? = nil) async throws {
+            gc.phase = phase
+            gc.updatedAt = Date()
+            gc.lastError = error
             do {
-                try? await UbiquitousFiles.ensureDownloaded(commitURL(generation.id))
-                manifests[generation.id] = try loadManifest(generationID: generation.id)
+                try await configuration.journalStore.saveGCJournal(gc)
             } catch {
-                return CloudCleanupReport(
-                    retainedGenerations: generations.count,
-                    skippedReason: "存在无法读取的版本清单，清理已暂停"
+                throw CloudStoreError.gcJournalCorrupted(
+                    "无法保存清理日志（\(phase.rawValue)）：\(error.localizedDescription)"
                 )
             }
         }
 
-        let cutoff = Date().addingTimeInterval(-gracePeriod)
-        var retained: [CloudGeneration] = []
-        for (index, generation) in generations.enumerated() {
-            if index < minimum || generation.createdAt > cutoff {
-                retained.append(generation)
-            }
-        }
-        let retainedIDs = Set(retained.map(\.id))
-        var referenced = Set<String>()
-        for generation in retained {
-            guard let manifest = manifests[generation.id] else { continue }
-            for file in manifest.repositoryFiles {
-                referenced.insert(file.contentHash)
-            }
-        }
-
-        for hash in referenced {
-            if !fileManager.fileExists(atPath: objectURL(hash).path) {
-                return CloudCleanupReport(
-                    retainedGenerations: retained.count,
-                    skippedReason: "保留版本仍引用缺失对象 \(hash)，清理已暂停"
-                )
-            }
-        }
-
-        var deletedObjects = 0
-        var freedBytes: Int64 = 0
-        let prefixes = (try? fileManager.contentsOfDirectory(
-            at: objectsURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        for prefix in prefixes {
-            guard (try? prefix.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
-            let files = (try? fileManager.contentsOfDirectory(
-                at: prefix,
-                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-            )) ?? []
-            for file in files {
-                let hash = file.lastPathComponent
-                if referenced.contains(hash) { continue }
-                let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-                let modified = values?.contentModificationDate ?? Date()
-                guard modified <= cutoff else { continue }
-                let size = Int64(values?.fileSize ?? 0)
-                if (try? fileManager.removeItem(at: file)) != nil {
-                    deletedObjects += 1
-                    freedBytes += size
+        // Phase 1: complete enumeration. Any unreadable manifest aborts the run;
+        // we never operate on a filtered "visible" list.
+        if gc.phase == .enumerating || gc.phase == .marking || gc.protectedGenerations.isEmpty {
+            var manifests: [UUID: CloudManifest] = [:]
+            var failure: String?
+            for url in try await manifestURLs() {
+                guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
+                    failure = "无法识别的清单文件名：\(url.lastPathComponent)"
+                    break
+                }
+                do { manifests[id] = try await loadManifest(generationID: id) }
+                catch {
+                    failure = "清单 \(id.uuidString) 无法读取：\(error.localizedDescription)"
+                    break
                 }
             }
+            if let failure {
+                try await persist(.aborted, error: failure)
+                return CloudCleanupReport(retainedGenerations: manifests.count, skippedReason: failure)
+            }
+            try await persist(.marking)
+
+            let ordered = manifests.keys.sorted { lhs, rhs in
+                let leftCreated = manifests[lhs]?.createdAt ?? .distantPast
+                let rightCreated = manifests[rhs]?.createdAt ?? .distantPast
+                if leftCreated != rightCreated { return leftCreated > rightCreated }
+                let leftCommit = commitModificationDate(lhs) ?? .distantPast
+                let rightCommit = commitModificationDate(rhs) ?? .distantPast
+                if leftCommit != rightCommit { return leftCommit > rightCommit }
+                return lhs.uuidString > rhs.uuidString
+            }
+            let minimum = max(2, minimumGenerations)
+            var protected: [UUID] = []
+            for (index, id) in ordered.enumerated() {
+                if index < minimum { protected.append(id); continue }
+                guard let createdAt = manifests[id]?.createdAt else { continue }
+                if createdAt > cutoff { protected.append(id) }
+            }
+            let deleteIDs = ordered.filter { !protected.contains($0) }
+            gc.protectedGenerations = protected
+            gc.plannedManifestDeletes = deleteIDs
+
+            // Every protected generation must be complete before we touch anything.
+            for id in protected {
+                guard let manifest = manifests[id] else {
+                    let message = "保留版本 \(id.uuidString) 清单不可用"
+                    try await persist(.aborted, error: message)
+                    return CloudCleanupReport(retainedGenerations: protected.count, skippedReason: message)
+                }
+                for file in manifest.repositoryFiles {
+                    guard fileManager.fileExists(atPath: objectURL(file.contentHash).path) else {
+                        let message = "保留版本引用缺失对象 \(file.contentHash)，清理已暂停"
+                        try await persist(.aborted, error: message)
+                        return CloudCleanupReport(retainedGenerations: protected.count, skippedReason: message)
+                    }
+                }
+            }
+
+            // Objects referenced by protected generations, plus every object that a
+            // tombstoned manifest still points at, are never candidates yet.
+            var protectedObjects = Set<String>()
+            for id in protected {
+                for file in manifests[id]?.repositoryFiles ?? [] { protectedObjects.insert(file.contentHash) }
+            }
+            for url in try await tombstoneURLs() {
+                let name = url.deletingPathExtension().lastPathComponent
+                let idPart = name.split(separator: ".").first.map(String.init) ?? ""
+                guard let id = UUID(uuidString: idPart) else {
+                    let message = "无法识别的墓碑文件名：\(url.lastPathComponent)，清理已暂停"
+                    try await persist(.aborted, error: message)
+                    return CloudCleanupReport(retainedGenerations: protected.count, skippedReason: message)
+                }
+                do {
+                    let manifest = try await loadManifestFromTombstone(id: id, url: url)
+                    for file in manifest.repositoryFiles { protectedObjects.insert(file.contentHash) }
+                } catch {
+                    // The tombstoned manifest may still reference objects; without
+                    // reading it we cannot prove any object is unreferenced.
+                    let message = "墓碑清单 \(id.uuidString) 无法读取：\(error.localizedDescription)，清理已暂停"
+                    try await persist(.aborted, error: message)
+                    return CloudCleanupReport(retainedGenerations: protected.count, skippedReason: message)
+                }
+            }
+            var referencedByDeleted = Set<String>()
+            for id in deleteIDs {
+                for file in manifests[id]?.repositoryFiles ?? [] {
+                    if !protectedObjects.contains(file.contentHash) { referencedByDeleted.insert(file.contentHash) }
+                }
+            }
+            gc.plannedObjectDeletes = Array(referencedByDeleted)
+            gc.updatedAt = Date()
+            try await persist(.tombstoning)
+
+            // Phase 2: tombstone manifests atomically, then enter the grace period.
+            try await access.ensureDirectory(tombstonesURL)
+            for id in gc.plannedManifestDeletes {
+                let source = commitURL(id)
+                guard fileManager.fileExists(atPath: source.path) else {
+                    if !gc.completedManifestDeletes.contains(id) { gc.completedManifestDeletes.append(id) }
+                    continue
+                }
+                let stamp = Int(Date().timeIntervalSince1970 * 1000)
+                let destination = tombstonesURL.appendingPathComponent("\(id.uuidString).\(stamp).ctm")
+                try await access.move(source, to: destination)
+                if !gc.completedManifestDeletes.contains(id) { gc.completedManifestDeletes.append(id) }
+                gc.updatedAt = Date()
+                try await persist(.tombstoning)
+            }
+            gc.graceDeadline = Date().addingTimeInterval(sweepGrace)
+            gc.updatedAt = Date()
+            try await persist(.gracePeriod)
         }
 
-        for generation in generations where !retainedIDs.contains(generation.id) {
-            guard generation.createdAt <= cutoff else { continue }
-            let commit = commitsURL.appendingPathComponent("\(generation.id.uuidString).ctm")
-            if (try? fileManager.removeItem(at: commit)) != nil {
-                manifests.removeValue(forKey: generation.id)
+        if gc.phase == .tombstoning || gc.phase == .deletingManifests || gc.phase == .awaitingSync {
+            gc.updatedAt = Date()
+            try await persist(.gracePeriod)
+        }
+
+        if gc.phase == .gracePeriod {
+            let deadline = gc.graceDeadline ?? Date()
+            guard Date() >= deadline else {
+                gc.updatedAt = Date()
+                try await persist(.gracePeriod)
+                return CloudCleanupReport(
+                    deletedObjects: gc.completedObjectDeletes.count,
+                    freedBytes: gc.freedBytes,
+                    retainedGenerations: gc.protectedGenerations.count,
+                    skippedReason: "等待宽限期结束（\(Int(deadline.timeIntervalSinceNow)) 秒）"
+                )
             }
+            gc.updatedAt = Date()
+            try await persist(.revalidating)
+        }
+
+        // Phase 3: revalidate from scratch. Tombstones are restored on any doubt.
+        if gc.phase == .revalidating || gc.phase == .sweepingObjects {
+            var validObjects = Set<String>()
+            var failure: String?
+            for url in try await manifestURLs() {
+                guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
+                    failure = "重新验证时发现无法识别的清单文件名：\(url.lastPathComponent)"
+                    break
+                }
+                do {
+                    let manifest = try await loadManifest(generationID: id)
+                    for file in manifest.repositoryFiles { validObjects.insert(file.contentHash) }
+                } catch {
+                    failure = "重新验证时清单 \(id.uuidString) 不可读：\(error.localizedDescription)"
+                    break
+                }
+            }
+            if let failure {
+                do {
+                    try await restoreTombstones()
+                } catch {
+                    let message = "\(failure)；恢复墓碑清单失败：\(error.localizedDescription)"
+                    try await persist(.aborted, error: message)
+                    throw CloudStoreError.gcBlocked(message)
+                }
+                try await persist(.aborted, error: failure)
+                return CloudCleanupReport(
+                    retainedGenerations: gc.protectedGenerations.count,
+                    skippedReason: failure
+                )
+            }
+            try await persist(.sweepingObjects)
+
+            var deleted = gc.completedObjectDeletes
+            var freed = gc.freedBytes
+            let sweepCutoff = Date().addingTimeInterval(-max(0, sweepGrace))
+            for prefix in try await accessingObjectPrefixes() {
+                for file in try await access.list(prefix, keys: [.fileSizeKey, .contentModificationDateKey]) {
+                    let hash = file.lastPathComponent
+                    if hash.hasPrefix(".tmp-") {
+                        // Incomplete writes from a crashed upload are only removed
+                        // after the grace period.
+                        let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                            .contentModificationDate ?? Date()
+                        if modified <= sweepCutoff {
+                            do { try await access.remove(file) }
+                            catch { gc.lastError = "临时对象 \(file.lastPathComponent) 删除失败：\(error.localizedDescription)" }
+                        }
+                        continue
+                    }
+                    guard UUID(uuidString: hash) != nil || hash.count == 64 else { continue }
+                    if validObjects.contains(hash) { continue }
+                    let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                        .contentModificationDate ?? Date()
+                    guard modified <= sweepCutoff else { continue }
+                    let size = Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+                    do {
+                        try await access.remove(file)
+                    } catch {
+                        gc.lastError = "对象 \(hash) 删除失败：\(error.localizedDescription)"
+                        continue
+                    }
+                    deleted.append(hash)
+                    freed += size
+                    gc.completedObjectDeletes = deleted
+                    gc.freedBytes = freed
+                    gc.updatedAt = Date()
+                    try await persist(.sweepingObjects, error: gc.lastError)
+                }
+            }
+
+            // Tombstoned manifests may only be removed once their grace period has
+            // elapsed; the objects they referenced were already unreferenced above.
+            for url in try await tombstoneURLs() {
+                if let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                   modified <= sweepCutoff {
+                    do { try await access.remove(url) }
+                    catch { gc.lastError = "墓碑清单 \(url.lastPathComponent) 删除失败：\(error.localizedDescription)" }
+                }
+            }
+
+            gc.completedAt = Date()
+            try await persist(.completed, error: gc.lastError)
+            return CloudCleanupReport(
+                deletedObjects: deleted.count,
+                freedBytes: freed,
+                retainedGenerations: gc.protectedGenerations.count
+            )
+        }
+
+        if gc.phase == .completed {
+            return CloudCleanupReport(
+                deletedObjects: gc.completedObjectDeletes.count,
+                freedBytes: gc.freedBytes,
+                retainedGenerations: gc.protectedGenerations.count,
+                skippedReason: "清理已完成"
+            )
         }
 
         return CloudCleanupReport(
-            deletedObjects: deletedObjects,
-            freedBytes: freedBytes,
-            retainedGenerations: retained.count
+            deletedObjects: gc.completedObjectDeletes.count,
+            freedBytes: gc.freedBytes,
+            retainedGenerations: gc.protectedGenerations.count,
+            skippedReason: gc.lastError ?? "清理已中止"
         )
+    }
+
+    private func loadManifestFromTombstone(id: UUID, url: URL) async throws -> CloudManifest {
+        let data = try await access.read(url)
+        let key = try configuration.masterKeyProvider.masterKey()
+        let plaintext = try CryptoBox.open(data, masterKey: key, context: manifestContext(generationID: id))
+        return try decoder.decode(CloudManifest.self, from: plaintext)
+    }
+
+    private func restoreTombstones() async throws {
+        for url in try await tombstoneURLs() {
+            let name = url.deletingPathExtension().lastPathComponent
+            guard let idPart = name.split(separator: ".").first, UUID(uuidString: String(idPart)) != nil else { continue }
+            let destination = commitsURL.appendingPathComponent("\(idPart).ctm")
+            guard !fileManager.fileExists(atPath: destination.path) else { continue }
+            try await access.move(url, to: destination)
+        }
     }
 
     // MARK: - Helpers
@@ -559,8 +1252,8 @@ public actor CloudMirrorStore: CloudStore {
             .appendingPathComponent(hash)
     }
 
-    private func manifestContext(generationID: UUID, repositoryID: UUID) -> String {
-        "manifest:\(repositoryID.uuidString):\(generationID.uuidString)"
+    private func manifestContext(generationID: UUID) -> String {
+        "manifest:\(configuration.repositoryID.uuidString):\(generationID.uuidString)"
     }
 
     private func recoveryContext(repositoryID: UUID) -> String {
@@ -578,9 +1271,8 @@ public actor CloudMirrorStore: CloudStore {
         return components.joined(separator: "/")
     }
 
-    // MARK: - Recovery
+    // MARK: - Cross-process lock
 
-    /// Cross-process lock; shared with the Kopia engine's repository lock.
     private final class ProcessFileLock: @unchecked Sendable {
         private let path: String
         private var descriptor: Int32 = -1
@@ -592,7 +1284,7 @@ public actor CloudMirrorStore: CloudStore {
             while true {
                 if tryAcquire() { return }
                 if Date() >= deadline {
-                    throw CodeTimeError.repositoryUnavailable("仓库正在被另一个任务使用")
+                    throw CodeTimeError.repositoryBusy("仓库正在被另一个任务使用")
                 }
                 try await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -618,48 +1310,262 @@ public actor CloudMirrorStore: CloudStore {
         }
     }
 
+    // MARK: - Recovery (§4.3)
+
+    /// Enumerates every device/repository, validates and decrypts each recovery
+    /// payload, and returns all candidates instead of relying on directory order.
+    public static func recoverCandidates(
+        storageRoot: URL,
+        recoveryKey: Data
+    ) async throws -> [RecoveryCandidate] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let devices = storageRoot.appendingPathComponent("devices", isDirectory: true)
+        let deviceDirs: [URL]
+        do {
+            deviceDirs = try FileManager.default.contentsOfDirectory(
+                at: devices,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            if Self.isMissingFileError(error) {
+                throw CloudStoreError.notFound("没有找到云端设备目录")
+            }
+            throw CloudStoreError.metadataUnavailable("无法列出云端设备目录：\(error.localizedDescription)")
+        }
+
+        var candidates: [RecoveryCandidate] = []
+        for device in deviceDirs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            // Only directories we published are recovery sources; an unrelated
+            // entry must not be turned into a candidate with a made-up identity.
+            guard let directoryDeviceID = UUID(uuidString: device.lastPathComponent) else { continue }
+            let repositories = device.appendingPathComponent("repositories", isDirectory: true)
+            let repos: [URL]
+            do {
+                repos = try FileManager.default.contentsOfDirectory(
+                    at: repositories,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles]
+                )
+            } catch {
+                if Self.isMissingFileError(error) { continue }
+                throw CloudStoreError.metadataUnavailable(
+                    "无法列出设备 \(device.lastPathComponent) 的仓库：\(error.localizedDescription)"
+                )
+            }
+            for repo in repos.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                guard let repositoryID = UUID(uuidString: repo.lastPathComponent) else { continue }
+                let infoURL = repo.appendingPathComponent("recovery-info.json")
+                guard FileManager.default.fileExists(atPath: infoURL.path) else { continue }
+                do { try await UbiquitousFiles.ensureDownloaded(infoURL) }
+                catch {
+                    candidates.append(RecoveryCandidate(
+                        repositoryID: repositoryID,
+                        deviceID: directoryDeviceID,
+                        deviceName: device.lastPathComponent,
+                        blockedReason: "恢复信息无法下载：\(error.localizedDescription)",
+                        recoveryInfoPath: infoURL.path
+                    ))
+                    continue
+                }
+                guard let data = try? Data(contentsOf: infoURL),
+                      let info = try? decoder.decode(RecoveryInfoFile.self, from: data),
+                      info.repositoryId == repositoryID else {
+                    candidates.append(RecoveryCandidate(
+                        repositoryID: repositoryID,
+                        deviceID: directoryDeviceID,
+                        deviceName: device.lastPathComponent,
+                        blockedReason: "恢复信息格式无效",
+                        recoveryInfoPath: infoURL.path
+                    ))
+                    continue
+                }
+                if info.keyFingerprint != Self.keyFingerprint(recoveryKey) {
+                    candidates.append(RecoveryCandidate(
+                        repositoryID: repositoryID,
+                        deviceID: info.deviceId,
+                        deviceName: info.deviceName ?? device.lastPathComponent,
+                        blockedReason: "恢复密钥与该设备不匹配",
+                        recoveryInfoPath: infoURL.path
+                    ))
+                    continue
+                }
+                do {
+                    let plaintext = try CryptoBox.open(
+                        info.payload,
+                        masterKey: recoveryKey,
+                        context: "recovery:\(info.repositoryId.uuidString)"
+                    )
+                    _ = try decoder.decode(RecoveryPayload.self, from: plaintext)
+                } catch {
+                    candidates.append(RecoveryCandidate(
+                        repositoryID: repositoryID,
+                        deviceID: info.deviceId,
+                        deviceName: info.deviceName ?? device.lastPathComponent,
+                        blockedReason: "无法解密恢复信息：\(error.localizedDescription)",
+                        recoveryInfoPath: infoURL.path
+                    ))
+                    continue
+                }
+
+                // Validate generations without ever trusting a partial parse.
+                let commits = repo.appendingPathComponent("commits", isDirectory: true)
+                let manifestURLs: [URL]
+                do {
+                    manifestURLs = try FileManager.default.contentsOfDirectory(
+                        at: commits,
+                        includingPropertiesForKeys: [.fileSizeKey],
+                        options: [.skipsHiddenFiles]
+                    ).filter { $0.pathExtension == "ctm" }
+                } catch {
+                    if Self.isMissingFileError(error) {
+                        manifestURLs = []
+                    } else {
+                        candidates.append(RecoveryCandidate(
+                            repositoryID: repositoryID,
+                            deviceID: info.deviceId,
+                            deviceName: info.deviceName ?? device.lastPathComponent,
+                            blockedReason: "无法列出云端版本：\(error.localizedDescription)",
+                            recoveryInfoPath: infoURL.path
+                        ))
+                        continue
+                    }
+                }
+                var readable = 0
+                var latest: CloudManifest?
+                var latestCommitDate: Date?
+                var blocked: String?
+                for url in manifestURLs {
+                    guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else { continue }
+                    do {
+                        try await UbiquitousFiles.ensureDownloaded(url)
+                        let sealed = try Data(contentsOf: url)
+                        let plaintext = try CryptoBox.open(
+                            sealed,
+                            masterKey: recoveryKey,
+                            context: "manifest:\(repositoryID.uuidString):\(id.uuidString)"
+                        )
+                        let manifest = try decoder.decode(CloudManifest.self, from: plaintext)
+                        readable += 1
+                        let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                            .contentModificationDate ?? .distantPast
+                        let isNewer: Bool
+                        if let current = latest {
+                            if manifest.createdAt != current.createdAt {
+                                isNewer = manifest.createdAt > current.createdAt
+                            } else {
+                                isNewer = commitDate > (latestCommitDate ?? .distantPast)
+                            }
+                        } else {
+                            isNewer = true
+                        }
+                        if isNewer {
+                            latest = manifest
+                            latestCommitDate = commitDate
+                        }
+                    } catch {
+                        blocked = blocked ?? "云端版本 \(id.uuidString) 不可读取"
+                    }
+                }
+                let bytes = (try? Self.directorySize(commits)) ?? 0
+                let objectsBytes = (try? Self.directorySize(repo.appendingPathComponent("objects", isDirectory: true))) ?? 0
+                candidates.append(RecoveryCandidate(
+                    repositoryID: repositoryID,
+                    deviceID: info.deviceId,
+                    deviceName: info.deviceName ?? device.lastPathComponent,
+                    latestGenerationID: latest?.generationId,
+                    latestBackupAt: latest?.createdAt,
+                    generationCount: manifestURLs.count,
+                    readableGenerationCount: readable,
+                    repositoryBytes: max(bytes, objectsBytes),
+                    integrityOK: blocked == nil,
+                    kopiaVersion: nil,
+                    blockedReason: blocked,
+                    recoveryInfoPath: infoURL.path
+                ))
+            }
+        }
+
+        guard !candidates.isEmpty else {
+            throw CloudStoreError.notFound("没有找到可用恢复凭据")
+        }
+        return candidates.sorted { ($0.latestBackupAt ?? .distantPast) > ($1.latestBackupAt ?? .distantPast) }
+    }
+
+    private static func isMissingFileError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain,
+           nsError.code == NSFileReadNoSuchFileError || nsError.code == NSFileNoSuchFileError {
+            return true
+        }
+        return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOENT)
+    }
+
+    private static func directorySize(_ url: URL) throws -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]
+        ) else { return 0 }
+        var total: Int64 = 0
+        while let file = enumerator.nextObject() as? URL {
+            if (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { continue }
+            total += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+        }
+        return total
+    }
+
+    /// Backwards-compatible single-candidate recovery. Prefers a fully readable,
+    /// newest candidate and throws when none qualifies.
     public static func recover(
         storageRoot: URL,
         recoveryKey: Data,
         repositoryID: UUID? = nil
     ) async throws -> RecoveredAccess {
+        var candidates = try await recoverCandidates(storageRoot: storageRoot, recoveryKey: recoveryKey)
+        if let repositoryID {
+            candidates = candidates.filter { $0.repositoryID == repositoryID }
+        }
+        guard let chosen = candidates.first(where: { $0.integrityOK && $0.latestGenerationID != nil }) ?? candidates.first,
+              chosen.blockedReason == nil,
+              chosen.latestGenerationID != nil else {
+            throw CloudStoreError.notFound("没有完整可恢复的云端版本")
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let devices = storageRoot.appendingPathComponent("devices", isDirectory: true)
-        let deviceDirs = (try? FileManager.default.contentsOfDirectory(
-            at: devices,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-
+        let deviceDirs = try FileManager.default.contentsOfDirectory(at: devices, includingPropertiesForKeys: nil)
         for device in deviceDirs {
-            let repositories = device.appendingPathComponent("repositories", isDirectory: true)
-            let repos = (try? FileManager.default.contentsOfDirectory(
-                at: repositories,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-            )) ?? []
-            for repo in repos {
-                if let repositoryID, repo.lastPathComponent != repositoryID.uuidString { continue }
-                let infoURL = repo.appendingPathComponent("recovery-info.json")
-                try? await UbiquitousFiles.ensureDownloaded(infoURL)
-                guard let data = try? Data(contentsOf: infoURL),
-                      let info = try? decoder.decode(RecoveryInfoFile.self, from: data) else { continue }
-                if let repositoryID, info.repositoryId != repositoryID { continue }
-                let payloadData = try CryptoBox.open(
+            let infoURL = device
+                .appendingPathComponent("repositories", isDirectory: true)
+                .appendingPathComponent(chosen.repositoryID.uuidString, isDirectory: true)
+                .appendingPathComponent("recovery-info.json")
+            guard let data = try? Data(contentsOf: infoURL),
+                  let info = try? decoder.decode(RecoveryInfoFile.self, from: data),
+                  info.repositoryId == chosen.repositoryID,
+                  // Several devices can hold the same repository ID; only the
+                  // candidate's own device proves the key matches.
+                  info.deviceId == chosen.deviceID else { continue }
+            do {
+                try await UbiquitousFiles.ensureDownloaded(infoURL)
+                let plaintext = try CryptoBox.open(
                     info.payload,
                     masterKey: recoveryKey,
                     context: "recovery:\(info.repositoryId.uuidString)"
                 )
-                let payload = try decoder.decode(RecoveryPayload.self, from: payloadData)
+                let payload = try decoder.decode(RecoveryPayload.self, from: plaintext)
                 return RecoveredAccess(
                     repositoryID: info.repositoryId,
                     deviceID: info.deviceId,
                     repositoryPassword: payload.repositoryPassword,
                     createdAt: payload.createdAt
                 )
+            } catch {
+                // A different device's recovery file may still be encrypted with
+                // another key; continue instead of aborting the whole recovery.
+                continue
             }
         }
-        throw CloudStoreError.notFound("没有找到可用恢复凭据")
+        throw CloudStoreError.notFound("恢复信息不完整")
     }
 }

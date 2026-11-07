@@ -219,13 +219,17 @@ public enum SecurityScopedBookmarks {
             )
             return (url, stale)
         } catch {
-            let url = try URL(
-                resolvingBookmarkData: data,
-                options: [],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            )
-            return (url, stale)
+            do {
+                let url = try URL(
+                    resolvingBookmarkData: data,
+                    options: [],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &stale
+                )
+                return (url, stale)
+            } catch let fallback {
+                throw SecurityError.bookmarkFailed(fallback.localizedDescription)
+            }
         }
     }
 }

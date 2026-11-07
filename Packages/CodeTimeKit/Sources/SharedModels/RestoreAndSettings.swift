@@ -217,6 +217,13 @@ public struct AppSettings: Codable, Hashable, Sendable {
     public var pauseOnBattery: Bool
     public var cloudGracePeriodDays: Int
     public var minimumCloudGenerations: Int
+    /// A path string is not an authorization; the bookmark is what survives a restart
+    /// inside the Release sandbox.
+    public var localMirrorBookmark: Data?
+    public var localMirrorAccessState: SecurityAccessState
+    public var scheduler: SchedulerSettings
+    /// Monotonic revision; other processes compare it against their cached copy.
+    public var configRevision: Int
 
     public init(
         iCloudEnabled: Bool = false,
@@ -231,7 +238,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
         lastRecoveryKeyAcknowledgedAt: Date? = nil,
         pauseOnBattery: Bool = false,
         cloudGracePeriodDays: Int = 30,
-        minimumCloudGenerations: Int = 2
+        minimumCloudGenerations: Int = 2,
+        localMirrorBookmark: Data? = nil,
+        localMirrorAccessState: SecurityAccessState = .unknown,
+        scheduler: SchedulerSettings = .default,
+        configRevision: Int = 0
     ) {
         self.iCloudEnabled = iCloudEnabled
         self.localMirrorPath = localMirrorPath
@@ -246,9 +257,65 @@ public struct AppSettings: Codable, Hashable, Sendable {
         self.pauseOnBattery = pauseOnBattery
         self.cloudGracePeriodDays = cloudGracePeriodDays
         self.minimumCloudGenerations = minimumCloudGenerations
+        self.localMirrorBookmark = localMirrorBookmark
+        self.localMirrorAccessState = localMirrorAccessState
+        self.scheduler = scheduler
+        self.configRevision = configRevision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case iCloudEnabled, localMirrorPath, performance, launchAgentEnabled
+        case periodicVerificationDays, autoBackupOnLaunch, globalIntervalMinutes
+        case showExcludedPreview, hasCompletedOnboarding, lastRecoveryKeyAcknowledgedAt
+        case pauseOnBattery, cloudGracePeriodDays, minimumCloudGenerations
+        case localMirrorBookmark, localMirrorAccessState, scheduler, configRevision
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        iCloudEnabled = try c.decodeIfPresent(Bool.self, forKey: .iCloudEnabled) ?? false
+        localMirrorPath = try c.decodeIfPresent(String.self, forKey: .localMirrorPath)
+        performance = try c.decodeIfPresent(PerformanceProfile.self, forKey: .performance) ?? .balanced
+        launchAgentEnabled = try c.decodeIfPresent(Bool.self, forKey: .launchAgentEnabled) ?? false
+        periodicVerificationDays = try c.decodeIfPresent(Int.self, forKey: .periodicVerificationDays) ?? 7
+        autoBackupOnLaunch = try c.decodeIfPresent(Bool.self, forKey: .autoBackupOnLaunch) ?? true
+        globalIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .globalIntervalMinutes) ?? 30
+        showExcludedPreview = try c.decodeIfPresent(Bool.self, forKey: .showExcludedPreview) ?? true
+        hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        lastRecoveryKeyAcknowledgedAt = try c.decodeIfPresent(Date.self, forKey: .lastRecoveryKeyAcknowledgedAt)
+        pauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        cloudGracePeriodDays = try c.decodeIfPresent(Int.self, forKey: .cloudGracePeriodDays) ?? 30
+        minimumCloudGenerations = try c.decodeIfPresent(Int.self, forKey: .minimumCloudGenerations) ?? 2
+        localMirrorBookmark = try c.decodeIfPresent(Data.self, forKey: .localMirrorBookmark)
+        localMirrorAccessState = try c.decodeIfPresent(SecurityAccessState.self, forKey: .localMirrorAccessState) ?? .unknown
+        configRevision = try c.decodeIfPresent(Int.self, forKey: .configRevision) ?? 0
+        // Pre-state-machine databases carry these facts as flat fields.
+        scheduler = try c.decodeIfPresent(SchedulerSettings.self, forKey: .scheduler) ?? SchedulerSettings(
+            enabled: true,
+            globallyPaused: false,
+            autoBackupOnLaunch: autoBackupOnLaunch,
+            pauseOnLowPowerMode: pauseOnBattery,
+            backupIntervalMinutes: globalIntervalMinutes,
+            verificationIntervalDays: periodicVerificationDays,
+            cleanupIntervalDays: 1,
+            configRevision: configRevision
+        )
     }
 
     public static let `default` = AppSettings()
+
+    /// Keeps the legacy flat fields and the scheduler block in agreement after an edit.
+    public func synchronizingScheduler() -> AppSettings {
+        var copy = self
+        copy.scheduler.autoBackupOnLaunch = autoBackupOnLaunch
+        copy.scheduler.pauseOnLowPowerMode = pauseOnBattery
+        copy.scheduler.backupIntervalMinutes = globalIntervalMinutes
+        copy.scheduler.verificationIntervalDays = periodicVerificationDays
+        copy.scheduler.enabled = launchAgentEnabled || scheduler.enabled
+        copy.scheduler.configRevision = configRevision
+        copy.scheduler.updatedAt = Date()
+        return copy
+    }
 }
 
 public struct ExclusionPreview: Codable, Hashable, Sendable {
@@ -257,13 +324,55 @@ public struct ExclusionPreview: Codable, Hashable, Sendable {
     public var excludedFiles: Int
     public var excludedBytes: Int64
     public var samples: [ExcludedSample]
+    /// Every file visited, included or excluded. The scan cap applies to this, not to
+    /// the included subset, otherwise a huge excluded tree scans without bound.
+    public var scannedFiles: Int
+    public var permissionErrors: Int
+    public var failedPaths: [String]
+    public var isComplete: Bool
+    public var truncatedReason: String?
 
-    public init(includedFiles: Int = 0, includedBytes: Int64 = 0, excludedFiles: Int = 0, excludedBytes: Int64 = 0, samples: [ExcludedSample] = []) {
+    public init(
+        includedFiles: Int = 0,
+        includedBytes: Int64 = 0,
+        excludedFiles: Int = 0,
+        excludedBytes: Int64 = 0,
+        samples: [ExcludedSample] = [],
+        scannedFiles: Int = 0,
+        permissionErrors: Int = 0,
+        failedPaths: [String] = [],
+        isComplete: Bool = true,
+        truncatedReason: String? = nil
+    ) {
         self.includedFiles = includedFiles
         self.includedBytes = includedBytes
         self.excludedFiles = excludedFiles
         self.excludedBytes = excludedBytes
         self.samples = samples
+        self.scannedFiles = scannedFiles
+        self.permissionErrors = permissionErrors
+        self.failedPaths = failedPaths
+        self.isComplete = isComplete
+        self.truncatedReason = truncatedReason
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case includedFiles, includedBytes, excludedFiles, excludedBytes, samples
+        case scannedFiles, permissionErrors, failedPaths, isComplete, truncatedReason
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        includedFiles = try c.decodeIfPresent(Int.self, forKey: .includedFiles) ?? 0
+        includedBytes = try c.decodeIfPresent(Int64.self, forKey: .includedBytes) ?? 0
+        excludedFiles = try c.decodeIfPresent(Int.self, forKey: .excludedFiles) ?? 0
+        excludedBytes = try c.decodeIfPresent(Int64.self, forKey: .excludedBytes) ?? 0
+        samples = try c.decodeIfPresent([ExcludedSample].self, forKey: .samples) ?? []
+        scannedFiles = try c.decodeIfPresent(Int.self, forKey: .scannedFiles) ?? (includedFiles + excludedFiles)
+        permissionErrors = try c.decodeIfPresent(Int.self, forKey: .permissionErrors) ?? 0
+        failedPaths = try c.decodeIfPresent([String].self, forKey: .failedPaths) ?? []
+        isComplete = try c.decodeIfPresent(Bool.self, forKey: .isComplete) ?? true
+        truncatedReason = try c.decodeIfPresent(String.self, forKey: .truncatedReason)
     }
 }
 

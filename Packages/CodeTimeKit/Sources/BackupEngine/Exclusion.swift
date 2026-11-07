@@ -243,32 +243,58 @@ public enum ExclusionScanner {
         sampleLimit: Int = 40
     ) -> ExclusionPreview {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey, .nameKey]
+        var permissionErrors = 0
+        var failedPaths: [String] = []
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: keys,
             options: [.skipsPackageDescendants],
-            errorHandler: { _, _ in true }
+            errorHandler: { url, _ in
+                permissionErrors += 1
+                if failedPaths.count < 20 { failedPaths.append(url.path) }
+                // Keep walking: one unreadable subtree must not hide the rest of
+                // the project, but the preview is marked incomplete below.
+                return true
+            }
         ) else {
-            return ExclusionPreview()
+            return ExclusionPreview(
+                permissionErrors: 1,
+                failedPaths: [root.path],
+                isComplete: false,
+                truncatedReason: "无法读取项目目录"
+            )
         }
 
         let rootPath = root.standardizedFileURL.path
         var result = ExclusionPreview()
-        var filesSeen = 0
+        var scannedFiles = 0
         var samples: [ExcludedSample] = []
+        var truncatedReason: String?
 
         while let object = enumerator.nextObject() {
-            if filesSeen >= maxFiles { break }
+            if scannedFiles >= maxFiles {
+                truncatedReason = "已扫描 \(CodeTimeFormat.count(maxFiles)) 项，预览不完整"
+                break
+            }
             guard let url = object as? URL else { continue }
-            let values = try? url.resourceValues(forKeys: Set(keys))
-            let isDirectory = values?.isDirectory ?? false
-            let isSymlink = values?.isSymbolicLink ?? false
-            let size = Int64(values?.fileSize ?? 0)
+            scannedFiles += 1
+            let values: URLResourceValues
+            do {
+                values = try url.resourceValues(forKeys: Set(keys))
+            } catch {
+                permissionErrors += 1
+                if failedPaths.count < 20 { failedPaths.append(url.path) }
+                continue
+            }
+            let isDirectory = values.isDirectory ?? false
+            let isSymlink = values.isSymbolicLink ?? false
+            let size = Int64(values.fileSize ?? 0)
 
             var path = url.standardizedFileURL.path
-            if path.hasPrefix(rootPath) {
-                path = String(path.dropFirst(rootPath.count))
-                if path.hasPrefix("/") { path.removeFirst() }
+            if path == rootPath {
+                path = ""
+            } else if path.hasPrefix(rootPath + "/") {
+                path = String(path.dropFirst(rootPath.count + 1))
             }
             let relative = path
 
@@ -285,16 +311,19 @@ public enum ExclusionScanner {
                 continue
             }
 
-            if isDirectory {
+            if isDirectory || isSymlink {
                 continue
             }
-            filesSeen += 1
             result.includedFiles += 1
             result.includedBytes += size
-            if isSymlink { continue }
         }
 
         result.samples = samples
+        result.scannedFiles = scannedFiles
+        result.permissionErrors = permissionErrors
+        result.failedPaths = failedPaths
+        result.isComplete = permissionErrors == 0 && truncatedReason == nil
+        result.truncatedReason = truncatedReason
         return result
     }
 }

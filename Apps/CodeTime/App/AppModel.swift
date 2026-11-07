@@ -124,7 +124,7 @@ final class AppModel: ObservableObject {
     @Published var restoreJobs: [RestoreJob] = []
     @Published var cloudSummary: CloudStorageSummary?
     @Published var diagnostics = DiagnosticsReport()
-    @Published var repositoryBytes: Int64 = 0
+    @Published var repositoryBytes: Int64?
 
     @Published var selectedSection: SidebarSection = .dashboard
     @Published var selectedProjectID: UUID?
@@ -150,11 +150,18 @@ final class AppModel: ObservableObject {
     @Published var showRecoveryKey = false
     @Published var showCloudRecovery = false
     @Published var recoveryKeyText: String = ""
+    @Published var recoveryCandidates: [RecoveryCandidate] = []
+    @Published var recoveryRestoreJob: CloudRestoreJob?
+    @Published var recoveryImportNotice: String?
     @Published var schedulerActive = false
+    @Published var snapshotLoadError: String?
+    @Published var searchNotice: String?
+    @Published var migrationNotice: String?
 
     @Published private(set) var service: CodeTimeService?
     private var scheduler: BackupScheduler?
     private var started = false
+    private var persistedSettings: AppSettings = .default
     private var refreshTask: Task<Void, Never>?
     private var saveSettingsTask: Task<Void, Never>?
     private var refreshDebounceTask: Task<Void, Never>?
@@ -217,11 +224,26 @@ final class AppModel: ObservableObject {
         started = true
         phase = .loading
         do {
+            let paths = try AppPaths.standard()
+            try paths.createDirectories()
+            if DataMigrator.hasPendingRequest(target: paths.root) {
+                do {
+                    let result = try await Task.detached(priority: .userInitiated) {
+                        try DataMigrator.performPending(target: paths.root)
+                    }.value
+                    if let result {
+                        migrationNotice = "已从 Beta 数据目录迁移 \(result.fileCount) 个文件（\(CodeTimeFormat.bytes(result.totalBytes))）。旧目录未删除。"
+                    }
+                } catch {
+                    throw CodeTimeError.migrationFailed(error.localizedDescription)
+                }
+            }
             let service = try CodeTimeService()
             self.service = service
             let report = try await service.bootstrap()
             bootstrap = report
             settings = report.settings
+            persistedSettings = report.settings
             if let newKey = report.recoveryKeyText {
                 recoveryKeyText = newKey
             } else {
@@ -233,16 +255,44 @@ final class AppModel: ObservableObject {
             phase = .ready
             await startScheduler()
             if settings.launchAgentEnabled {
-                try? LaunchAgentManager.setEnabled(true)
+                do {
+                    try LaunchAgentManager.setEnabled(true)
+                } catch {
+                    showToast("后台代理启动失败：\(error.localizedDescription)", style: .warning)
+                }
             }
             installObservers()
             startRefreshLoop()
-            Task {
-                await service.runPeriodicVerificationIfNeeded()
-                await service.cleanupCloudIfNeeded()
+            if let migrationNotice {
+                showToast(migrationNotice, style: .success)
             }
         } catch {
             phase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Schedules a Beta data import for the next launch. Refuses when the current
+    /// install already has projects, because merging two databases is not safe.
+    func requestLegacyMigration(source: URL) async {
+        guard let service else { return }
+        do {
+            let plan = try DataMigrator.inspect(source: source, target: service.paths.root)
+            guard plan.hasDatabase || plan.repositoryCount > 0 else {
+                showToast("所选目录没有 CodeTime 数据", style: .warning)
+                return
+            }
+            if !projects.isEmpty {
+                showToast("当前已有项目，不能合并另一份数据库；请在全新安装上执行迁移", style: .warning)
+                return
+            }
+            if !plan.conflicts.isEmpty {
+                showToast(plan.conflicts.joined(separator: "；"), style: .warning)
+                return
+            }
+            try DataMigrator.requestMigration(source: source, target: service.paths.root)
+            showToast("已记录迁移请求：请退出并重新打开 CodeTime 完成导入", style: .success)
+        } catch {
+            showToast("无法准备迁移：\(error.localizedDescription)", style: .error)
         }
     }
 
@@ -256,17 +306,52 @@ final class AppModel: ObservableObject {
         let scheduler = BackupScheduler(service: service, lockPath: service.paths.schedulerLock.path)
         self.scheduler = scheduler
         await scheduler.start(checkImmediately: settings.autoBackupOnLaunch)
-        schedulerActive = true
+        schedulerActive = settings.scheduler.allowsScheduling
     }
 
     func setSchedulerPaused(_ paused: Bool) async {
+        // Persist the pause: the LaunchAgent reads the same row, so pausing in the
+        // window must stop background snapshots too.
+        settings.scheduler.globallyPaused = paused
+        await persistSettings()
+        schedulerActive = settings.scheduler.allowsScheduling
         guard let scheduler else { return }
-        if paused {
+        if paused || !settings.scheduler.allowsScheduling {
             await scheduler.stop()
-            schedulerActive = false
         } else {
             await scheduler.start(checkImmediately: true)
-            schedulerActive = true
+        }
+    }
+
+    func setLocalMirror(_ url: URL?) async {
+        guard let service else { return }
+        do {
+            let saved = try await service.setLocalMirror(url)
+            settings = saved
+            persistedSettings = saved
+            schedulerActive = saved.scheduler.allowsScheduling
+        } catch {
+            showToast("本地镜像设置失败：\(error.localizedDescription)", style: .error)
+        }
+    }
+
+    func setLaunchAgent(enabled: Bool) async {
+        settings.launchAgentEnabled = enabled
+        await persistSettings()
+        do {
+            try LaunchAgentManager.setEnabled(enabled)
+            switch LaunchAgentManager.state {
+            case .enabled:
+                showToast("后台代理已启用", style: .success)
+            case .requiresApproval:
+                showToast("后台代理需要在“系统设置 › 通用 › 登录项”中允许", style: .warning)
+            case .notFound, .notRegistered, .unknown:
+                showToast(enabled ? "后台代理尚未注册，请重新打开 CodeTime" : "后台代理已关闭", style: enabled ? .warning : .success)
+            }
+        } catch {
+            settings.launchAgentEnabled = LaunchAgentManager.state == .enabled
+            await persistSettings()
+            showToast("后台代理设置失败：\(error.localizedDescription)", style: .error)
         }
     }
 
@@ -345,8 +430,18 @@ final class AppModel: ObservableObject {
             activity = dashboard.activity
             cloudSummary = dashboard.cloudSummary
             diagnostics = dashboard.diagnostics
-            settings = dashboard.settings
-            restoreJobs = (try? await service.restoreJobs(limit: 80)) ?? restoreJobs
+            // Never clobber edits the user has not saved yet; the debounced save
+            // merges them onto the latest revision once it lands.
+            let hadLocalEdits = settings != persistedSettings
+            persistedSettings = dashboard.settings
+            if !hadLocalEdits {
+                settings = dashboard.settings
+            }
+            do {
+                restoreJobs = try await service.restoreJobs(limit: 80)
+            } catch {
+                if !silent { showToast("读取恢复任务失败：\(error.localizedDescription)", style: .warning) }
+            }
             repositoryBytes = await service.repositoryUsage()
             if selectedProjectID == nil, let first = projects.first {
                 selectedProjectID = first.id
@@ -409,8 +504,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func policy(for projectID: UUID) async -> BackupPolicy? {
-        try? await service?.policy(projectID: projectID)
+    func policy(for projectID: UUID) async throws -> BackupPolicy? {
+        try await service?.policy(projectID: projectID)
     }
 
     func saveProject(_ project: Project, policy: BackupPolicy) async {
@@ -494,10 +589,11 @@ final class AppModel: ObservableObject {
 
     func refreshSnapshots(selectNewest: Bool = false) async {
         guard let projectID = selectedProjectID else { return }
-        let fresh = ((try? await service?.refreshSnapshots(projectID: projectID)) ?? [])
-            .sorted { $0.createdAt > $1.createdAt }
+        let result = await service?.snapshotQuery(projectID: projectID) ?? .success([])
         // Discard results for a project the user already switched away from.
         guard selectedProjectID == projectID else { return }
+        snapshotLoadError = result.failureMessage
+        let fresh = result.snapshotsOrEmpty.sorted { $0.createdAt > $1.createdAt }
         snapshots = fresh
         if selectNewest || selectedSnapshotID == nil || !fresh.contains(where: { $0.id == selectedSnapshotID }) {
             selectedSnapshotID = fresh.first?.id
@@ -541,17 +637,32 @@ final class AppModel: ObservableObject {
         guard let snapshotID = selectedSnapshotID,
               !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
             globalSearchResults = nil
+            searchNotice = nil
             return
         }
         isSearching = true
         defer { isSearching = false }
         do {
-            globalSearchResults = try await service?.searchFiles(
+            let result = try await service?.searchFiles(
                 snapshotID: snapshotID,
                 query: searchText.trimmingCharacters(in: .whitespaces)
             )
+            globalSearchResults = result?.entries ?? []
+            if let result {
+                var notes: [String] = []
+                if result.truncated {
+                    notes.append(result.truncationReason ?? "结果数量已达上限，仅显示部分匹配")
+                }
+                if !result.failedDirectories.isEmpty {
+                    notes.append("\(result.failedDirectories.count) 个目录无法读取")
+                }
+                searchNotice = notes.isEmpty ? nil : notes.joined(separator: "；")
+            } else {
+                searchNotice = nil
+            }
         } catch {
             globalSearchResults = []
+            searchNotice = nil
             showToast(error.localizedDescription, style: .error)
         }
     }
@@ -559,6 +670,7 @@ final class AppModel: ObservableObject {
     func clearSearch() {
         searchText = ""
         globalSearchResults = nil
+        searchNotice = nil
     }
 
     func goUp() async {
@@ -619,31 +731,50 @@ final class AppModel: ObservableObject {
         diffContext = DiffContext(projectID: projectID, from: older, to: current)
     }
 
-    func snapshotDiff(_ context: DiffContext) async -> SnapshotDiff {
-        (try? await service?.diff(projectID: context.projectID, from: context.from.id, to: context.to.id)) ?? SnapshotDiff()
+    func snapshotDiff(_ context: DiffContext) async throws -> SnapshotDiff {
+        guard let service else { throw CodeTimeError.repositoryUnavailable("服务尚未就绪") }
+        return try await service.diff(projectID: context.projectID, from: context.from.id, to: context.to.id)
     }
 
     func fileDiff(context: DiffContext, path: String) async -> FileDiffResult {
-        do {
-            let fromData = try? await service?.readFile(snapshotID: context.from.id, path: path, maxBytes: 4 * 1024 * 1024)
-            let toData = try? await service?.readFile(snapshotID: context.to.id, path: path, maxBytes: 4 * 1024 * 1024)
-            let fromText = fromData.flatMap { String(data: $0, encoding: .utf8) }
-            let toText = toData.flatMap { String(data: $0, encoding: .utf8) }
-            guard fromText != nil || toText != nil else {
-                return FileDiffResult(path: path, state: .message("二进制文件或无法解码的文本"), added: 0, removed: 0)
-            }
-            let old = fromText ?? ""
-            let new = toText ?? ""
-            if old.components(separatedBy: .newlines).count > 1500 || new.components(separatedBy: .newlines).count > 1500 {
-                return FileDiffResult(path: path, state: .message("文件超过 1500 行，无法在应用内并排比较"), added: 0, removed: 0)
-            }
-            let rows = LineDiff.rows(from: old, to: new)
-            let added = rows.filter { $0.right?.kind == .added }.count
-            let removed = rows.filter { $0.left?.kind == .removed }.count
-            return FileDiffResult(path: path, state: .text(rows), added: added, removed: removed)
-        } catch {
-            return FileDiffResult(path: path, state: .message(error.localizedDescription), added: 0, removed: 0)
+        guard let service else {
+            return FileDiffResult(path: path, state: .message("服务尚未就绪"), added: 0, removed: 0)
         }
+        var fromData: Data?
+        var toData: Data?
+        var readErrors: [String] = []
+        do {
+            fromData = try await service.readFile(snapshotID: context.from.id, path: path, maxBytes: 4 * 1024 * 1024)
+        } catch {
+            readErrors.append("旧版本：\(error.localizedDescription)")
+        }
+        do {
+            toData = try await service.readFile(snapshotID: context.to.id, path: path, maxBytes: 4 * 1024 * 1024)
+        } catch {
+            readErrors.append("新版本：\(error.localizedDescription)")
+        }
+        let fromText = fromData.flatMap { String(data: $0, encoding: .utf8) }
+        let toText = toData.flatMap { String(data: $0, encoding: .utf8) }
+        if fromText == nil, toText == nil {
+            return FileDiffResult(
+                path: path,
+                state: .message(readErrors.isEmpty ? "二进制文件或无法解码的文本" : readErrors.joined(separator: "；")),
+                added: 0,
+                removed: 0
+            )
+        }
+        if (fromData?.count ?? 0) >= 4 * 1024 * 1024 || (toData?.count ?? 0) >= 4 * 1024 * 1024 {
+            return FileDiffResult(path: path, state: .message("文件超过 4 MB，无法在应用内完整比较"), added: 0, removed: 0)
+        }
+        let old = fromText ?? ""
+        let new = toText ?? ""
+        if old.components(separatedBy: .newlines).count > 1500 || new.components(separatedBy: .newlines).count > 1500 {
+            return FileDiffResult(path: path, state: .message("文件超过 1500 行，无法在应用内并排比较"), added: 0, removed: 0)
+        }
+        let rows = LineDiff.rows(from: old, to: new)
+        let added = rows.filter { $0.right?.kind == .added }.count
+        let removed = rows.filter { $0.left?.kind == .removed }.count
+        return FileDiffResult(path: path, state: .text(rows), added: added, removed: removed)
     }
 
     // MARK: - Restore
@@ -758,18 +889,59 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func recoverFromCloud(storageRoot: URL, recoveryKey: String) async throws -> Int {
+    func loadRecoveryCandidates(storageRoot: URL, recoveryKey: String) async throws -> [RecoveryCandidate] {
         guard let service else { throw CodeTimeError.repositoryUnavailable("服务尚未就绪") }
-        let result = try await service.recoverFromCloud(storageRoot: storageRoot, recoveryKeyText: recoveryKey)
+        let key = recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { throw CodeTimeError.unsupported("请先输入恢复密钥") }
+        recoveryImportNotice = nil
+        let candidates = try await service.cloudRecoveryCandidates(storageRoot: storageRoot, recoveryKeyText: key)
+        recoveryCandidates = candidates
+        return candidates
+    }
+
+    /// Restores the chosen candidate. A previous failed attempt is resumed
+    /// automatically by the service (verified objects are never re-downloaded).
+    func recoverFromCloud(candidate: RecoveryCandidate, storageRoot: URL, recoveryKey: String) async throws -> Int {
+        guard let service else { throw CodeTimeError.repositoryUnavailable("服务尚未就绪") }
+        recoveryImportNotice = nil
+        recoveryRestoreJob = nil
+        let result = try await service.recoverFromCloud(
+            candidate: candidate,
+            storageRoot: storageRoot,
+            recoveryKeyText: recoveryKey,
+            progress: { [weak self] job in
+                Task { @MainActor [weak self] in
+                    self?.recoveryRestoreJob = job
+                }
+            }
+        )
+        recoveryRestoreJob = nil
+
         var imported = 0
+        var failures: [String] = []
         for path in result.sourcePaths {
-            if (try? await service.addRecoveredProject(sourcePath: path)) != nil {
+            do {
+                _ = try await service.addRecoveredProject(sourcePath: path)
                 imported += 1
+            } catch {
+                failures.append("\(path)：\(error.localizedDescription)")
             }
         }
+        if !failures.isEmpty {
+            recoveryImportNotice = "有 \(failures.count) 个历史项目未能自动登记："
+                + failures.joined(separator: "\n")
+        }
         await refreshAll(silent: true)
-        showToast("云端仓库恢复完成，已登记 \(imported) 个项目；路径缺失的项目仍可浏览与整项目恢复", style: .success)
+        showToast(
+            "云端仓库恢复完成，已登记 \(imported) 个项目；路径缺失的项目仍可浏览与整项目恢复",
+            style: failures.isEmpty ? .success : .warning
+        )
         return imported
+    }
+
+    func latestRecoveryRestoreJob() async throws -> CloudRestoreJob? {
+        guard let service else { return nil }
+        return try await service.latestCloudRestoreJob()
     }
 
     // MARK: - Settings
@@ -778,10 +950,51 @@ final class AppModel: ObservableObject {
         saveSettingsTask?.cancel()
         saveSettingsTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled, let self, let service = self.service else { return }
-            try? await service.saveSettings(self.settings)
+            guard !Task.isCancelled, let self else { return }
+            await self.persistSettings()
             await self.refreshAll(silent: true)
         }
+    }
+
+    /// Saves the local settings. If another process bumped `configRevision` first,
+    /// the user's changed fields are re-applied on top of the latest revision
+    /// instead of being silently discarded or overwriting the other change.
+    private func persistSettings() async {
+        guard let service else { return }
+        do {
+            let saved = try await service.saveSettings(settings)
+            settings = saved
+            persistedSettings = saved
+        } catch {
+            do {
+                let latest = try await service.currentSettings()
+                let merged = try mergeSettings(local: settings, base: persistedSettings, latest: latest)
+                let saved = try await service.saveSettings(merged)
+                settings = saved
+                persistedSettings = saved
+            } catch {
+                showToast("设置保存失败：\(error.localizedDescription)", style: .error)
+            }
+        }
+    }
+
+    private func mergeSettings(local: AppSettings, base: AppSettings, latest: AppSettings) throws -> AppSettings {
+        let encoder = JSONEncoder()
+        guard let baseObject = try JSONSerialization.jsonObject(with: encoder.encode(base)) as? [String: Any],
+              let localObject = try JSONSerialization.jsonObject(with: encoder.encode(local)) as? [String: Any],
+              var latestObject = try JSONSerialization.jsonObject(with: encoder.encode(latest)) as? [String: Any] else {
+            return latest
+        }
+        for (key, localValue) in localObject where !jsonEqual(baseObject[key], localValue) {
+            latestObject[key] = localValue
+        }
+        let data = try JSONSerialization.data(withJSONObject: latestObject)
+        return try JSONDecoder().decode(AppSettings.self, from: data)
+    }
+
+    private func jsonEqual(_ lhs: Any?, _ rhs: Any) -> Bool {
+        guard let lhs, let rhsObject = rhs as? NSObject else { return false }
+        return (lhs as? NSObject)?.isEqual(rhsObject) ?? false
     }
 
     func completeOnboarding() async {
@@ -811,15 +1024,6 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(recoveryKeyText, forType: .string)
         showToast("恢复密钥已复制，请离线保存", style: .success)
-    }
-
-    func setLaunchAgent(enabled: Bool) {
-        do {
-            try LaunchAgentManager.setEnabled(enabled)
-            showToast(enabled ? "后台代理已启用" : "后台代理已关闭", style: .success)
-        } catch {
-            showToast("后台代理设置失败：\(error.localizedDescription)", style: .warning)
-        }
     }
 
     // MARK: - Toast

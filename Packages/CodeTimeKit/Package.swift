@@ -36,7 +36,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodeTimeKitTests",
-            dependencies: ["CodeTimeCore", "SharedModels", "Persistence", "CodeTimeSecurity", "BackupEngine", "CloudMirrorStore"]
+            dependencies: ["CodeTimeCore", "SharedModels", "Persistence", "CodeTimeSecurity", "BackupEngine", "CloudMirrorStore", "CSQLite"]
         ),
     ],
     swiftLanguageModes: [.v5]

@@ -115,7 +115,7 @@ struct HealthBanner: View {
     @EnvironmentObject var model: AppModel
 
     private var hasError: Bool {
-        model.projects.contains { $0.status == .error }
+        model.projects.contains { $0.status == .failed }
     }
 
     private var hasWarning: Bool {
@@ -134,7 +134,7 @@ struct HealthBanner: View {
             return "添加代码目录后，CodeTime 会按计划自动生成加密快照。"
         }
         if hasError {
-            let names = model.projects.filter { $0.status == .error }.map(\.name).joined(separator: "、")
+            let names = model.projects.filter { $0.status == .failed }.map(\.name).joined(separator: "、")
             return "\(names) 最近一次备份失败，请查看活动记录。"
         }
         if hasWarning {

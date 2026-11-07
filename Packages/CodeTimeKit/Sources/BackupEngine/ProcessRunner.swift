@@ -12,9 +12,32 @@ public struct CommandResult: Sendable {
     public var stdout: Data
     public var stderr: Data
     public var duration: TimeInterval
+    /// True when the capture buffer hit its cap; callers must not treat partial
+    /// output as a complete JSON document.
+    public var stdoutTruncated: Bool
+    public var stderrTruncated: Bool
+    public var terminationSignal: Int32?
 
     public var stdoutText: String { String(data: stdout, encoding: .utf8) ?? "" }
     public var stderrText: String { String(data: stderr, encoding: .utf8) ?? "" }
+
+    public init(
+        status: Int32,
+        stdout: Data,
+        stderr: Data,
+        duration: TimeInterval,
+        stdoutTruncated: Bool = false,
+        stderrTruncated: Bool = false,
+        terminationSignal: Int32? = nil
+    ) {
+        self.status = status
+        self.stdout = stdout
+        self.stderr = stderr
+        self.duration = duration
+        self.stdoutTruncated = stdoutTruncated
+        self.stderrTruncated = stderrTruncated
+        self.terminationSignal = terminationSignal
+    }
 }
 
 public enum KopiaBinary {
@@ -55,25 +78,60 @@ public enum KopiaBinary {
     }
 }
 
+/// Tracks the spawned process group so cancellation can never target a recycled
+/// PID: the start time is captured at spawn and re-checked before any kill.
 private final class PIDBox: @unchecked Sendable {
     private let lock = NSLock()
     private var pid: pid_t = -1
+    private var startTime: Double = 0
     private var cancelled = false
 
     func set(_ value: pid_t) {
         lock.lock()
         pid = value
+        startTime = ProcessIdentity.processStartTime(value)
         let shouldKill = cancelled
         lock.unlock()
-        if shouldKill { Darwin.kill(value, SIGKILL) }
+        if shouldKill { Self.signalGroup(value, startTime: startTime, sig: SIGTERM) }
+    }
+
+    /// Called only after `waitpid` has reaped the child. Any later cancel is a no-op,
+    /// which removes the "kill a reused PID" window.
+    func clear(_ value: pid_t) {
+        lock.lock()
+        if pid == value {
+            pid = -1
+            startTime = 0
+        }
+        lock.unlock()
     }
 
     func cancel() {
         lock.lock()
         cancelled = true
         let target = pid
+        let start = startTime
         lock.unlock()
-        if target > 0 { Darwin.kill(target, SIGKILL) }
+        guard target > 0, Self.isSameProcess(target, start: start) else { return }
+        Self.signalGroup(target, startTime: start, sig: SIGTERM)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+            guard Self.isSameProcess(target, start: start) else { return }
+            Self.signalGroup(target, startTime: start, sig: SIGKILL)
+        }
+    }
+
+    private static func isSameProcess(_ pid: pid_t, start: Double) -> Bool {
+        guard start > 0 else { return false }
+        return ProcessIdentity.isAlive(pid, startTime: start)
+    }
+
+    private static func signalGroup(_ pid: pid_t, startTime: Double, sig: Int32) {
+        guard isSameProcess(pid, start: startTime) else { return }
+        // The child is a process-group leader; negative PID signals the whole tree,
+        // including helpers spawned by kopia.
+        if kill(-pid, sig) != 0 {
+            _ = kill(pid, sig)
+        }
     }
 }
 
@@ -81,7 +139,11 @@ private final class PIDBox: @unchecked Sendable {
 /// observed to hang on macOS when many short-lived children are spawned, so the
 /// engine uses posix_spawn + poll + waitpid directly.
 public final class ProcessRunner: @unchecked Sendable {
-    public init() {}
+    public var captureLimitPerStream: Int
+
+    public init(captureLimitPerStream: Int = 16 * 1024 * 1024) {
+        self.captureLimitPerStream = max(64 * 1024, captureLimitPerStream)
+    }
 
     public func run(
         executable: URL,
@@ -90,6 +152,7 @@ public final class ProcessRunner: @unchecked Sendable {
         currentDirectory: URL? = nil,
         timeout: TimeInterval = 300
     ) async throws -> CommandResult {
+        guard timeout > 0 else { throw CodeTimeError.commandFailed(command: executable.lastPathComponent, status: -1, message: "超时必须大于 0") }
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
         environment["KOPIA_CHECK_FOR_UPDATES"] = "false"
@@ -98,6 +161,7 @@ public final class ProcessRunner: @unchecked Sendable {
         }
 
         let box = PIDBox()
+        let limit = captureLimitPerStream
         let result = try await withTaskCancellationHandler {
             try await Task.detached(priority: .userInitiated) {
                 try Self.runSync(
@@ -106,6 +170,7 @@ public final class ProcessRunner: @unchecked Sendable {
                     environment: environment,
                     currentDirectory: currentDirectory,
                     timeout: timeout,
+                    captureLimit: limit,
                     box: box
                 )
             }.value
@@ -116,12 +181,33 @@ public final class ProcessRunner: @unchecked Sendable {
         return result
     }
 
-    private static func decodeExitStatus(_ waitStatus: Int32) -> Int32 {
+    /// Darwin's WIFEXITED/WTERMSIG are function-like C macros and are not exposed to
+    /// Swift, so the wait status is decoded with the stable POSIX bit layout.
+    private static func decodeExitStatus(_ waitStatus: Int32) -> (status: Int32, signal: Int32?) {
         let signal = waitStatus & 0x7F
         if signal == 0 {
-            return (waitStatus >> 8) & 0xFF
+            return ((waitStatus >> 8) & 0xFF, nil)
         }
-        return 128 + signal
+        if signal == 0x7F {
+            // Stopped child (only possible without WUNTRACED on some platforms).
+            return (-1, nil)
+        }
+        return (128 + signal, signal)
+    }
+
+    /// EINTR-safe blocking wait. A signal delivered while waiting must never be
+    /// mistaken for a missing child.
+    private static func waitForExit(_ pid: pid_t, blocking: Bool) -> Int32? {
+        var status: Int32 = 0
+        while true {
+            let result = waitpid(pid, &status, blocking ? 0 : WNOHANG)
+            if result == pid { return status }
+            if result == 0 && !blocking { return nil }
+            if result < 0 {
+                if errno == EINTR { continue }
+                return nil
+            }
+        }
     }
 
     private static func runSync(
@@ -130,6 +216,7 @@ public final class ProcessRunner: @unchecked Sendable {
         environment: [String: String],
         currentDirectory: URL?,
         timeout: TimeInterval,
+        captureLimit: Int,
         box: PIDBox
     ) throws -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
@@ -138,28 +225,62 @@ public final class ProcessRunner: @unchecked Sendable {
 
         var stdoutPipe: [Int32] = [-1, -1]
         var stderrPipe: [Int32] = [-1, -1]
-        guard pipe(&stdoutPipe) == 0, pipe(&stderrPipe) == 0 else {
+        guard pipe(&stdoutPipe) == 0 else {
             throw CodeTimeError.repositoryUnavailable("无法创建命令输出管道")
+        }
+        guard pipe(&stderrPipe) == 0 else {
+            close(stdoutPipe[0]); close(stdoutPipe[1])
+            throw CodeTimeError.repositoryUnavailable("无法创建命令错误管道")
         }
         defer {
             for fd in stdoutPipe + stderrPipe where fd >= 0 { close(fd) }
         }
 
-        let devNull = open("/dev/null", O_RDONLY)
         var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
+        guard posix_spawn_file_actions_init(&actions) == 0 else {
+            throw CodeTimeError.repositoryUnavailable("无法初始化进程文件操作")
+        }
         defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO)
-        posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO)
+
+        // Every file action is checked: an unchecked failure would leave the child
+        // writing to the parent's terminal or inheriting unrelated descriptors.
+        func addAction(_ result: Int32) throws {
+            guard result == 0 else {
+                throw CodeTimeError.repositoryUnavailable("无法配置子进程文件描述符（\(result)）")
+            }
+        }
+        try addAction(posix_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO))
+        try addAction(posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO))
+        try addAction(posix_spawn_file_actions_addclose(&actions, stdoutPipe[0]))
+        try addAction(posix_spawn_file_actions_addclose(&actions, stderrPipe[0]))
+        try addAction(posix_spawn_file_actions_addclose(&actions, stdoutPipe[1]))
+        try addAction(posix_spawn_file_actions_addclose(&actions, stderrPipe[1]))
+
+        let devNull = open("/dev/null", O_RDONLY)
         if devNull >= 0 {
-            posix_spawn_file_actions_adddup2(&actions, devNull, STDIN_FILENO)
-            if devNull > 2 { posix_spawn_file_actions_addclose(&actions, devNull) }
+            try addAction(posix_spawn_file_actions_adddup2(&actions, devNull, STDIN_FILENO))
+            if devNull > 2 {
+                try addAction(posix_spawn_file_actions_addclose(&actions, devNull))
+            }
         }
-        posix_spawn_file_actions_addclose(&actions, stdoutPipe[0])
-        posix_spawn_file_actions_addclose(&actions, stderrPipe[0])
         if let currentDirectory {
-            posix_spawn_file_actions_addchdir_np(&actions, currentDirectory.path)
+            try addAction(posix_spawn_file_actions_addchdir_np(&actions, currentDirectory.path))
         }
+
+        var attributes: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attributes) == 0 else {
+            if devNull >= 0 { close(devNull) }
+            throw CodeTimeError.repositoryUnavailable("无法初始化进程属性")
+        }
+        defer { posix_spawnattr_destroy(&attributes) }
+        // Own process group: timeout/cancel can terminate helpers too, and the
+        // parent's group is never signalled.
+        var flags = Int16(POSIX_SPAWN_SETPGROUP)
+        if POSIX_SPAWN_CLOEXEC_DEFAULT > 0 {
+            flags |= Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)
+        }
+        posix_spawnattr_setflags(&attributes, flags)
+        posix_spawnattr_setpgroup(&attributes, 0)
 
         var argumentPointers: [UnsafeMutablePointer<CChar>?] = ([executable.path] + arguments).map { strdup($0) }
         argumentPointers.append(nil)
@@ -170,7 +291,7 @@ public final class ProcessRunner: @unchecked Sendable {
         defer { for pointer in environmentPointers where pointer != nil { free(pointer) } }
 
         var pid: pid_t = 0
-        let spawnResult = posix_spawn(&pid, executable.path, &actions, nil, argumentPointers, environmentPointers)
+        let spawnResult = posix_spawn(&pid, executable.path, &actions, &attributes, argumentPointers, environmentPointers)
         if devNull >= 0 { close(devNull) }
         guard spawnResult == 0 else {
             throw CodeTimeError.commandFailed(
@@ -190,20 +311,25 @@ public final class ProcessRunner: @unchecked Sendable {
         let deadline = startedAt.addingTimeInterval(timeout)
         var stdout = Data()
         var stderr = Data()
+        var stdoutTruncated = false
+        var stderrTruncated = false
         var stdoutOpen = true
         var stderrOpen = true
-        var childExited = false
-        var status: Int32 = 0
+        var exitStatus: Int32?
+        var terminationSignal: Int32?
         var exitSeenAt: Date?
 
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        let maxCapture = 32 * 1024 * 1024
 
         while true {
-            if Date() >= deadline {
-                Darwin.kill(pid, SIGKILL)
-                var waitStatus: Int32 = 0
-                waitpid(pid, &waitStatus, 0)
+            if Date() >= deadline, exitStatus == nil {
+                if kill(-pid, SIGKILL) != 0 { _ = kill(pid, SIGKILL) }
+                if let status = waitForExit(pid, blocking: true) {
+                    let decoded = decodeExitStatus(status)
+                    exitStatus = decoded.status
+                    terminationSignal = decoded.signal
+                    box.clear(pid)
+                }
                 throw CommandTimeoutError(seconds: timeout)
             }
 
@@ -212,6 +338,9 @@ public final class ProcessRunner: @unchecked Sendable {
                 pollfd(fd: stderrOpen ? stderrPipe[0] : -1, events: Int16(POLLIN | POLLHUP), revents: 0),
             ]
             let ready = poll(&descriptors, 2, 40)
+            if ready < 0 && errno != EINTR {
+                break
+            }
 
             if ready > 0 {
                 for (index, descriptor) in descriptors.enumerated() where descriptor.fd >= 0 {
@@ -223,9 +352,21 @@ public final class ProcessRunner: @unchecked Sendable {
                     if count > 0 {
                         let chunk = Data(buffer[0..<count])
                         if index == 0 {
-                            if stdout.count < maxCapture { stdout.append(chunk) }
+                            if stdout.count < captureLimit {
+                                let room = captureLimit - stdout.count
+                                stdout.append(chunk.prefix(room))
+                                if chunk.count > room { stdoutTruncated = true }
+                            } else {
+                                stdoutTruncated = true
+                            }
                         } else {
-                            if stderr.count < maxCapture { stderr.append(chunk) }
+                            if stderr.count < captureLimit {
+                                let room = captureLimit - stderr.count
+                                stderr.append(chunk.prefix(room))
+                                if chunk.count > room { stderrTruncated = true }
+                            } else {
+                                stderrTruncated = true
+                            }
                         }
                     } else if count == 0 {
                         close(fd)
@@ -239,46 +380,56 @@ public final class ProcessRunner: @unchecked Sendable {
                 }
             }
 
-            if !childExited {
-                var waitStatus: Int32 = 0
-                let waitResult = waitpid(pid, &waitStatus, WNOHANG)
-                if waitResult == pid {
-                    childExited = true
+            if exitStatus == nil {
+                if let status = waitForExit(pid, blocking: false) {
+                    let decoded = decodeExitStatus(status)
+                    exitStatus = decoded.status
+                    terminationSignal = decoded.signal
                     exitSeenAt = Date()
-                    status = Self.decodeExitStatus(waitStatus)
-                } else if waitResult < 0 {
-                    childExited = true
-                    status = -1
-                    exitSeenAt = Date()
+                    box.clear(pid)
                 }
             }
 
-            if childExited {
+            if exitStatus != nil {
                 if !stdoutOpen && !stderrOpen { break }
                 if let exitSeenAt, Date().timeIntervalSince(exitSeenAt) > 2 {
-                    if stdoutOpen { close(stdoutPipe[0]); stdoutOpen = false }
-                    if stderrOpen { close(stderrPipe[0]); stderrOpen = false }
+                    // A grandchild may hold the pipe open; the group was already
+                    // signalled, so stop waiting for EOF.
+                    if stdoutOpen { kill(-pid, SIGKILL); close(stdoutPipe[0]); stdoutOpen = false }
+                    if stderrOpen { kill(-pid, SIGKILL); close(stderrPipe[0]); stderrOpen = false }
                     break
                 }
             }
         }
 
-        if !childExited {
-            var waitStatus: Int32 = 0
-            waitpid(pid, &waitStatus, 0)
-            status = Self.decodeExitStatus(waitStatus)
+        if exitStatus == nil, let status = waitForExit(pid, blocking: true) {
+            let decoded = decodeExitStatus(status)
+            exitStatus = decoded.status
+            terminationSignal = decoded.signal
+            box.clear(pid)
         }
 
         return CommandResult(
-            status: status,
+            status: exitStatus ?? -1,
             stdout: stdout,
             stderr: stderr,
-            duration: Date().timeIntervalSince(startedAt)
+            duration: Date().timeIntervalSince(startedAt),
+            stdoutTruncated: stdoutTruncated,
+            stderrTruncated: stderrTruncated,
+            terminationSignal: terminationSignal
         )
     }
 }
 
+/// Cross-process advisory lock backed by `flock(2)`. The kernel releases the lock
+/// when the owning process exits, so a crashed writer cannot wedge the repository.
 public final class RepositoryLock: @unchecked Sendable {
+    public struct OwnerInfo: Sendable, Equatable {
+        public var pid: Int32
+        public var startTime: Double
+        public var acquiredAt: Date
+    }
+
     private let path: String
     private var descriptor: Int32 = -1
 
@@ -291,27 +442,44 @@ public final class RepositoryLock: @unchecked Sendable {
         while true {
             if tryAcquire() { return }
             if Date() >= deadline {
-                throw CodeTimeError.repositoryUnavailable("仓库正在被另一个备份任务使用")
+                let owner = currentOwner().map { " (持有者 PID \($0.pid))" } ?? ""
+                throw CodeTimeError.repositoryUnavailable("仓库正在被另一个备份任务使用\(owner)")
             }
+            if Task.isCancelled { throw CodeTimeError.cancelled }
             usleep(200_000)
         }
     }
 
     @discardableResult
     public func tryAcquire() -> Bool {
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let fd = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
         guard fd >= 0 else { return false }
         if flock(fd, LOCK_EX | LOCK_NB) == 0 {
             descriptor = fd
-            let pid = "\(getpid())\n"
+            let start = ProcessIdentity.processStartTime(getpid())
+            let line = "\(getpid()) \(start) \(Int(Date().timeIntervalSince1970))\n"
             _ = ftruncate(fd, 0)
-            _ = pid.withCString { pointer in
+            _ = line.withCString { pointer in
                 write(fd, pointer, strlen(pointer))
             }
+            _ = fsync(fd)
             return true
         }
         close(fd)
         return false
+    }
+
+    public func currentOwner() -> OwnerInfo? {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let parts = text.split(whereSeparator: \.isWhitespace).compactMap { Double($0) }
+        guard parts.count >= 3 else { return nil }
+        return OwnerInfo(
+            pid: Int32(parts[0]),
+            startTime: parts[1],
+            acquiredAt: Date(timeIntervalSince1970: parts[2])
+        )
     }
 
     public func release() {

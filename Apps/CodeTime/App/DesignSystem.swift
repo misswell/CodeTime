@@ -206,10 +206,13 @@ extension ProjectStatus {
         switch self {
         case .synced: return CT.success
         case .backingUp: return CT.accent
-        case .uploading: return CT.mint
+        case .publishing: return CT.mint
+        case .verifying: return CT.mint
         case .warning: return CT.warning
-        case .error: return CT.danger
-        case .paused: return .secondary
+        case .failed: return CT.danger
+        case .missing: return CT.danger
+        case .disabled: return .secondary
+        case .localOnly: return CT.accent
         case .idle: return .secondary
         }
     }
@@ -218,10 +221,13 @@ extension ProjectStatus {
         switch self {
         case .synced: return "checkmark.circle.fill"
         case .backingUp: return "arrow.triangle.2.circlepath"
-        case .uploading: return "icloud.and.arrow.up"
+        case .publishing: return "icloud.and.arrow.up"
+        case .verifying: return "checkmark.shield"
         case .warning: return "exclamationmark.triangle.fill"
-        case .error: return "xmark.octagon.fill"
-        case .paused: return "pause.circle"
+        case .failed: return "xmark.octagon.fill"
+        case .missing: return "questionmark.folder"
+        case .disabled: return "pause.circle"
+        case .localOnly: return "internaldrive"
         case .idle: return "clock"
         }
     }

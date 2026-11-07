@@ -334,8 +334,27 @@ struct CloudRecoverySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
     @State private var storageRoot: URL?
+    @State private var isScanning = false
+    @State private var hasScanned = false
+    @State private var selectedCandidateID: UUID?
     @State private var isRestoring = false
+    @State private var restoreAttempts = 0
     @State private var errorMessage: String?
+
+    private var selectedCandidate: RecoveryCandidate? {
+        model.recoveryCandidates.first { $0.id == selectedCandidateID }
+    }
+
+    private var canScan: Bool {
+        storageRoot != nil && !key.trimmingCharacters(in: .whitespaces).isEmpty && !isRestoring
+    }
+
+    private var canRestore: Bool {
+        guard let selectedCandidate, selectedCandidate.isRestorable, storageRoot != nil, !isRestoring else {
+            return false
+        }
+        return true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -350,6 +369,7 @@ struct CloudRecoverySheet: View {
                 Spacer()
                 Button("取消") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isRestoring)
             }
 
             CTCard {
@@ -368,6 +388,7 @@ struct CloudRecoverySheet: View {
                         Spacer()
                         Button("选择…") { chooseStorageRoot() }
                             .controlSize(.small)
+                            .disabled(isRestoring)
                     }
                     Text("该目录应包含 format.json 与 devices 文件夹。")
                         .font(.caption2)
@@ -383,10 +404,19 @@ struct CloudRecoverySheet: View {
                     TextField("CT1-XXXXX-XXXXX-…", text: $key)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
+                        .disabled(isRestoring)
                     Text("恢复后会从云端重建 Kopia 仓库，并自动发现历史项目路径。已有的本地备份数据不会被覆盖。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if hasScanned || isScanning {
+                candidateSection
+            }
+
+            if let job = model.recoveryRestoreJob {
+                restoreProgressCard(job)
             }
 
             if let errorMessage {
@@ -398,23 +428,187 @@ struct CloudRecoverySheet: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(CT.danger.opacity(0.08)))
             }
 
+            if let notice = model.recoveryImportNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(CT.warning)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(CT.warning.opacity(0.10)))
+            }
+
             HStack {
-                Spacer()
-                Button {
-                    restore()
-                } label: {
-                    if isRestoring {
-                        HStack { ProgressView().controlSize(.small); Text("正在恢复…") }
-                    } else {
-                        Text("开始恢复")
-                    }
+                if isScanning {
+                    ProgressView().controlSize(.small)
+                    Text("正在读取云端版本清单…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(storageRoot == nil || key.trimmingCharacters(in: .whitespaces).isEmpty || isRestoring)
+                Spacer()
+                if !hasScanned {
+                    Button("查找可恢复备份") { scan() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canScan)
+                } else {
+                    Button(restoreAttempts > 0 ? "重试恢复（续传已验证对象）" : "恢复所选备份") {
+                        restore()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canRestore)
+                }
             }
         }
         .padding(22)
-        .frame(width: 600)
+        .frame(width: 640)
+    }
+
+    @ViewBuilder
+    private var candidateSection: some View {
+        CTCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("可恢复备份")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if hasScanned {
+                        Button("重新查找") { scan() }
+                            .controlSize(.small)
+                            .disabled(isRestoring || !canScan)
+                    }
+                }
+
+                if isScanning {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在解密并校验各设备版本…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if model.recoveryCandidates.isEmpty {
+                    Text("没有找到能用此恢复密钥解密的备份。请确认目录与密钥来自同一账号。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(model.recoveryCandidates) { candidate in
+                                candidateRow(candidate)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+
+                Text("恢复始终选择一份完整、已校验的历史版本；不会混用不同设备的数据。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func candidateRow(_ candidate: RecoveryCandidate) -> some View {
+        let isSelected = candidate.id == selectedCandidateID
+        return Button {
+            selectedCandidateID = candidate.id
+            errorMessage = nil
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isSelected ? CT.accent : Color.secondary)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(candidate.deviceName.isEmpty ? "未命名设备" : candidate.deviceName)
+                            .font(.system(size: 12.5, weight: .semibold))
+                        if candidate.integrityOK {
+                            Label("完整性通过", systemImage: "checkmark.seal.fill")
+                                .font(.caption2)
+                                .foregroundStyle(CT.success)
+                        } else {
+                            Label("完整性未通过", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(CT.warning)
+                        }
+                    }
+                    Text(candidateSubtitle(candidate))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let blocked = candidate.blockedReason {
+                        Text(blocked)
+                            .font(.caption2)
+                            .foregroundStyle(CT.danger)
+                    }
+                }
+                Spacer()
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? CT.accent.opacity(0.10) : Color.primary.opacity(0.03))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isRestoring || !candidate.isRestorable)
+        .opacity(candidate.isRestorable ? 1 : 0.65)
+    }
+
+    private func candidateSubtitle(_ candidate: RecoveryCandidate) -> String {
+        var parts: [String] = []
+        if let date = candidate.latestBackupAt {
+            parts.append("最近备份 \(CodeTimeFormat.relative(date))")
+        } else {
+            parts.append("没有可读备份版本")
+        }
+        parts.append("可读版本 \(candidate.readableGenerationCount)/\(candidate.generationCount)")
+        parts.append(CodeTimeFormat.bytes(candidate.repositoryBytes))
+        if let version = candidate.kopiaVersion {
+            parts.append("Kopia \(version)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func restoreProgressCard(_ job: CloudRestoreJob) -> some View {
+        CTCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("恢复进度")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(job.state.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: job.progress)
+                HStack {
+                    Text("已恢复 \(CodeTimeFormat.count(job.completedFiles)) / \(CodeTimeFormat.count(job.totalFiles)) 个对象")
+                    Spacer()
+                    Text("\(CodeTimeFormat.bytes(job.completedBytes)) / \(CodeTimeFormat.bytes(job.totalBytes))")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                if let current = job.currentObject {
+                    Text(current)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if let lastError = job.lastError {
+                    Text(lastError)
+                        .font(.caption2)
+                        .foregroundStyle(CT.danger)
+                }
+                if job.retryCount > 0 {
+                    Text("已续传 \(job.retryCount) 次；已验证的对象不会重复下载。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
     }
 
     private func chooseStorageRoot() {
@@ -426,21 +620,55 @@ struct CloudRecoverySheet: View {
         panel.message = "选择 iCloud Drive 中的 CodeTime 文件夹"
         if panel.runModal() == .OK {
             storageRoot = panel.url
+            hasScanned = false
+            selectedCandidateID = nil
+            errorMessage = nil
+            model.recoveryCandidates = []
+        }
+    }
+
+    private func scan() {
+        guard let storageRoot else { return }
+        isScanning = true
+        hasScanned = true
+        errorMessage = nil
+        selectedCandidateID = nil
+        Task {
+            do {
+                let candidates = try await model.loadRecoveryCandidates(storageRoot: storageRoot, recoveryKey: key)
+                selectedCandidateID = candidates.first(where: { $0.isRestorable })?.id
+                isScanning = false
+                if candidates.isEmpty {
+                    errorMessage = "此目录中没有可用该恢复密钥解密的备份。"
+                }
+            } catch {
+                isScanning = false
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
     private func restore() {
-        guard let storageRoot else { return }
+        guard let storageRoot, let candidate = selectedCandidate, candidate.isRestorable else { return }
         isRestoring = true
+        restoreAttempts += 1
         errorMessage = nil
         Task {
             do {
-                _ = try await model.recoverFromCloud(storageRoot: storageRoot, recoveryKey: key)
+                _ = try await model.recoverFromCloud(candidate: candidate, storageRoot: storageRoot, recoveryKey: key)
                 isRestoring = false
                 dismiss()
             } catch {
                 isRestoring = false
-                errorMessage = error.localizedDescription
+                errorMessage = "恢复未完成：\(error.localizedDescription)。可点击“重试恢复”从已校验的对象继续，无需重新下载。"
+                // Refresh persisted counters so the retry card reflects what survived.
+                do {
+                    if let job = try await model.latestRecoveryRestoreJob() {
+                        model.recoveryRestoreJob = job
+                    }
+                } catch {
+                    errorMessage = (errorMessage ?? "") + "\n无法读取上次恢复进度：\(error.localizedDescription)"
+                }
             }
         }
     }

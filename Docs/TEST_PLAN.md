@@ -18,7 +18,9 @@
 KOPIA_PATH="$PWD/Resources/Kopia/kopia" swift test --package-path Packages/CodeTimeKit
 ```
 
-最近结果：**17 项通过，0 失败，约 14 秒**。
+v1.0.0 整改后最近结果：**64 项测试，0 失败，4 跳过（约 21 秒）**。跳过项为 CT-036/CT-037（规模测试）、CT-044（磁盘满注入）与真实 iCloud 双机验收，执行方式见 [`Engineering/REGRESSION_MATRIX.md`](Engineering/REGRESSION_MATRIX.md) 与 [`Engineering/KNOWN_LIMITATIONS.md`](Engineering/KNOWN_LIMITATIONS.md)。
+
+下表为 Beta 阶段的测试清单，v1.0.0 新增的 CT-001…CT-044 与 MIG-001/002 以矩阵文档为准。
 
 | # | 测试 | 覆盖点 |
 | --- | --- | --- |
@@ -58,7 +60,7 @@ Beta 前新增的回归断言还覆盖：快照列表最新在前、根锚定排
 
 | 项 | 方法 | 通过标准 |
 | --- | --- | --- |
-| 10,000 个小文件 | 生成 fixture，创建/上传/恢复 | 文件数与内容哈希完全一致 |
+| 10,000 个小文件（已有 CT-036/037 覆盖 10 万/100 万规模，需 `CODETIME_SCALE_TESTS=1`） | 生成 fixture，创建/上传/恢复 | 文件数与内容哈希完全一致 |
 | 备份时正在写文件 | 后台持续写文件并备份 | 快照标记不完整，不谎报成功 |
 | 100 次随机强制退出 | 在快照/上传/发布各阶段 kill -9 | 之前已验证的云端版本仍可恢复 |
 | 真实 iCloud 同步规模 | 数百 MB / 数千对象，多台 Mac | 状态最终一致，逐出后可重新下载 |

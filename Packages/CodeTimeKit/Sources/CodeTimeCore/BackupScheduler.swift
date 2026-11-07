@@ -50,19 +50,27 @@ public actor BackupScheduler {
     /// Runs one catch-up pass. Used by the agent's `--once` mode and after wake.
     public func runOnce(ignoreSchedule: Bool = false) async {
         guard acquireLeadership() else { return }
+        await processDueRetries()
         do {
             let projects: [Project]
             if ignoreSchedule {
-                projects = try await service.projects().filter(\.enabled)
+                projects = try await service.projects().filter(\.isSchedulable)
             } else {
                 projects = try await service.dueProjects()
             }
             for project in projects {
-                _ = try? await service.createSnapshot(projectID: project.id, trigger: .scheduled)
+                do {
+                    _ = try await service.createSnapshot(projectID: project.id, trigger: .scheduled)
+                } catch {
+                    await service.logger.warning(
+                        "调度备份失败（\(project.name)）：\(error.localizedDescription)"
+                    )
+                }
             }
         } catch {
-            // The service records failures in the activity log.
+            await service.logger.error("调度轮询失败：\(error.localizedDescription)")
         }
+        await runMaintenance()
     }
 
     public func handleWake() async {
@@ -81,19 +89,59 @@ public actor BackupScheduler {
             if settings.pauseOnBattery, ProcessInfo.processInfo.isLowPowerModeEnabled {
                 return
             }
+            guard settings.scheduler.allowsScheduling else { return }
+
+            await processDueRetries()
+
             let due = try await service.dueProjects()
-            guard !due.isEmpty else {
+            if due.isEmpty {
                 pendingWakeCatchUp = false
-                return
+            } else {
+                let trigger: BackupTrigger = pendingWakeCatchUp ? .wakeCatchUp : .scheduled
+                for project in due {
+                    do {
+                        _ = try await service.createSnapshot(projectID: project.id, trigger: trigger)
+                    } catch {
+                        await service.logger.warning(
+                            "调度备份失败（\(project.name)）：\(error.localizedDescription)"
+                        )
+                    }
+                }
+                pendingWakeCatchUp = false
             }
-            let trigger: BackupTrigger = pendingWakeCatchUp ? .wakeCatchUp : .scheduled
-            for project in due {
-                _ = try? await service.createSnapshot(projectID: project.id, trigger: trigger)
-            }
-            pendingWakeCatchUp = false
         } catch {
-            // Errors are stored by the service; scheduling continues.
+            await service.logger.error("调度轮询失败：\(error.localizedDescription)")
         }
+
+        await runMaintenance()
+    }
+
+    /// Retry jobs already had their backoff honored by `nextRetryAt`; the lease
+    /// inside `createSnapshot` still guarantees only one process runs each job.
+    private func processDueRetries() async {
+        do {
+            let jobs = try await service.dueRetryJobs().filter { $0.type == .backup }
+            for job in jobs {
+                do {
+                    _ = try await service.createSnapshot(
+                        projectID: job.projectID,
+                        trigger: job.trigger,
+                        retryJobID: job.id
+                    )
+                } catch {
+                    await service.logger.warning(
+                        "重试备份失败（\(job.projectID.uuidString)）：\(error.localizedDescription)"
+                    )
+                }
+            }
+        } catch {
+            await service.logger.error("读取待重试任务失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func runMaintenance() async {
+        await service.runMaintenanceIfDue(.verify)
+        await service.runMaintenanceIfDue(.cleanup)
     }
 
     private func acquireLeadership() -> Bool {

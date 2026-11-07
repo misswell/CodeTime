@@ -64,9 +64,11 @@ final class SQLiteStoreTests: XCTestCase {
         let job = BackupJob(projectID: project.id, type: .backup, state: .running)
         try await store.upsertJob(job)
         let recovered = try await store.recoverInterruptedJobs()
-        XCTAssertEqual(recovered, 1)
+        XCTAssertEqual(recovered.count, 1)
+        let interrupted = try await store.jobs(state: .interrupted)
+        XCTAssertEqual(interrupted.count, 1)
         let failed = try await store.jobs(state: .failed)
-        XCTAssertEqual(failed.count, 1)
+        XCTAssertEqual(failed.count, 0)
     }
 }
 
@@ -136,7 +138,8 @@ final class KopiaEngineIntegrationTests: XCTestCase {
         XCTAssertEqual(String(data: data, encoding: .utf8), "hello v1\n")
 
         let search = try await engine.searchFiles(snapshotID: first.id, query: "b.md")
-        XCTAssertEqual(search.first?.path, "sub/b.md")
+        XCTAssertFalse(search.truncated)
+        XCTAssertEqual(search.entries.first?.path, "sub/b.md")
 
         try "hello v2\n".write(to: source.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
         let second = try await engine.createSnapshot(project: project, policy: policy, trigger: .scheduled)
@@ -189,6 +192,7 @@ final class CloudMirrorStoreTests: XCTestCase {
     private var repoURL: URL!
     private var storageRoot: URL!
     private var repositoryID: UUID!
+    private var deviceID: UUID!
     private var store: CloudMirrorStore!
     private let masterKey = Data((0..<32).map { UInt8($0) })
 
@@ -197,6 +201,7 @@ final class CloudMirrorStoreTests: XCTestCase {
         repoURL = root.appendingPathComponent("repository")
         storageRoot = root.appendingPathComponent("iCloud/CodeTime")
         repositoryID = UUID()
+        deviceID = UUID()
         try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
         try writeRepoFile("kopia.repository", "format-block")
         try writeRepoFile("packs/p1", "content-one")
@@ -208,14 +213,15 @@ final class CloudMirrorStoreTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    private func makeStore() -> CloudMirrorStore {
+    private func makeStore(sweepGrace: TimeInterval = 3_600) -> CloudMirrorStore {
         CloudMirrorStore(configuration: .init(
             storageRoot: storageRoot,
             repositoryID: repositoryID,
             repositoryURL: repoURL,
-            deviceID: UUID(),
+            deviceID: deviceID,
             masterKeyProvider: TestMasterKey(value: masterKey),
-            passwordProvider: TestPassword(value: "repo-password")
+            passwordProvider: TestPassword(value: "repo-password"),
+            sweepGrace: sweepGrace
         ))
     }
 
@@ -316,7 +322,13 @@ final class CloudMirrorStoreTests: XCTestCase {
             generations.append(gen)
         }
 
-        let report = try await store.cleanup(repositoryId: repositoryID, gracePeriod: 0, minimumGenerations: 2)
+        // Retention assertions run with the synchronization grace disabled; the
+        // grace phase itself is covered by CT-002/CT-003.
+        let report = try await makeStore(sweepGrace: 0).cleanup(
+            repositoryId: repositoryID,
+            gracePeriod: 0,
+            minimumGenerations: 2
+        )
         XCTAssertEqual(report.retainedGenerations, 2)
         XCTAssertNil(report.skippedReason)
 
@@ -421,7 +433,7 @@ final class ServiceEndToEndTests: XCTestCase {
         let restored = try String(contentsOf: restoreTarget.appendingPathComponent("main.swift"), encoding: .utf8)
         XCTAssertEqual(restored, "func main() {}\n")
 
-        let originalPassword = try keychain.repositoryPassword()
+        _ = try keychain.repositoryPassword()
 
         // Simulate a fresh Mac: new application data directory, same recovery key.
         let freshPaths = AppPaths(root: root.appendingPathComponent("fresh"))

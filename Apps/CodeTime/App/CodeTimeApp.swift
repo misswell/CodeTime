@@ -243,7 +243,7 @@ struct SidebarStatusView: View {
     @EnvironmentObject var model: AppModel
 
     private var healthColor: Color {
-        if model.projects.contains(where: { $0.status == .error }) { return CT.danger }
+        if model.projects.contains(where: { $0.status == .failed }) { return CT.danger }
         if model.projects.contains(where: { $0.status == .warning }) { return CT.warning }
         if model.projects.isEmpty { return .secondary }
         return CT.success
@@ -251,7 +251,7 @@ struct SidebarStatusView: View {
 
     private var healthText: String {
         if model.projects.isEmpty { return "尚未添加项目" }
-        if model.projects.contains(where: { $0.status == .error }) { return "有项目备份失败" }
+        if model.projects.contains(where: { $0.status == .failed }) { return "有项目备份失败" }
         if model.projects.contains(where: { $0.status == .warning }) { return "存在需要关注的项目" }
         return "运行正常"
     }

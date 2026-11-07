@@ -94,9 +94,7 @@ private struct GeneralSettingsView: View {
                     Toggle("使用后台代理（LaunchAgent）", isOn: Binding(
                         get: { model.settings.launchAgentEnabled },
                         set: { value in
-                            model.settings.launchAgentEnabled = value
-                            model.settingsChanged()
-                            model.setLaunchAgent(enabled: value)
+                            Task { await model.setLaunchAgent(enabled: value) }
                         }
                     ))
                     Text("代理与主应用通过文件锁选主，同一时刻只有一个进程创建快照。")
@@ -120,6 +118,27 @@ private struct GeneralSettingsView: View {
                         }
                     }
                     Toggle("在排除编辑器中显示文件预览", isOn: binding(\.showExcludedPreview))
+                }
+
+                SettingsCard(title: "Beta 数据迁移", subtitle: "导入 v1.0.0-beta.1 的数据库与本地仓库；旧目录只读，不会删除。") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("仅在新安装且没有项目时可导入")
+                            Text("迁移在下次启动、数据库打开前执行；目标已有数据库会先改名备份。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("选择旧数据目录…") {
+                            chooseLegacyData()
+                        }
+                        .controlSize(.small)
+                    }
+                    if let notice = model.migrationNotice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(CT.success)
+                    }
                 }
 
                 SettingsCard(title: "关于") {
@@ -157,6 +176,16 @@ private struct GeneralSettingsView: View {
             get: { model.settings[keyPath: keyPath] },
             set: { model.settings[keyPath: keyPath] = $0; model.settingsChanged() }
         )
+    }
+
+    private func chooseLegacyData() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "选择旧数据目录"
+        panel.message = "选择 Beta 版本的 Application Support/CodeTime 目录"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.requestLegacyMigration(source: url) }
     }
 }
 
@@ -208,11 +237,17 @@ private struct CloudSettingsView: View {
                             .controlSize(.small)
                         if model.settings.localMirrorPath != nil {
                             Button("清除") {
-                                model.settings.localMirrorPath = nil
-                                model.settingsChanged()
+                                Task { await model.setLocalMirror(nil) }
                             }
                             .controlSize(.small)
                         }
+                    }
+                    HStack(spacing: 7) {
+                        Image(systemName: model.settings.localMirrorAccessState == .granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(model.settings.localMirrorAccessState == .granted ? CT.success : CT.warning)
+                        Text(model.settings.localMirrorAccessState.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Text("选择本地镜像会关闭 iCloud，用于开发与灾难恢复演练。")
                         .font(.caption)
@@ -291,9 +326,7 @@ private struct CloudSettingsView: View {
         panel.prompt = "使用此目录"
         panel.message = "选择一个本地镜像目录（建议为空目录）"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.settings.localMirrorPath = url.path
-        model.settings.iCloudEnabled = false
-        model.settingsChanged()
+        Task { await model.setLocalMirror(url) }
     }
 }
 
@@ -390,7 +423,7 @@ private struct PerformanceSettingsView: View {
                         PerformanceStat(title: "开发时干扰", value: model.settings.performance == .eco ? "最低" : (model.settings.performance == .balanced ? "较低" : "较高"))
                     }
                     Toggle("低电量模式下暂停自动备份", isOn: binding(\.pauseOnBattery))
-                    Text("节能模式适合笔记本电池供电时使用；FSEvents 变更会合并并防抖，不会每次写入都触发完整扫描。")
+                    Text("节能模式适合笔记本电池供电时使用；自动备份按项目频率由后台调度器轮询执行，睡眠唤醒后只补跑一次，不会为每次写入触发完整扫描。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -399,7 +432,7 @@ private struct PerformanceSettingsView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("完整数据副本")
-                            Text("本地 Kopia 仓库占用 \(CodeTimeFormat.bytes(model.repositoryBytes))，不能视为零本地占用的云备份。")
+                            Text(model.repositoryBytes.map { "本地 Kopia 仓库占用 \(CodeTimeFormat.bytes($0))，不能视为零本地占用的云备份。" } ?? "暂时无法统计本地仓库占用；这不代表仓库为空。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

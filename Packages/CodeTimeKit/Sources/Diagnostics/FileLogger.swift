@@ -4,11 +4,20 @@ import SharedModels
 public actor FileLogger {
     public let fileURL: URL
     private let maxBytes: Int64
+    private let maxArchives: Int
+    private let maxAge: TimeInterval
     private let fileManager = FileManager.default
 
-    public init(fileURL: URL, maxBytes: Int64 = 5 * 1024 * 1024) {
+    public init(
+        fileURL: URL,
+        maxBytes: Int64 = 5 * 1024 * 1024,
+        maxArchives: Int = 5,
+        maxAge: TimeInterval = 30 * 86_400
+    ) {
         self.fileURL = fileURL
-        self.maxBytes = maxBytes
+        self.maxBytes = max(256 * 1024, maxBytes)
+        self.maxArchives = max(1, maxArchives)
+        self.maxAge = maxAge
     }
 
     public func info(_ message: String) {
@@ -40,9 +49,44 @@ public actor FileLogger {
     private func rotateIfNeeded() {
         guard let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path),
               let size = attributes[.size] as? Int64, size > maxBytes else { return }
-        let archive = fileURL.deletingPathExtension()
-            .appendingPathExtension("\(Int(Date().timeIntervalSince1970)).log")
-        try? fileManager.moveItem(at: fileURL, to: archive)
+        let base = fileURL.deletingPathExtension()
+        // Two rotations can happen within the same second; a unique archive name
+        // keeps the move from failing and leaving the current file unbounded.
+        var stamp = Int(Date().timeIntervalSince1970 * 1_000)
+        var archive = base.appendingPathExtension("\(stamp).log")
+        while fileManager.fileExists(atPath: archive.path) {
+            stamp += 1
+            archive = base.appendingPathExtension("\(stamp).log")
+        }
+        guard (try? fileManager.moveItem(at: fileURL, to: archive)) != nil else { return }
+        pruneArchives()
+    }
+
+    /// Rotation is bounded by count and age; otherwise a long-running install
+    /// would grow logs without limit even though each file is capped.
+    private func pruneArchives() {
+        let directory = fileURL.deletingLastPathComponent()
+        let stem = fileURL.deletingPathExtension().lastPathComponent
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        var archives = entries.filter { url in
+            url.lastPathComponent.hasPrefix(stem + ".") && url.pathExtension == "log"
+        }
+        archives.sort { lhs, rhs in
+            let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return l > r
+        }
+        let cutoff = Date().addingTimeInterval(-maxAge)
+        for (index, archive) in archives.enumerated() {
+            let modified = (try? archive.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if index >= maxArchives || modified < cutoff {
+                try? fileManager.removeItem(at: archive)
+            }
+        }
     }
 }
 

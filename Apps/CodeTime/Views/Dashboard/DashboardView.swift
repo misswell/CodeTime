@@ -184,7 +184,7 @@ struct StorageSummaryCard: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(CodeTimeFormat.bytes(model.repositoryBytes))
+                    Text(model.repositoryBytes.map(CodeTimeFormat.bytes) ?? "无法统计")
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                     Text("去重后占用")
                         .font(.caption2)

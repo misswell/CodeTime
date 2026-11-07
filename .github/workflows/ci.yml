@@ -5,28 +5,30 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  KOPIA_VERSION: "0.23.1"
+  KOPIA_PATH: ${{ github.workspace }}/Resources/Kopia/kopia
+
 jobs:
-  build-and-test:
+  build:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
+      - name: Cache pinned Kopia
+        uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - name: Fetch and verify Kopia
+        run: ./Scripts/fetch_kopia.sh
+      - name: Swift build
+        run: swift build --package-path Packages/CodeTimeKit
       - name: Install XcodeGen
         run: brew install xcodegen
-
-      - name: Fetch Kopia
-        run: ./Scripts/fetch_kopia.sh
-
-      - name: Swift tests (Kopia + cloud mirror + recovery)
-        env:
-          KOPIA_PATH: ${{ github.workspace }}/Resources/Kopia/kopia
-        run: swift test --package-path Packages/CodeTimeKit
-
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: Build app (unsigned)
+      - name: Build app (unsigned Debug)
         run: |
           xcodebuild \
             -project CodeTime.xcodeproj \
@@ -34,3 +36,139 @@ jobs:
             -configuration Debug \
             -derivedDataPath .build/DerivedData \
             build CODE_SIGNING_ALLOWED=NO
+
+  unit-tests:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Unit tests
+        run: ./Scripts/test.sh --filter 'SmokeTests|ExclusionMatcherTests|SQLiteStoreTests|SchemaMigrationTests'
+
+  integration-tests:
+    needs: unit-tests
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Integration tests
+        run: ./Scripts/test.sh --filter 'KopiaEngineIntegrationTests|RepositoryReplicationTests|ServiceEndToEndTests|ProcessRunnerTests'
+
+  cloud-tests:
+    needs: integration-tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: CloudMirrorStore + GC tests
+        run: ./Scripts/test.sh --filter 'CloudMirrorStoreTests|CloudMirrorRegressionTests'
+
+  recovery-tests:
+    needs: cloud-tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Restore + recovery tests
+        run: ./Scripts/test.sh --filter 'RecoveryRegressionTests'
+
+  concurrency-tests:
+    needs: recovery-tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Lease, retry and persistence tests
+        run: ./Scripts/test.sh --filter 'ConcurrencyPersistenceRegressionTests'
+
+  security-tests:
+    needs: concurrency-tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Sandbox, bookmark and capacity tests
+        run: ./Scripts/test.sh --filter 'SandboxMigrationRegressionTests'
+
+  release-build:
+    needs: security-tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build app (unsigned Release)
+        run: |
+          xcodebuild \
+            -project CodeTime.xcodeproj \
+            -scheme CodeTime \
+            -configuration Release \
+            -derivedDataPath .build/ReleaseDerived \
+            build CODE_SIGNING_ALLOWED=NO
+
+  entitlements:
+    needs: release-build
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Validate entitlements and LaunchAgent
+        run: ./Scripts/validate_entitlements.sh
+      - name: Lint plists
+        run: plutil -lint Apps/CodeTime/Info.plist Resources/LaunchAgents/com.codetime.agent.plist
+
+  regression-gate:
+    needs: entitlements
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: Resources/Kopia
+          key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
+      - run: ./Scripts/fetch_kopia.sh
+      - name: Full suite + CT-001 … CT-044 presence gate
+        run: ./Scripts/regression_gate.sh

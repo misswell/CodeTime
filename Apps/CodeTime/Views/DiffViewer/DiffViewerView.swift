@@ -7,6 +7,7 @@ struct DiffViewerView: View {
     let context: DiffContext
 
     @State private var diff: SnapshotDiff?
+    @State private var diffError: String?
     @State private var selectedPath: String?
     @State private var fileResult: FileDiffResult?
     @State private var filter = ""
@@ -32,7 +33,11 @@ struct DiffViewerView: View {
         }
         .frame(width: 1040, height: 700)
         .task {
-            diff = await model.snapshotDiff(context)
+            do {
+                diff = try await model.snapshotDiff(context)
+            } catch {
+                diffError = error.localizedDescription
+            }
             isLoadingDiff = false
             if selectedPath == nil {
                 select(changedFiles.first?.path)
@@ -77,6 +82,13 @@ struct DiffViewerView: View {
             if isLoadingDiff {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let diffError {
+                EmptyStateView(
+                    symbol: "exclamationmark.triangle",
+                    title: "无法读取版本差异",
+                    message: diffError
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if changedFiles.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "equal.circle")
@@ -90,6 +102,13 @@ struct DiffViewerView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
+                        if diff?.isTruncated == true {
+                            Text("变更列表超过上限，仅显示部分文件")
+                                .font(.caption2)
+                                .foregroundStyle(CT.warning)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        }
                         ForEach(changedFiles, id: \.path) { file in
                             changeRow(file)
                         }
