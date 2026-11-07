@@ -627,12 +627,15 @@ public actor SQLiteStore {
             }
 
             var claimedJob: BackupJob
-            if let retryJobID, let existing = try self.job(id: retryJobID),
-               !existing.state.isTerminal,
-               existing.type == .backup,
-               existing.projectID == projectID {
-                // A retry claim may only resume a job whose previous worker is
-                // provably gone; a live lease must never be stolen by Job ID.
+            if let retryJobID {
+                // A retry claim must find a resumable backup-type job. Any other
+                // outcome is a hard error, not a fallback to creating a new job.
+                guard let existing = try self.job(id: retryJobID),
+                      !existing.state.isTerminal,
+                      existing.type == .backup,
+                      existing.projectID == projectID else {
+                    return nil
+                }
                 if let lease = existing.lease, !lease.isReclaimable() { return nil }
                 claimedJob = existing
             } else {

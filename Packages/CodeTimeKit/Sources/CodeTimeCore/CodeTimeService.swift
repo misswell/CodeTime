@@ -1838,6 +1838,27 @@ public actor CodeTimeService {
             )
         }
         if let existing = resumable, existing.state.isResumable {
+            // CT-074: Validate full identity binding before reusing a stale job.
+            guard existing.repositoryID == recovered.repositoryID else {
+                throw CodeTimeError.restoreSourceUnavailable(
+                    "恢复任务 \(existing.id) 属于仓库 \(existing.repositoryID)，与目标 \(recovered.repositoryID) 不匹配"
+                )
+            }
+            guard existing.generationID == generationID else {
+                throw CodeTimeError.restoreSourceUnavailable(
+                    "恢复任务 \(existing.id) 属于 Generation \(existing.generationID)，与目标 \(generationID) 不匹配"
+                )
+            }
+            guard existing.sourceDeviceID == recovered.deviceID else {
+                throw CodeTimeError.restoreSourceUnavailable(
+                    "恢复任务 \(existing.id) 来自设备 \(existing.sourceDeviceID)，与目标 \(recovered.deviceID) 不匹配"
+                )
+            }
+            guard existing.stagingPath.hasPrefix(repositoryRoot.path) else {
+                throw CodeTimeError.restoreSourceUnavailable(
+                    "恢复任务 staging 路径超出仓库范围：\(existing.stagingPath)"
+                )
+            }
             job = existing
             if !FileManager.default.fileExists(atPath: job.stagingPath) {
                 try FileManager.default.createDirectory(
