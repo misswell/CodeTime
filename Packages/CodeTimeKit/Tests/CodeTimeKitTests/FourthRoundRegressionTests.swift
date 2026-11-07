@@ -744,6 +744,12 @@ extension FourthRoundRegressionTests {
         getrusage(RUSAGE_SELF, &usage)
         let peakMemoryMB = Double(usage.ru_maxrss) / 1_048_576 // bytes → MB on macOS
 
+        // CPU usage via rusage
+        let cpuUserSec = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1_000_000
+        let cpuSysSec = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1_000_000
+        let cpuTotalSec = cpuUserSec + cpuSysSec
+        let cpuPercent = backupDuration > 0 ? (cpuTotalSec / backupDuration) * 100 : 0
+
         print("""
         PERF_METRICS:
           files: \(fileCount)
@@ -751,7 +757,11 @@ extension FourthRoundRegressionTests {
           backupDurationMs: \(Int(backupDuration * 1000))
           restoreDurationMs: \(Int(restoreDuration * 1000))
           peakMemoryMB: \(String(format: "%.1f", peakMemoryMB))
+          cpuUserSec: \(String(format: "%.2f", cpuUserSec))
+          cpuSysSec: \(String(format: "%.2f", cpuSysSec))
+          cpuPercent: \(String(format: "%.1f", cpuPercent))
           concurrencyBackup: 2
+          concurrentTasks: 1
           verifyFiles: \(fileCount) (all content-verified)
         """)
     }
