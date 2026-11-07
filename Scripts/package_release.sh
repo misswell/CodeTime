@@ -12,8 +12,26 @@ if [ "$CHANNEL" != "stable" ]; then
 fi
 
 : "${DEVELOPMENT_TEAM:?请设置 DEVELOPMENT_TEAM}"
-: "${APPLE_ID:?stable 发布必须设置 APPLE_ID 用于公证}"
-: "${NOTARY_PASSWORD:?stable 发布必须设置 NOTARY_PASSWORD 用于公证}"
+
+# Notarization credential, following the AgentSpace convention: a notarytool
+# keychain profile is verified live before use; APPLE_ID/NOTARY_PASSWORD env is
+# the explicit fallback. A profile *name* alone proves nothing.
+NOTARY_ARGS=()
+NOTARY_PROFILE="${NOTARY_PROFILE:-codetime-notary}"
+if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  echo "notarization credential: keychain profile '$NOTARY_PROFILE' (live)"
+  NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+elif [ -n "${APPLE_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ]; then
+  echo "notarization credential: APPLE_ID/NOTARY_PASSWORD env"
+  NOTARY_ARGS=(--apple-id "$APPLE_ID" --password "$NOTARY_PASSWORD")
+else
+  echo "未找到可用的公证凭据。任选其一配置：" >&2
+  echo "  xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <apple-id> --team-id $DEVELOPMENT_TEAM" >&2
+  echo "  或导出 APPLE_ID / NOTARY_PASSWORD 环境变量" >&2
+  exit 1
+fi
+[ -n "${TEAM_ID:-}" ] && DEVELOPMENT_TEAM="$TEAM_ID"
+NOTARY_ARGS+=(--team-id "$DEVELOPMENT_TEAM")
 
 if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
   echo "未找到 Developer ID Application 证书，stable 发布终止。" >&2
@@ -59,23 +77,30 @@ ZIP="$DIST/$NAME.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 echo "提交公证…"
-xcrun notarytool submit "$ZIP" \
-  --apple-id "$APPLE_ID" \
-  --team-id "$DEVELOPMENT_TEAM" \
-  --password "$NOTARY_PASSWORD" \
-  --wait
+xcrun notarytool submit "$ZIP" "${NOTARY_ARGS[@]}" --wait
 
+# Staple the app first, then rebuild the DMG from the stapled app so the copy a
+# user drags out of the DMG carries its own ticket (AgentSpace pattern).
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 
-rm -f "$ZIP"
+rm -f "$ZIP" "$DIST/$NAME.dmg"
 ditto -c -k --keepParent "$APP" "$ZIP"
 (cd "$DIST" && shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256")
+
+DMG="$DIST/$NAME.dmg"
+hdiutil create -quiet -volname "CodeTime ${VERSION}" \
+  -srcfolder "$APP" -ov -format UDZO "$DMG"
+hdiutil verify -quiet "$DMG"
+xcrun notarytool submit "$DMG" "${NOTARY_ARGS[@]}" --wait
+xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
 
 "$ROOT/Scripts/verify_release.sh" "$ZIP"
 
 echo
 echo "artifact: $ZIP"
+echo "artifact: $DMG"
 echo "sha256:   $(cat "$ZIP.sha256")"
 echo "tag:      $TAG"
 unzip -l "$ZIP" | head -12

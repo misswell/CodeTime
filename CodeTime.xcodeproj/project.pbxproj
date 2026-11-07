@@ -317,7 +317,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nAPP_DIR=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nmkdir -p \"$APP_DIR/Library/LaunchAgents\"\ncp -f \"$SRCROOT/Resources/LaunchAgents/com.codetime.agent.plist\" \"$APP_DIR/Library/LaunchAgents/com.codetime.agent.plist\"\nchmod +x \"$APP_DIR/Resources/Kopia/kopia\" 2>/dev/null || true\n\nIDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-}\"\nif [ -z \"$IDENTITY\" ]; then IDENTITY=\"-\"; fi\nOPTS=\"\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then OPTS=\"--options runtime\"; fi\nif [ -f \"$APP_DIR/Resources/Kopia/kopia\" ]; then\n  if [ \"$CONFIGURATION\" = \"Release\" ]; then\n    codesign --force $OPTS --entitlements \"$SRCROOT/Resources/Kopia/kopia.entitlements\" --sign \"$IDENTITY\" \"$APP_DIR/Resources/Kopia/kopia\"\n  else\n    codesign --force $OPTS --sign \"$IDENTITY\" \"$APP_DIR/Resources/Kopia/kopia\"\n  fi\nfi\n";
+			shellScript = "set -e\nAPP_DIR=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nmkdir -p \"$APP_DIR/Library/LaunchAgents\"\ncp -f \"$SRCROOT/Resources/LaunchAgents/com.codetime.agent.plist\" \"$APP_DIR/Library/LaunchAgents/com.codetime.agent.plist\"\nchmod +x \"$APP_DIR/Resources/Kopia/kopia\" 2>/dev/null || true\n\nIDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-}\"\nif [ -z \"$IDENTITY\" ]; then IDENTITY=\"-\"; fi\nOPTS=\"\"\nif [ \"$IDENTITY\" != \"-\" ]; then OPTS=\"--options runtime --timestamp\"; fi\nif [ \"$CONFIGURATION\" = \"Release\" ]; then OPTS=\"$OPTS --entitlements $SRCROOT/Resources/Kopia/kopia.entitlements\"; fi\nif [ -f \"$APP_DIR/Resources/Kopia/kopia\" ]; then\n  codesign --force $OPTS --sign \"$IDENTITY\" \"$APP_DIR/Resources/Kopia/kopia\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

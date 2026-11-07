@@ -98,13 +98,10 @@ targets:
           IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-}"
           if [ -z "$IDENTITY" ]; then IDENTITY="-"; fi
           OPTS=""
-          if [ "$CONFIGURATION" = "Release" ]; then OPTS="--options runtime"; fi
+          if [ "$IDENTITY" != "-" ]; then OPTS="--options runtime --timestamp"; fi
+          if [ "$CONFIGURATION" = "Release" ]; then OPTS="$OPTS --entitlements $SRCROOT/Resources/Kopia/kopia.entitlements"; fi
           if [ -f "$APP_DIR/Resources/Kopia/kopia" ]; then
-            if [ "$CONFIGURATION" = "Release" ]; then
-              codesign --force $OPTS --entitlements "$SRCROOT/Resources/Kopia/kopia.entitlements" --sign "$IDENTITY" "$APP_DIR/Resources/Kopia/kopia"
-            else
-              codesign --force $OPTS --sign "$IDENTITY" "$APP_DIR/Resources/Kopia/kopia"
-            fi
+            codesign --force $OPTS --sign "$IDENTITY" "$APP_DIR/Resources/Kopia/kopia"
           fi
 
 schemes:
