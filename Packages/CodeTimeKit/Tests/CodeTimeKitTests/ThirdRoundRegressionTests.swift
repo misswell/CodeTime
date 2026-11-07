@@ -21,6 +21,10 @@ final class ThirdRoundRegressionTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codetime-ct3-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Clean up any leftover lifecycle lock files from previous tests.
+        let lifecycleDir = root.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
+        try? FileManager.default.removeItem(at: lifecycleDir)
         keychain = KeychainStore(service: "com.codetime.test.ct3.\(UUID().uuidString)")
         keychain.deleteAllSecrets()
     }

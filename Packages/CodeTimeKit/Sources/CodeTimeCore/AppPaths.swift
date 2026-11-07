@@ -30,7 +30,7 @@ public struct AppPaths: Sendable {
         // Lifecycle locks live OUTSIDE the replaceable data root so they survive
         // a whole-root swap during Beta → Release migration.
         self.lifecycleDir = root.deletingLastPathComponent()
-            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
         self.schedulerLock = lifecycleDir.appendingPathComponent("scheduler.lock")
         self.agentLock = lifecycleDir.appendingPathComponent("agent.lock")
         self.migrationLock = lifecycleDir.appendingPathComponent("migration.lock")

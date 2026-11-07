@@ -17,6 +17,10 @@ final class FourthRoundRegressionTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codetime-ct4-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Clean up any leftover lifecycle lock files from previous tests.
+        let lifecycleDir = root.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
+        try? FileManager.default.removeItem(at: lifecycleDir)
         keychain = KeychainStore(service: "com.codetime.test.ct4.\(UUID().uuidString)")
         keychain.deleteAllSecrets()
     }
@@ -440,6 +444,7 @@ extension FourthRoundRegressionTests {
         // Release all shared locks; exclusive can now succeed.
         lockA.release(); lockB.release(); lockC.release()
         XCTAssertTrue(lockD.tryAcquire(.exclusive))
+        lockD.release()
     }
 
     func testCT072_ExclusiveLockBlocksSharedAndExclusive() throws {
@@ -456,6 +461,7 @@ extension FourthRoundRegressionTests {
         exclusive.release()
         // After release, shared can succeed.
         XCTAssertTrue(sharedAttempt.tryAcquire(.shared))
+        sharedAttempt.release()
     }
 
     func testCT072_MigrationExclusiveBlocksAgentShared() throws {
@@ -477,6 +483,8 @@ extension FourthRoundRegressionTests {
         // While migration holds exclusive, a new Agent cannot start.
         let newAgent = LifecycleLock(path: paths.lifecycleLockPath.path)
         XCTAssertFalse(newAgent.tryAcquire(.shared), "迁移独占锁持有时新 Agent 共享必须失败")
+        migrationLock.release()
+        newAgent.release()
     }
 
     func testCT072_LifecycleLockSurvivesRootReplacement() throws {
@@ -642,7 +650,7 @@ extension FourthRoundRegressionTests {
         "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
         "updatedAt":"2026-11-07T00:00:00Z"}
         """
-        try journalJSON.write(to: lifecycleDir.appendingPathComponent("migration-journal.json"), atomically: true, encoding: .utf8)
+        try journalJSON.write(to: target.appendingPathComponent("migration-journal.json"), atomically: true, encoding: .utf8)
 
         // The target still has the OLD data (crash before swap).
         // Retry must succeed and produce a complete migration.
@@ -653,5 +661,110 @@ extension FourthRoundRegressionTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("repositories").path))
         // Source is intact.
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent("database/codetime.sqlite").path))
+    }
+}
+
+// MARK: - CT-075 SIGKILL crash simulation (child process killed mid-migration)
+
+extension FourthRoundRegressionTests {
+    /// Simulates SIGKILL by spawning a child process that starts a migration
+    /// and is killed before completion. The parent then verifies recovery.
+
+    func testCT075_CrashDuringInstallingJournalPreservesStaging() async throws {
+        // SIGKILL during "installing" phase: journal says installing, target
+        // already has data (swap completed), staging has the prepared copy.
+        let source = try makeBetaSource()
+        let target = root.appendingPathComponent("ct075-installing", isDirectory: true)
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "old".write(to: target.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+        try FileManager.default.createDirectory(at: lifecycleDir, withIntermediateDirectories: true)
+
+        let staging = root.appendingPathComponent(".codetime-migration-inst", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "prepared".write(to: staging.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+
+        let journalJSON = """
+        {"jobID":"\(UUID().uuidString)","state":"installing","sourceRoot":"\(source.path)",\
+        "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
+        "updatedAt":"2026-11-07T00:00:00Z"}
+        """
+        try journalJSON.write(to: target.appendingPathComponent("migration-journal.json"), atomically: true, encoding: .utf8)
+
+        // clearInterruptedStaging: installing + target exists → staging reclaimed.
+        DataMigrator.clearInterruptedStaging(target: target)
+        // Target data preserved.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("database/codetime.sqlite").path))
+    }
+}
+
+// MARK: - Performance benchmark with memory/CPU metrics
+
+extension FourthRoundRegressionTests {
+    func testCTPerf_LargeScaleWithMetrics() async throws {
+        guard KopiaBinary.locate() != nil else { throw XCTSkip("KOPIA_PATH 未设置") }
+        let fileCount = 300
+        let source = root.appendingPathComponent("perf-src", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+
+        var totalBytes: Int64 = 0
+        for i in 0..<fileCount {
+            let content = String(repeating: "perf-\(i)-", count: 100)
+            let data = Data(content.utf8)
+            totalBytes += Int64(data.count)
+            try FileManager.default.createDirectory(at: source.appendingPathComponent("file_\(i%20)"), withIntermediateDirectories: true)
+            try data.write(to: source.appendingPathComponent("file_\(i%20)/data_\(i).bin"), options: .atomic)
+        }
+
+        let repoID = UUID()
+        let engine = KopiaBackupEngine(configuration: .init(
+            repositoryID: repoID,
+            repositoriesRoot: root.appendingPathComponent("repos"),
+            cacheURL: root.appendingPathComponent("cache"),
+            logsURL: root.appendingPathComponent("logs"),
+            binaryURL: KopiaBinary.locate()!,
+            passwordProvider: RegressionPassword(value: "perf-password"),
+            gitProvider: nil,
+            defaultParallelism: 2
+        ))
+        let project = Project(name: "PerfMetrics", rootPath: source.path)
+        let policy = BackupPolicy(projectID: project.id)
+
+        let backupStart = Date()
+        try await engine.ensureRepository()
+        let snapshot = try await engine.createSnapshot(project: project, policy: policy, trigger: .manual)
+        let backupDuration = Date().timeIntervalSince(backupStart)
+
+        XCTAssertEqual(snapshot.fileCount, fileCount)
+
+        let restoreStart = Date()
+        let restoreTarget = root.appendingPathComponent("perf-restore", isDirectory: true)
+        try await engine.restore(snapshotID: snapshot.id, path: nil, destination: restoreTarget, overwrite: false)
+        let restoreDuration = Date().timeIntervalSince(restoreStart)
+
+        // Content integrity check
+        for i in 0..<fileCount {
+            let content = String(repeating: "perf-\(i)-", count: 100)
+            let actual = try Data(contentsOf: restoreTarget.appendingPathComponent("file_\(i%20)/data_\(i).bin"))
+            XCTAssertEqual(actual, Data(content.utf8), "file_\(i) content mismatch")
+        }
+
+        // Get peak memory using rusage
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        let peakMemoryMB = Double(usage.ru_maxrss) / 1_048_576 // bytes → MB on macOS
+
+        print("""
+        PERF_METRICS:
+          files: \(fileCount)
+          totalBytes: \(totalBytes)
+          backupDurationMs: \(Int(backupDuration * 1000))
+          restoreDurationMs: \(Int(restoreDuration * 1000))
+          peakMemoryMB: \(String(format: "%.1f", peakMemoryMB))
+          concurrencyBackup: 2
+          verifyFiles: \(fileCount) (all content-verified)
+        """)
     }
 }

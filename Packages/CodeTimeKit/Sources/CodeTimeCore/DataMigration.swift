@@ -196,6 +196,9 @@ public enum DataMigrator {
         let fileManager = FileManager.default
         let target = plan.targetRoot
         try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
+        try fileManager.createDirectory(at: lifecycleDir, withIntermediateDirectories: true)
         let staging = target.deletingLastPathComponent()
             .appendingPathComponent(".codetime-migration-\(jobID.uuidString.prefix(8))", isDirectory: true)
         if fileManager.fileExists(atPath: staging.path) {
@@ -212,7 +215,7 @@ public enum DataMigrator {
             updatedAt: Date(),
             message: nil
         )
-        try write(journal, to: target.appendingPathComponent(journalName))
+try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
 
         do {
             let files = try regularFiles(under: plan.sourceRoot)
@@ -245,7 +248,7 @@ public enum DataMigrator {
 
             journal.state = "verifying"
             journal.updatedAt = Date()
-            try write(journal, to: target.appendingPathComponent(journalName))
+    try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
 
             for (index, file) in files.enumerated() {
                 if isCancelled() { throw MigrationError.cancelled }
@@ -277,7 +280,7 @@ public enum DataMigrator {
             journal.state = "installing"
             journal.updatedAt = Date()
             journal.targetPath = target.path
-            try write(journal, to: target.appendingPathComponent(journalName))
+    try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
             progress(0.95)
 
             if replaceRoot {
@@ -342,7 +345,16 @@ public enum DataMigrator {
 
     /// A previous run left staging data behind; remove it so a retry starts clean.
     public static func clearInterruptedStaging(target: URL) {
-        let fileName = target.appendingPathComponent(journalName)
+        // The journal may be in the target or the lifecycle dir (which survives
+        // whole-root replacement). Check both locations.
+        var fileName = target.appendingPathComponent(journalName)
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
+        let lifecycleJournal = lifecycleDir.appendingPathComponent(journalName)
+        if !FileManager.default.fileExists(atPath: fileName.path),
+           FileManager.default.fileExists(atPath: lifecycleJournal.path) {
+            fileName = lifecycleJournal
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileName),
@@ -380,7 +392,7 @@ public enum DataMigrator {
         // The request file lives in the lifecycle directory, NOT inside the
         // replaceable target, so it survives a whole-root swap.
         let lifecycleDir = target.deletingLastPathComponent()
-            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
         try FileManager.default.createDirectory(at: lifecycleDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -392,7 +404,7 @@ public enum DataMigrator {
 
     public static func hasPendingRequest(target: URL) -> Bool {
         FileManager.default.fileExists(atPath: target.deletingLastPathComponent()
-            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
             .appendingPathComponent(requestName).path)
     }
 
@@ -401,7 +413,7 @@ public enum DataMigrator {
     /// old data and removes the request only after full verification.
     public static func performPending(target: URL) throws -> MigrationResult? {
         let lifecycleDir = target.deletingLastPathComponent()
-            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
         let requestURL = lifecycleDir.appendingPathComponent(requestName)
         guard FileManager.default.fileExists(atPath: requestURL.path) else { return nil }
         let decoder = JSONDecoder()
@@ -422,13 +434,7 @@ public enum DataMigrator {
             throw MigrationError.targetNotEmpty("另一个数据迁移正在进行，或 UI/Agent 仍在运行")
         }
         defer { lifecycleLock.release() }
-        let agentLock = RepositoryLock(
-            path: target.appendingPathComponent("agent.lock").path
-        )
-        guard agentLock.tryAcquire() else {
-            throw MigrationError.targetNotEmpty("后台代理正在运行，请先退出 CodeTime 再迁移")
-        }
-        defer { agentLock.release() }
+
 
         // The source Beta app may still have an Agent, scheduler or Kopia task.
         // Acquire every existing source lock for the whole copy/switch window.
