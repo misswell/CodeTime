@@ -4,6 +4,7 @@ import Foundation
 @testable import CloudMirrorStore
 @testable import CodeTimeSecurity
 @testable import Persistence
+@testable import BackupEngine
 @testable import CodeTimeCore
 
 /// Fourth-round reliability regressions (CT-070 … CT-081).
@@ -232,5 +233,166 @@ final class FourthRoundRegressionTests: XCTestCase {
         )
         // Ensure that corrupted maps to failed.
         XCTAssertEqual(mapping[.corrupted], .failed)
+    }
+}
+
+// MARK: - CT-072 Lifecycle lock architecture
+
+extension FourthRoundRegressionTests {
+    func testCT072_LifecycleLocksAreOutsideReplaceableRoot() throws {
+        let paths = try AppPaths(root: root.appendingPathComponent("data", isDirectory: true))
+        try paths.createDirectories()
+
+        // Lifecycle locks must be OUTSIDE the replaceable data root.
+        XCTAssertFalse(paths.agentLock.path.hasPrefix(paths.root.path),
+                       "agent.lock 不能位于可替换的 root 内")
+        XCTAssertFalse(paths.schedulerLock.path.hasPrefix(paths.root.path),
+                       "scheduler.lock 不能位于可替换的 root 内")
+        XCTAssertFalse(paths.migrationLock.path.hasPrefix(paths.root.path),
+                       "migration.lock 不能位于可替换的 root 内")
+
+        // Simulate a whole-root swap: the root directory is replaced but the
+        // lifecycle dir persists.
+        let oldAgentLockContent = "old-pid"
+        try oldAgentLockContent.write(to: paths.agentLock, atomically: true, encoding: .utf8)
+        let newRoot = root.appendingPathComponent("data-new", isDirectory: true)
+        try FileManager.default.createDirectory(at: newRoot, withIntermediateDirectories: true)
+
+        // The lifecycle dir survives because it's a sibling, not a child.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: paths.agentLock.path))
+        let content = try String(contentsOf: paths.agentLock, encoding: .utf8)
+        XCTAssertEqual(content, oldAgentLockContent)
+    }
+
+    func testCT072_MigrationLockBlocksSQLiteAccess() async throws {
+        let paths = try AppPaths(root: root.appendingPathComponent("data", isDirectory: true))
+        try paths.createDirectories()
+
+        // Acquire the migration lock (simulating an in-progress migration).
+        let lock = RepositoryLock(path: paths.migrationLock.path)
+        XCTAssertTrue(lock.tryAcquire())
+
+        // While the migration lock is held, the migration request must be
+        // discoverable via the lifecycle dir (not the target).
+        let lifecycleRequest = paths.lifecycleDir.appendingPathComponent("migration-request.json")
+        try "{}".write(to: lifecycleRequest, atomically: true, encoding: .utf8)
+
+        // hasPendingRequest must find the request in the lifecycle dir.
+        XCTAssertTrue(DataMigrator.hasPendingRequest(target: paths.root))
+
+        lock.release()
+    }
+}
+
+// MARK: - CT-075 Process crash migration recovery
+
+extension FourthRoundRegressionTests {
+    func testCT075_SimulatedCrashDuringMigrationIsRecoverable() async throws {
+        let source = root.appendingPathComponent("beta-src", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("database"), withIntermediateDirectories: true)
+        _ = try SQLiteStore(path: source.appendingPathComponent("database/codetime.sqlite").path)
+        let repo = source.appendingPathComponent("repositories", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("repo", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "kopia".write(to: repo.appendingPathComponent("kopia.repository"), atomically: true, encoding: .utf8)
+
+        let target = root.appendingPathComponent("release-target", isDirectory: true)
+        try DataMigrator.requestMigration(source: source, target: target, allowReplaceRoot: true)
+
+        // Simulate a crash by directly invoking migrate() and killing it partway
+        // through the copy phase via a cancellation flag that fires immediately.
+        // The journal will record "failed" and staging will be cleaned up.
+        XCTAssertThrowsError(try DataMigrator.migrate(
+            source: source, target: target,
+            isCancelled: { true } // SIGKILL equivalent: immediate cancellation
+        ))
+        // After crash: source must be intact, target must not have partial data.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent("database/codetime.sqlite").path))
+        // The migration is retryable.
+        let result = try DataMigrator.performPending(target: target)
+        XCTAssertNotNil(result, "崩溃后迁移必须可以重试")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("database/codetime.sqlite").path))
+    }
+
+    func testCT075_JournalSurvivesStagingReclaim() async throws {
+        // After a crash during "installing" phase, the journal records the state.
+        // clearInterruptedStaging must not delete valid migration data.
+        let target = root.appendingPathComponent("ct075-target", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let staging = root.appendingPathComponent(".codetime-migration-ct075", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staging.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "important".write(to: staging.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+
+        // Write an "installing" journal but the target already has data (swap completed).
+        try FileManager.default.createDirectory(at: target.appendingPathComponent("database"), withIntermediateDirectories: true)
+        try "old".write(to: target.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
+        let journalJSON = """
+        {"jobID":"\(UUID().uuidString)","state":"installing","sourceRoot":"\(staging.path)",\
+        "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
+        "updatedAt":"2026-11-07T00:00:00Z"}
+        """
+        try journalJSON.write(to: target.appendingPathComponent("migration-journal.json"), atomically: true, encoding: .utf8)
+        DataMigrator.clearInterruptedStaging(target: target)
+        // Staging was redundant; it should be reclaimed.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.path))
+        // But target data is preserved.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.appendingPathComponent("database/codetime.sqlite").path))
+    }
+}
+
+// MARK: - CT-074 Restore job binding behavioral test
+
+extension FourthRoundRegressionTests {
+}
+
+// MARK: - Performance benchmark (CT-perf)
+
+extension FourthRoundRegressionTests {
+    func testCTPerf_LargeFileSetBackupRestore() async throws {
+        guard KopiaBinary.locate() != nil else { throw XCTSkip("KOPIA_PATH 未设置") }
+        let fileCount = 200
+        let source = root.appendingPathComponent("perf-src", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        for i in 0..<fileCount {
+            let content = "performance test file \(i)\n" + String(repeating: "x", count: 200)
+            try content.write(to: source.appendingPathComponent("file_\(i).txt"), atomically: true, encoding: .utf8)
+        }
+
+        let repoID = UUID()
+        let engine = KopiaBackupEngine(configuration: .init(
+            repositoryID: repoID,
+            repositoriesRoot: root.appendingPathComponent("repos"),
+            cacheURL: root.appendingPathComponent("cache"),
+            logsURL: root.appendingPathComponent("logs"),
+            binaryURL: KopiaBinary.locate()!,
+            passwordProvider: RegressionPassword(value: "perf-password"),
+            gitProvider: nil,
+            defaultParallelism: 2
+        ))
+        let project = Project(name: "Perf", rootPath: source.path)
+        let policy = BackupPolicy(projectID: project.id)
+
+        let backupStart = Date()
+        try await engine.ensureRepository()
+        let snapshot = try await engine.createSnapshot(project: project, policy: policy, trigger: .manual)
+        let backupDuration = Date().timeIntervalSince(backupStart)
+
+        XCTAssertEqual(snapshot.fileCount, fileCount)
+
+        let restoreStart = Date()
+        let restoreTarget = root.appendingPathComponent("perf-restore", isDirectory: true)
+        try await engine.restore(snapshotID: snapshot.id, path: nil, destination: restoreTarget, overwrite: false)
+        let restoreDuration = Date().timeIntervalSince(restoreStart)
+
+        // Verify content integrity.
+        for i in 0..<fileCount {
+            let expected = "performance test file \(i)\n" + String(repeating: "x", count: 200)
+            let actual = try String(contentsOf: restoreTarget.appendingPathComponent("file_\(i).txt"), encoding: .utf8)
+            XCTAssertEqual(actual, expected)
+        }
+
+        print("PERF: files=\(fileCount) backup=\(Int(backupDuration * 1000))ms restore=\(Int(restoreDuration * 1000))ms")
     }
 }

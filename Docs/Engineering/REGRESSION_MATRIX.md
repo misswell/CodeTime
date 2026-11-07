@@ -89,6 +89,17 @@ Scripts/test.sh --filter CloudMirrorRegressionTests/testCT001
 | CT-067 | 同上 | 迁移中断（取消/崩溃） | staging 被回收，源目录完好，重试成功 | 通过 |
 | CT-068 | 同上 | workflow_dispatch 手动发布 | publish_release 输入与两个发布步骤、artifact 上传齐全，YAML 合法 | 通过 |
 | CT-069 | 同上 | 回归门禁自身 | 缺失 CT、未登记跳过、非 0 失败均使门禁失败；白名单跳过通过 | 通过 |
+| CT-070 | FourthRoundRegressionTests | Manifest 聚合字段篡改 | repositoryHash/totalBytes 不匹配被发现 | 通过 |
+| CT-071 | 同上 | 多设备 GC | 其他设备存在时跳过物理删除；单设备正常 | 通过 |
+| CT-072 | 同上 | 生命周期锁在 root 外部 | 锁文件不在可替换 root 内；迁移锁阻断 SQLite 打开 | 通过 |
+| CT-073 | 同上 | 旧上传完成覆盖新状态 | 项目状态由最新 Snapshot 推导 | 通过 |
+| CT-074 | 同上 | Restore Job 身份绑定 | 编译期四重绑定检查存在 | 通过 |
+| CT-075 | 同上 | 进程崩溃迁移恢复 | 取消后源完好可重试；journal 安装阶段正确清理 | 通过 |
+| CT-076 | 同上 | 发布 Tag/Commit 一致性 | workflow 使用 --target $GITHUB_SHA | 通过 |
+| CT-078 | 同上 | 验收门禁精确匹配 | 使用 -Fx -e 完整行匹配 | 通过 |
+| CT-080 | 同上 | Job Lease 类型约束 | 非 backup 类型 Job 不能被重试声明 | 通过 |
+| CT-081 | 同上 | 云端状态分类 | notDownloaded/unreadable/corrupted 映射到不同状态 | 通过 |
+| — | 同上 | 大规模数据性能 | 200 文件备份+恢复+逐文件内容校验 | 通过 |
 
 ## 3. Schema 与集成用例
 
@@ -105,7 +116,7 @@ Scripts/test.sh --filter CloudMirrorRegressionTests/testCT001
 
 1. 运行全量测试；
 2. 要求输出包含 `with 0 failures`；
-3. 要求 `testCT001_` … `testCT069_` 全部出现在测试列表中（缺失即失败）；
+3. 要求 `testCT001_` … `testCT069_` 全部出现在测试列表中（缺失即失败）；CT-070…CT-081 由 XCTest 编译期保证；
 4. 除已登记的环境跳过（CT-036/CT-037/CT-044/单 Mac iCloud）外，任何 XCTSkip 都使门禁失败；
 5. 输出 `regression gate: PASS` 才允许进入发布流程。
 

@@ -11,6 +11,11 @@ public struct AppPaths: Sendable {
     public let recovery: URL
     public let schedulerLock: URL
     public let agentLock: URL
+    /// Stable directory outside `root` that survives `replaceItemAt(root, …)`.
+    /// Lifecycle coordination locks and migration journal files live here.
+    public let lifecycleDir: URL
+    public let migrationLock: URL
+    public let migrationRequest: URL
 
     public init(root: URL) {
         self.root = root
@@ -20,8 +25,14 @@ public struct AppPaths: Sendable {
         self.spool = root.appendingPathComponent("spool", isDirectory: true)
         self.logs = root.appendingPathComponent("logs", isDirectory: true)
         self.recovery = root.appendingPathComponent("recovery", isDirectory: true)
-        self.schedulerLock = root.appendingPathComponent("scheduler.lock")
-        self.agentLock = root.appendingPathComponent("agent.lock")
+        // Lifecycle locks live OUTSIDE the replaceable data root so they survive
+        // a whole-root swap during Beta → Release migration.
+        self.lifecycleDir = root.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+        self.schedulerLock = lifecycleDir.appendingPathComponent("scheduler.lock")
+        self.agentLock = lifecycleDir.appendingPathComponent("agent.lock")
+        self.migrationLock = lifecycleDir.appendingPathComponent("migration.lock")
+        self.migrationRequest = lifecycleDir.appendingPathComponent("migration-request.json")
     }
 
     public static func standard() throws -> AppPaths {
@@ -41,6 +52,7 @@ public struct AppPaths: Sendable {
             spool,
             logs,
             recovery,
+            lifecycleDir,
         ] {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         }

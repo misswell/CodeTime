@@ -377,24 +377,32 @@ public enum DataMigrator {
             createdAt: Date(),
             allowReplaceRoot: allowReplaceRoot
         )
-        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        // The request file lives in the lifecycle directory, NOT inside the
+        // replaceable target, so it survives a whole-root swap.
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+        try FileManager.default.createDirectory(at: lifecycleDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(request).write(
-            to: target.appendingPathComponent(requestName),
+            to: lifecycleDir.appendingPathComponent(requestName),
             options: .atomic
         )
     }
 
     public static func hasPendingRequest(target: URL) -> Bool {
-        FileManager.default.fileExists(atPath: target.appendingPathComponent(requestName).path)
+        FileManager.default.fileExists(atPath: target.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+            .appendingPathComponent(requestName).path)
     }
 
     /// Executes a pending request. A non-empty target database is moved aside to a
     /// timestamped directory rather than deleted; the migration then installs the
     /// old data and removes the request only after full verification.
     public static func performPending(target: URL) throws -> MigrationResult? {
-        let requestURL = target.appendingPathComponent(requestName)
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent("CodeTime-lifecycle", isDirectory: true)
+        let requestURL = lifecycleDir.appendingPathComponent(requestName)
         guard FileManager.default.fileExists(atPath: requestURL.path) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -409,8 +417,7 @@ public enum DataMigrator {
         // A second process (old Beta app, Agent, or another UI) must not write the
         // database while it is being snapshotted and swapped.
         let migrationLock = RepositoryLock(
-            path: target.deletingLastPathComponent()
-                .appendingPathComponent("CodeTime.migration.lock").path
+            path: lifecycleDir.appendingPathComponent("migration.lock").path
         )
         guard migrationLock.tryAcquire() else {
             throw MigrationError.targetNotEmpty("另一个数据迁移正在进行")

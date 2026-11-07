@@ -227,6 +227,20 @@ final class AppModel: ObservableObject {
         do {
             let paths = try AppPaths.standard()
             try paths.createDirectories()
+            // CT-072: The stable migration lock (outside the replaceable root)
+            // blocks SQLite access while a whole-root swap is in progress.
+            if FileManager.default.fileExists(atPath: paths.migrationLock.path) {
+                let migrationLock = RepositoryLock(path: paths.migrationLock.path)
+                if !migrationLock.tryAcquire() {
+                    // Migration is actively running; wait for it.
+                    for _ in 0..<120 {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        if !FileManager.default.fileExists(atPath: paths.migrationLock.path) { break }
+                    }
+                } else {
+                    migrationLock.release()
+                }
+            }
             if DataMigrator.hasPendingRequest(target: paths.root) {
                 do {
                     let result = try await Task.detached(priority: .userInitiated) {

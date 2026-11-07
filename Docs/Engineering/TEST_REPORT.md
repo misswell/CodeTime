@@ -22,7 +22,7 @@ Scripts/regression_gate.sh
 结果：
 
 ```text
-Executed 92 tests, with 4 tests skipped and 0 failures
+Executed 106 tests, with 4 tests skipped and 0 failures
 regression gate: PASS (CT-001 … CT-069 present, 0 failures, only allowed skips)
 ```
 
@@ -40,7 +40,7 @@ regression gate: PASS (CT-001 … CT-069 present, 0 failures, only allowed skips
 | ServiceEndToEndTests | 1 | 0 | 0 | 6.07 s |
 | SecondRoundRegressionTests（CT-045…057） | 13 | 0 | 0 | 2.1 s |
 | ICloudAcceptanceTests | 1 | 0 | 1 | — |
-| **合计** | **92** | **0** | **4** | **36.8 s** |
+| **合计** | **106** | **0** | **4** | **35.8 s** |
 
 跳过项：
 

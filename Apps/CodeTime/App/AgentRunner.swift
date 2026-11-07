@@ -22,7 +22,8 @@ enum AgentRunner {
     private static func runAsync() async {
         do {
             let paths = try AppPaths.standard()
-            if DataMigrator.hasPendingRequest(target: paths.root) {
+            if DataMigrator.hasPendingRequest(target: paths.root)
+                || FileManager.default.fileExists(atPath: paths.migrationLock.path) {
                 FileHandle.standardError.write(Data("待处理的数据迁移请求，Agent 退出以避免占用迁移锁。\n".utf8))
                 exit(0)
             }
