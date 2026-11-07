@@ -52,7 +52,7 @@ xcodebuild \
   -configuration Beta \
   -derivedDataPath .build/Beta \
   ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-  "${SIGN_OVERRIDE[@]}" \
+  "${SIGN_OVERRIDE[@]:+${SIGN_OVERRIDE[@]}}" \
   build
 
 APP=".build/Beta/Build/Products/Beta/CodeTime.app"
