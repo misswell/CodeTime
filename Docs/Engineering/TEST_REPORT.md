@@ -22,8 +22,8 @@ Scripts/regression_gate.sh
 结果：
 
 ```text
-Executed 77 tests, with 4 tests skipped and 0 failures
-regression gate: PASS (CT-001 … CT-057 present, 0 failures)
+Executed 92 tests, with 4 tests skipped and 0 failures
+regression gate: PASS (CT-001 … CT-069 present, 0 failures, only allowed skips)
 ```
 
 | 测试类 | 数量 | 失败 | 跳过 | 耗时 |
@@ -40,7 +40,7 @@ regression gate: PASS (CT-001 … CT-057 present, 0 failures)
 | ServiceEndToEndTests | 1 | 0 | 0 | 6.07 s |
 | SecondRoundRegressionTests（CT-045…057） | 13 | 0 | 0 | 2.1 s |
 | ICloudAcceptanceTests | 1 | 0 | 1 | — |
-| **合计** | **77** | **0** | **4** | **23.2 s** |
+| **合计** | **92** | **0** | **4** | **36.8 s** |
 
 跳过项：
 
@@ -50,7 +50,7 @@ regression gate: PASS (CT-001 … CT-057 present, 0 failures)
 - 单机真实 iCloud 往返：缺少真实 iCloud 容器，本次未执行。
 - 真实 iCloud 双 Mac 验收：缺少第二台 Mac；仍为 Stable 必需的人工报告门禁。
 
-第二轮 CT-045…CT-057 全部通过，覆盖迁移、恢复提交、多设备绑定、候选对象缺失、虚假 verified、GC 墓碑、双连接租约、仓库重新发现和 iCloud 路径保护。
+第二轮 CT-045…CT-057 与第三轮 CT-058…CT-069 全部通过，覆盖迁移、恢复提交、多设备绑定、候选对象缺失、虚假 verified、GC 墓碑、双连接租约、仓库重新发现、iCloud 路径保护、双 Mac 验收门禁、迁移锁协调、Keychain 修复、租约全链路原子性、项目状态重算、锁作用域、staging 回收、手动发布工作流与门禁白名单。
 
 ## 3. 构建与静态检查
 

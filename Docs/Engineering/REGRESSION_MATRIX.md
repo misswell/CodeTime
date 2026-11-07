@@ -6,7 +6,7 @@
 # 全量（需要 Bundled Kopia）
 Scripts/test.sh
 
-# 全量 + 门禁（要求 0 失败且 CT-001…CT-057 全部存在）
+# 全量 + 门禁（要求 0 失败且 CT-001…CT-069 全部存在）
 Scripts/regression_gate.sh
 
 # 单个用例
@@ -77,6 +77,18 @@ Scripts/test.sh --filter CloudMirrorRegressionTests/testCT001
 | CT-056 | 同上 | SQLite 丢失、仓库目录保留 | 重新发现仓库 ID/路径 | 通过 |
 | CT-057 | 同上 | iCloud 镜像目录作为项目 | 明确拒绝 | 通过 |
 | — | ICloudAcceptanceTests | 单 Mac 真实 iCloud 发布/恢复 | 上传确认、发布、恢复哈希一致 | **跳过**（需 `CODETIME_ICLOUD_TESTS=1` 与真实容器；双 Mac 为人工报告） |
+| CT-058 | ThirdRoundRegressionTests | 双 Mac 验收门禁输入 | 模板/FAIL 行/缺字段/tag 不匹配全部拒绝，完整 PASS 通过 | 通过 |
+| CT-059 | 同上 | 已登记仓库丢失 + 不同/多个仓库；SQLite+Keychain 双丢失 | 不自动切换仓库；不生成新密钥（fail-closed） | 通过 |
+| CT-060 | 同上 | Beta Agent/Scheduler/Kopia 锁被持有 | 迁移拒绝并提示退出旧版；释放后完整迁移 | 通过 |
+| CT-061 | 同上 | 迁移请求生命周期 | hasPendingRequest 随请求创建/完成翻转 | 通过 |
+| CT-062 | 同上 | Keychain 不可读后的恢复密钥修复 | 错误密钥拒绝；正确密钥恢复 master-key 与仓库密码 | 通过 |
+| CT-063 | 同上 | 双连接/双 Service 竞争同一项目任务 | 只有一个租约成功；owner 之外不能 finish/retry；过期+进程死亡才可回收 | 通过 |
+| CT-064 | 同上 | 最新 Generation 不可读且曾有 verified | verifyCloud 清除 verifiedAt，列表保留损坏占位 | 通过 |
+| CT-065 | 同上 | 旧上传回调 vs 最新快照状态 | 项目状态始终由最新快照推导 | 通过 |
+| CT-066 | 同上 | 发布/GC 与本地仓库锁 | 上传等待期间不持有仓库锁；GC 持有仓库锁时仍可完成 | 通过 |
+| CT-067 | 同上 | 迁移中断（取消/崩溃） | staging 被回收，源目录完好，重试成功 | 通过 |
+| CT-068 | 同上 | workflow_dispatch 手动发布 | publish_release 输入与两个发布步骤、artifact 上传齐全，YAML 合法 | 通过 |
+| CT-069 | 同上 | 回归门禁自身 | 缺失 CT、未登记跳过、非 0 失败均使门禁失败；白名单跳过通过 | 通过 |
 
 ## 3. Schema 与集成用例
 
@@ -93,7 +105,8 @@ Scripts/test.sh --filter CloudMirrorRegressionTests/testCT001
 
 1. 运行全量测试；
 2. 要求输出包含 `with 0 failures`；
-3. 要求 `testCT001_` … `testCT044_` 全部出现在测试列表中（缺失即失败）；
-4. 输出 `REGRESSION GATE: PASS` 才允许进入发布流程。
+3. 要求 `testCT001_` … `testCT069_` 全部出现在测试列表中（缺失即失败）；
+4. 除已登记的环境跳过（CT-036/CT-037/CT-044/单 Mac iCloud）外，任何 XCTSkip 都使门禁失败；
+5. 输出 `regression gate: PASS` 才允许进入发布流程。
 
 CI 的 `regression-gate` job 与 Release 的稳定版 job 均调用该脚本。规模测试与真实 iCloud 验收不在默认 CI 中伪造通过，而是明确标记为 NOT RUN，并由发布检查清单要求人工执行。

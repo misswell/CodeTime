@@ -21,7 +21,12 @@ enum AgentRunner {
 
     private static func runAsync() async {
         do {
-            let service = try CodeTimeService()
+            let paths = try AppPaths.standard()
+            if DataMigrator.hasPendingRequest(target: paths.root) {
+                FileHandle.standardError.write(Data("待处理的数据迁移请求，Agent 退出以避免占用迁移锁。\n".utf8))
+                exit(0)
+            }
+            let service = try CodeTimeService(paths: paths)
             let lock = RepositoryLock(path: service.paths.agentLock.path)
             guard lock.tryAcquire() else {
                 let owner = lock.currentOwner()

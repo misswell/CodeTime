@@ -149,6 +149,7 @@ final class AppModel: ObservableObject {
     @Published var diffContext: DiffContext?
     @Published var showRecoveryKey = false
     @Published var showCloudRecovery = false
+    @Published var secretRecoveryMode = false
     @Published var recoveryKeyText: String = ""
     @Published var recoveryCandidates: [RecoveryCandidate] = []
     @Published var recoveryRestoreJob: CloudRestoreJob?
@@ -267,7 +268,21 @@ final class AppModel: ObservableObject {
                 showToast(migrationNotice, style: .success)
             }
         } catch {
-            phase = .failed(error.localizedDescription)
+            let message = error.localizedDescription
+            if message.contains("master-key")
+                || message.contains("repository-password")
+                || message.contains("Keychain") {
+                // A migrated repository can exist while the Beta Keychain item is
+                // not readable by the Release signing identity. Do not dead-end:
+                // offer the cloud recovery-key repair path.
+                secretRecoveryMode = true
+                showCloudRecovery = true
+                phase = .failed(
+                    "\(message)\n请使用恢复密钥从云端修复本机密钥；不会生成新密钥覆盖现有仓库。"
+                )
+            } else {
+                phase = .failed(message)
+            }
         }
     }
 
@@ -942,6 +957,16 @@ final class AppModel: ObservableObject {
             style: failures.isEmpty ? .success : .warning
         )
         return imported
+    }
+
+    func installSecretsFromCloud(storageRoot: URL, recoveryKey: String) async throws {
+        guard let service else { throw CodeTimeError.repositoryUnavailable("服务尚未就绪") }
+        try await service.installSecretsFromCloud(
+            storageRoot: storageRoot,
+            recoveryKeyText: recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        secretRecoveryMode = false
+        await retryStart()
     }
 
     func latestRecoveryRestoreJob() async throws -> CloudRestoreJob? {

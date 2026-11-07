@@ -593,6 +593,101 @@ public actor SQLiteStore {
         }
     }
 
+    /// Atomically claim a backup job for a project: no live job may exist for the
+    /// project, and the selected job's lease is taken in the same write transaction.
+    public func claimBackupJob(
+        projectID: UUID,
+        retryJobID: UUID?,
+        trigger: BackupTrigger,
+        owner: ProcessIdentity,
+        expiresAt: Date
+    ) throws -> (job: BackupJob, lease: JobLease)? {
+        try transactionResult { () -> (job: BackupJob, lease: JobLease)? in
+            let running: [BackupJob] = try query(
+                "SELECT payload FROM jobs WHERE project_id=? AND state='running'",
+                [.text(projectID.uuidString)]
+            ).compactMap { row -> BackupJob? in
+                guard case .blob(let data) = row[0] else { return nil }
+                return try decode(BackupJob.self, from: data)
+            }
+            for existing in running where existing.id != retryJobID {
+                if let lease = existing.lease, !lease.isReclaimable() { return nil }
+                if existing.lease == nil,
+                   Date().timeIntervalSince(existing.startedAt ?? existing.createdAt) < 60 {
+                    return nil
+                }
+            }
+
+            var claimedJob: BackupJob
+            if let retryJobID, let existing = try self.job(id: retryJobID),
+               !existing.state.isTerminal,
+               existing.projectID == projectID {
+                // A retry claim may only resume a job whose previous worker is
+                // provably gone; a live lease must never be stolen by Job ID.
+                if let lease = existing.lease, !lease.isReclaimable() { return nil }
+                claimedJob = existing
+            } else {
+                claimedJob = BackupJob(projectID: projectID, type: .backup, state: .queued, trigger: trigger)
+            }
+            let lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            claimedJob.state = .running
+            claimedJob.startedAt = claimedJob.startedAt ?? Date()
+            claimedJob.lease = lease
+            try upsertJob(claimedJob)
+            return (claimedJob, lease)
+        }
+    }
+
+    /// Owner-checked terminal update in one transaction. A stale worker can never
+    /// overwrite the state of a job that another process has since claimed.
+    public func finishJob(
+        id: UUID,
+        state: BackupJobState,
+        owner: ProcessIdentity,
+        errorMessage: String? = nil
+    ) throws {
+        try transaction {
+            guard var job = try job(id: id), let lease = job.lease,
+                  lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return }
+            job.state = state
+            job.finishedAt = Date()
+            job.errorMessage = errorMessage
+            job.lease = nil
+            if state == .succeeded {
+                job.nextRetryAt = nil
+                job.errorClass = nil
+                job.attempt = 0
+            }
+            try upsertJob(job)
+        }
+    }
+
+    /// Owner-checked retry scheduling using the current row, not a stale copy.
+    public func scheduleRetry(
+        id: UUID,
+        owner: ProcessIdentity,
+        after delay: TimeInterval,
+        errorClass: RetryErrorClass,
+        message: String
+    ) throws -> Bool {
+        try transactionResult {
+            guard var job = try job(id: id), let lease = job.lease,
+                  lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            job.state = .queued
+            job.retryCount += 1
+            job.attempt = job.retryCount + 1
+            job.nextRetryAt = Date().addingTimeInterval(delay)
+            job.errorClass = errorClass
+            job.errorMessage = message
+            job.finishedAt = nil
+            job.lease = nil
+            try upsertJob(job)
+            return true
+        }
+    }
+
     public func renewJobLease(id: UUID, owner: ProcessIdentity, expiresAt: Date) throws -> Bool {
         try transactionResult {
             guard var job = try job(id: id), let lease = job.lease else { return false }

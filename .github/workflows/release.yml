@@ -20,6 +20,11 @@ on:
         type: string
         required: false
         default: "1"
+      publish_release:
+        description: "Create a GitHub Release for manual dispatch"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -117,11 +122,18 @@ jobs:
         env:
           TAG: ${{ needs.classify.outputs.tag }}
         run: ./Scripts/package_beta.sh
+      - name: Upload pre-release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codetime-${{ needs.classify.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
       - name: Publish pre-release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.classify.outputs.tag }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           NOTES="Docs/releases/${TAG}.md"
@@ -129,12 +141,13 @@ jobs:
             echo "missing release notes: $NOTES" >&2
             exit 1
           fi
+          VERIFY=""
+          if [[ "$REF" == refs/tags/* ]]; then VERIFY="--verify-tag"; fi
           gh release create "$TAG" \
             dist/*.zip dist/*.zip.sha256 \
             --title "CodeTime ${TAG}" \
             --notes-file "$NOTES" \
-            --prerelease \
-            --verify-tag
+            --prerelease $VERIFY
 
   stable:
     needs: [classify, regression]
@@ -174,11 +187,18 @@ jobs:
         run: ./Scripts/package_release.sh
       - name: Verify signed artifact
         run: ./Scripts/verify_release.sh dist/CodeTime-*-macos-universal.zip
+      - name: Upload stable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codetime-${{ needs.classify.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
       - name: Publish stable release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.classify.outputs.tag }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           NOTES="Docs/releases/${TAG}.md"
@@ -186,9 +206,10 @@ jobs:
             echo "missing release notes: $NOTES" >&2
             exit 1
           fi
+          VERIFY=""
+          if [[ "$REF" == refs/tags/* ]]; then VERIFY="--verify-tag"; fi
           gh release create "$TAG" \
             dist/*.zip dist/*.zip.sha256 \
             --title "CodeTime ${TAG}" \
             --notes-file "$NOTES" \
-            --latest \
-            --verify-tag
+            --latest $VERIFY

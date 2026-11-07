@@ -347,9 +347,17 @@ public enum DataMigrator {
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileName),
               let journal = try? decoder.decode(Journal.self, from: data) else { return }
-        if journal.state != "installing" {
-            try? FileManager.default.removeItem(atPath: journal.stagingPath)
+        if journal.state == "installing" {
+            // Whole-root replacement is a single rename. If the target still
+            // exists, the prepared staging directory is safe to reclaim; if the
+            // target is gone, keep it for manual recovery instead of deleting
+            // the only prepared copy.
+            if FileManager.default.fileExists(atPath: target.path) {
+                try? FileManager.default.removeItem(atPath: journal.stagingPath)
+            }
+            return
         }
+        try? FileManager.default.removeItem(atPath: journal.stagingPath)
     }
 
     // MARK: - Deferred migration (runs before the database is opened)
@@ -415,6 +423,41 @@ public enum DataMigrator {
             throw MigrationError.targetNotEmpty("后台代理正在运行，请先退出 CodeTime 再迁移")
         }
         defer { agentLock.release() }
+
+        // The source Beta app may still have an Agent, scheduler or Kopia task.
+        // Acquire every existing source lock for the whole copy/switch window.
+        var sourceLocks: [RepositoryLock] = []
+        defer { sourceLocks.forEach { $0.release() } }
+        let sourceRoot = resolved.url
+        guard sourceRoot.standardizedFileURL != target.standardizedFileURL else {
+            throw MigrationError.targetNotEmpty("源目录与目标目录相同，无法迁移")
+        }
+        func lockSource(_ url: URL, label: String) throws {
+            let lock = RepositoryLock(path: url.path)
+            guard lock.tryAcquireIfPresent() else {
+                throw MigrationError.targetNotEmpty("\(label) 正在被旧版 CodeTime 使用，请先退出旧版并重试")
+            }
+            sourceLocks.append(lock)
+        }
+        try lockSource(sourceRoot.appendingPathComponent("agent.lock"), label: "Beta Agent")
+        try lockSource(sourceRoot.appendingPathComponent("scheduler.lock"), label: "Beta Scheduler")
+        let sourceRepositories = sourceRoot.appendingPathComponent("repositories", isDirectory: true)
+        if FileManager.default.fileExists(atPath: sourceRepositories.path) {
+            let children: [URL]
+            do {
+                children = try FileManager.default.contentsOfDirectory(
+                    at: sourceRepositories,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: []
+                )
+            } catch {
+                throw MigrationError.sourceUnreadable("无法读取 Beta 仓库目录：\(error.localizedDescription)")
+            }
+            for child in children {
+                try lockSource(child.appendingPathComponent("repository.lock"), label: "Beta Kopia")
+                try lockSource(child.appendingPathComponent("publish.lock"), label: "Beta publish")
+            }
+        }
 
         clearInterruptedStaging(target: target)
         let result = try migrate(

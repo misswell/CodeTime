@@ -5,6 +5,31 @@ import SharedModels
 /// A missing database must not turn an existing backup repository into an orphan and
 /// create a new empty one.
 public enum RepositoryDiscovery {
+    /// Chooses a repository without ever silently switching a registered ID.
+    /// Returns nil only when no repository exists at all.
+    public static func select(
+        stored: RepositoryRecord?,
+        discovered: [RepositoryRecord]
+    ) throws -> RepositoryRecord? {
+        if let stored {
+            if let matching = discovered.first(where: { $0.id == stored.id }) {
+                return matching
+            }
+            if !discovered.isEmpty {
+                throw CodeTimeError.repositoryUnavailable(
+                    "已登记仓库丢失，同时发现不同 ID 的本地仓库；请手动选择，CodeTime 不会自动切换"
+                )
+            }
+            return stored
+        }
+        if discovered.count > 1 {
+            throw CodeTimeError.repositoryUnavailable(
+                "发现多个本地备份仓库，请先移走不需要的目录，避免误连到错误的仓库"
+            )
+        }
+        return discovered.first
+    }
+
     public static func discover(in repositoriesRoot: URL) throws -> [RepositoryRecord] {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: repositoriesRoot.path) else { return [] }

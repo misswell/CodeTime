@@ -458,6 +458,14 @@ public final class RepositoryLock: @unchecked Sendable {
         }
     }
 
+    /// Acquire only when the lock file already exists. Absent means no process
+    /// has ever used that subsystem, so there is nothing to coordinate.
+    @discardableResult
+    public func tryAcquireIfPresent() -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return true }
+        return tryAcquire()
+    }
+
     @discardableResult
     public func tryAcquire() -> Bool {
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()

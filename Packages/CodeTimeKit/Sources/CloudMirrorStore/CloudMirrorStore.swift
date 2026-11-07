@@ -246,9 +246,9 @@ public actor CloudMirrorStore: CloudStore {
             guard existing.repositoryId == configuration.repositoryID else {
                 throw CloudStoreError.manifestExists(generation.id.uuidString)
             }
-            try await configuration.uploadTracker.waitForUpload(commit, timeout: configuration.uploadTimeout)
             repositoryLock?.release()
             repositoryLock = nil
+            try await configuration.uploadTracker.waitForUpload(commit, timeout: configuration.uploadTimeout)
             return
         }
 
@@ -1098,12 +1098,11 @@ public actor CloudMirrorStore: CloudStore {
         guard repositoryId == configuration.repositoryID else {
             throw CloudStoreError.invalidFormat("仓库 ID 与存储配置不匹配")
         }
-        // Same order as publish: upload lock first, then the local repository
-        // lock. This prevents GC from sweeping objects of an in-flight publish.
+        // GC only touches cloud objects/manifests. It must not hold the local
+        // Kopia repository lock while scanning a large cloud tree; the publish
+        // lock is the synchronization point with an in-flight upload.
         let publishLock = try await acquirePublishLock()
         defer { publishLock?.release() }
-        let lock = try await acquireRepositoryLock()
-        defer { lock?.release() }
         try await prepare()
 
         let now = Date()

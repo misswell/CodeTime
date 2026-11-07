@@ -655,6 +655,15 @@ struct CloudRecoverySheet: View {
         errorMessage = nil
         Task {
             do {
+                if model.secretRecoveryMode {
+                    try await model.installSecretsFromCloud(
+                        storageRoot: storageRoot,
+                        recoveryKey: key
+                    )
+                    isRestoring = false
+                    dismiss()
+                    return
+                }
                 _ = try await model.recoverFromCloud(candidate: candidate, storageRoot: storageRoot, recoveryKey: key)
                 isRestoring = false
                 dismiss()
