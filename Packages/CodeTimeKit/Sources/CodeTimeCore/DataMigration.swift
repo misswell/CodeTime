@@ -1,6 +1,8 @@
 import Foundation
+import CSQLite
 import SharedModels
 import CodeTimeSecurity
+import BackupEngine
 
 /// One-time import of a v1.0.0-beta.1 data directory (database, local Kopia
 /// repository, recovery copies) into the current App Support location.
@@ -74,6 +76,9 @@ public enum DataMigrator {
         var sourcePath: String
         var sourceBookmark: Data
         var createdAt: Date
+        /// New requests explicitly allow replacing the freshly initialized Release
+        /// data root. Old requests default to false and never overwrite it.
+        var allowReplaceRoot: Bool?
     }
 
     private struct Journal: Codable {
@@ -84,6 +89,8 @@ public enum DataMigrator {
         var startedAt: Date
         var updatedAt: Date
         var message: String?
+        var targetPath: String?
+        var backupPath: String?
     }
 
     private struct Completion: Codable {
@@ -94,7 +101,11 @@ public enum DataMigrator {
         var totalBytes: Int64
     }
 
-    public static func inspect(source: URL, target: URL) throws -> MigrationPlan {
+    public static func inspect(
+        source: URL,
+        target: URL,
+        ignoreTargetConflicts: Bool = false
+    ) throws -> MigrationPlan {
         let fileManager = FileManager.default
         let source = source.standardizedFileURL
         let target = target.standardizedFileURL
@@ -120,32 +131,37 @@ public enum DataMigrator {
         }
 
         var conflicts: [String] = []
-        let targetDatabase = target.appendingPathComponent("database/codetime.sqlite")
-        if fileManager.fileExists(atPath: targetDatabase.path) {
-            conflicts.append("当前目录已有数据库")
-        }
-        let targetRepositories = target.appendingPathComponent("repositories")
-        if fileManager.fileExists(atPath: targetRepositories.path) {
-            do {
-                let targetRepos = try fileManager.contentsOfDirectory(atPath: targetRepositories.path)
-                if targetRepos.contains(where: { !$0.hasPrefix(".") }) {
-                    conflicts.append("当前目录已有备份仓库")
+        if !ignoreTargetConflicts {
+            let targetDatabase = target.appendingPathComponent("database/codetime.sqlite")
+            if fileManager.fileExists(atPath: targetDatabase.path) {
+                conflicts.append("当前目录已有数据库")
+            }
+            let targetRepositories = target.appendingPathComponent("repositories")
+            if fileManager.fileExists(atPath: targetRepositories.path) {
+                do {
+                    let targetRepos = try fileManager.contentsOfDirectory(atPath: targetRepositories.path)
+                    if targetRepos.contains(where: { !$0.hasPrefix(".") }) {
+                        conflicts.append("当前目录已有备份仓库")
+                    }
+                } catch {
+                    throw MigrationError.targetNotEmpty("无法读取当前备份仓库目录：\(error.localizedDescription)")
                 }
-            } catch {
-                throw MigrationError.targetNotEmpty("无法读取当前备份仓库目录：\(error.localizedDescription)")
             }
         }
 
-        var fileCount = 0
-        var totalBytes: Int64 = 0
-        if let enumerator = fileManager.enumerator(at: source, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) {
-            while let url = enumerator.nextObject() as? URL {
-                let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-                guard values?.isRegularFile == true else { continue }
-                fileCount += 1
-                totalBytes += Int64(values?.fileSize ?? 0)
-            }
+        // Use the same enumerator as the copy phase so hidden files are counted
+        // consistently and symlinks are not reported as copied bytes.
+        let files = try regularFiles(under: source).filter {
+            let relative = relativePath($0, root: source)
+            return relative != "database/codetime.sqlite-wal"
+                && relative != "database/codetime.sqlite-shm"
         }
+        var totalBytes: Int64 = 0
+        for file in files {
+            let values = try file.resourceValues(forKeys: [.fileSizeKey])
+            totalBytes += Int64(values.fileSize ?? 0)
+        }
+        let fileCount = files.count
 
         return MigrationPlan(
             sourceRoot: source,
@@ -165,10 +181,11 @@ public enum DataMigrator {
         source: URL,
         target: URL,
         jobID: UUID = UUID(),
+        replaceRoot: Bool = false,
         isCancelled: () -> Bool = { false },
         progress: (Double) -> Void = { _ in }
     ) throws -> MigrationResult {
-        let plan = try inspect(source: source, target: target)
+        let plan = try inspect(source: source, target: target, ignoreTargetConflicts: replaceRoot)
         guard plan.conflicts.isEmpty else {
             throw MigrationError.targetNotEmpty(plan.conflicts.joined(separator: "；"))
         }
@@ -200,17 +217,29 @@ public enum DataMigrator {
         do {
             let files = try regularFiles(under: plan.sourceRoot)
             var copied: [String: Int64] = [:]
+            var copiedCount = 0
             for (index, file) in files.enumerated() {
                 if isCancelled() { throw MigrationError.cancelled }
                 let relative = relativePath(file, root: plan.sourceRoot)
+                if relative == "database/codetime.sqlite-wal"
+                    || relative == "database/codetime.sqlite-shm" {
+                    // SQLite backup below captures a consistent snapshot including
+                    // the WAL. Copying sidecars separately would corrupt it.
+                    continue
+                }
                 let destination = staging.appendingPathComponent(relative)
                 try fileManager.createDirectory(
                     at: destination.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
-                try fileManager.copyItem(at: file, to: destination)
+                if relative == "database/codetime.sqlite" {
+                    try copySQLiteDatabase(from: file, to: destination)
+                } else {
+                    try fileManager.copyItem(at: file, to: destination)
+                }
                 let values = try destination.resourceValues(forKeys: [.fileSizeKey])
                 copied[relative] = Int64(values.fileSize ?? 0)
+                copiedCount += 1
                 progress(Double(index + 1) / Double(max(1, files.count)) * 0.9)
             }
 
@@ -221,6 +250,10 @@ public enum DataMigrator {
             for (index, file) in files.enumerated() {
                 if isCancelled() { throw MigrationError.cancelled }
                 let relative = relativePath(file, root: plan.sourceRoot)
+                if relative == "database/codetime.sqlite-wal"
+                    || relative == "database/codetime.sqlite-shm" {
+                    continue
+                }
                 guard let expectedSize = copied[relative] else {
                     throw MigrationError.verificationFailed("缺少文件 \(relative)")
                 }
@@ -229,35 +262,58 @@ public enum DataMigrator {
                 guard Int64(size) == expectedSize else {
                     throw MigrationError.verificationFailed("大小不一致：\(relative)")
                 }
-                let sourceHash = try Hashing.sha256Hex(fileURL: file)
-                let stagedHash = try Hashing.sha256Hex(fileURL: staged)
-                guard sourceHash == stagedHash else {
-                    throw MigrationError.verificationFailed("内容不一致：\(relative)")
+                if relative == "database/codetime.sqlite" {
+                    try verifySQLiteDatabase(at: staged)
+                } else {
+                    let sourceHash = try Hashing.sha256Hex(fileURL: file)
+                    let stagedHash = try Hashing.sha256Hex(fileURL: staged)
+                    guard sourceHash == stagedHash else {
+                        throw MigrationError.verificationFailed("内容不一致：\(relative)")
+                    }
                 }
                 progress(0.9 + Double(index + 1) / Double(max(1, files.count)) * 0.1)
             }
 
             journal.state = "installing"
             journal.updatedAt = Date()
+            journal.targetPath = target.path
             try write(journal, to: target.appendingPathComponent(journalName))
+            progress(0.95)
 
-            // Move children rather than the directory itself: the target already
-            // holds the journal file and may hold unrelated user files.
-            for child in try fileManager.contentsOfDirectory(atPath: staging.path) {
-                let from = staging.appendingPathComponent(child)
-                let to = target.appendingPathComponent(child)
-                guard !fileManager.fileExists(atPath: to.path) else {
-                    throw MigrationError.targetNotEmpty("安装阶段发现冲突：\(child)")
+            if replaceRoot {
+                let targetExists = fileManager.fileExists(atPath: target.path)
+                if targetExists {
+                    let backupName = "CodeTime.pre-migration-\(Int(Date().timeIntervalSince1970))"
+                    // A single filesystem replace keeps the target either wholly old
+                    // or wholly new; the previous target is retained as a backup.
+                    _ = try fileManager.replaceItemAt(
+                        target,
+                        withItemAt: staging,
+                        backupItemName: backupName,
+                        options: []
+                    )
+                } else {
+                    try fileManager.moveItem(at: staging, to: target)
                 }
-                try fileManager.moveItem(at: from, to: to)
+            } else {
+                // Legacy merge mode: only used for an empty target. Move children
+                // rather than deleting the target directory.
+                for child in try fileManager.contentsOfDirectory(atPath: staging.path) {
+                    let from = staging.appendingPathComponent(child)
+                    let to = target.appendingPathComponent(child)
+                    guard !fileManager.fileExists(atPath: to.path) else {
+                        throw MigrationError.targetNotEmpty("安装阶段发现冲突：\(child)")
+                    }
+                    try fileManager.moveItem(at: from, to: to)
+                }
+                try? fileManager.removeItem(at: staging)
             }
-            try? fileManager.removeItem(at: staging)
 
             let completion = Completion(
                 jobID: jobID,
                 sourceRoot: plan.sourceRoot.path,
                 migratedAt: Date(),
-                fileCount: plan.fileCount,
+                fileCount: copiedCount,
                 totalBytes: plan.totalBytes
             )
             let encoder = JSONEncoder()
@@ -269,7 +325,7 @@ public enum DataMigrator {
 
             return MigrationResult(
                 jobID: jobID,
-                fileCount: plan.fileCount,
+                fileCount: copiedCount,
                 totalBytes: plan.totalBytes,
                 migratedAt: completion.migratedAt,
                 sourceRoot: plan.sourceRoot
@@ -287,8 +343,10 @@ public enum DataMigrator {
     /// A previous run left staging data behind; remove it so a retry starts clean.
     public static func clearInterruptedStaging(target: URL) {
         let fileName = target.appendingPathComponent(journalName)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileName),
-              let journal = try? JSONDecoder().decode(Journal.self, from: data) else { return }
+              let journal = try? decoder.decode(Journal.self, from: data) else { return }
         if journal.state != "installing" {
             try? FileManager.default.removeItem(atPath: journal.stagingPath)
         }
@@ -299,9 +357,18 @@ public enum DataMigrator {
     /// Records a migration request. The actual copy happens on the next launch,
     /// before `CodeTimeService` opens SQLite, because replacing a database under
     /// an open connection is never safe.
-    public static func requestMigration(source: URL, target: URL) throws {
+    public static func requestMigration(
+        source: URL,
+        target: URL,
+        allowReplaceRoot: Bool = false
+    ) throws {
         let bookmark = try SecurityScopedBookmarks.makeBookmark(for: source)
-        let request = Request(sourcePath: source.path, sourceBookmark: bookmark, createdAt: Date())
+        let request = Request(
+            sourcePath: source.path,
+            sourceBookmark: bookmark,
+            createdAt: Date(),
+            allowReplaceRoot: allowReplaceRoot
+        )
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -321,33 +388,104 @@ public enum DataMigrator {
     public static func performPending(target: URL) throws -> MigrationResult? {
         let requestURL = target.appendingPathComponent(requestName)
         guard FileManager.default.fileExists(atPath: requestURL.path) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: requestURL),
-              let request = try? JSONDecoder().decode(Request.self, from: data) else {
+              let request = try? decoder.decode(Request.self, from: data) else {
             throw MigrationError.sourceUnreadable("迁移请求文件损坏")
         }
         let resolved = try SecurityScopedBookmarks.resolve(request.sourceBookmark)
         let access = SecurityScopedAccess(url: resolved.url)
         defer { access.stop() }
 
-        clearInterruptedStaging(target: target)
-
-        let databaseDirectory = target.appendingPathComponent("database", isDirectory: true)
-        if FileManager.default.fileExists(atPath: databaseDirectory.path) {
-            let stamp = Int(Date().timeIntervalSince1970)
-            let backup = target.appendingPathComponent("database.pre-migration-\(stamp)", isDirectory: true)
-            try FileManager.default.moveItem(at: databaseDirectory, to: backup)
+        // A second process (old Beta app, Agent, or another UI) must not write the
+        // database while it is being snapshotted and swapped.
+        let migrationLock = RepositoryLock(
+            path: target.deletingLastPathComponent()
+                .appendingPathComponent("CodeTime.migration.lock").path
+        )
+        guard migrationLock.tryAcquire() else {
+            throw MigrationError.targetNotEmpty("另一个数据迁移正在进行")
         }
+        defer { migrationLock.release() }
+        let agentLock = RepositoryLock(
+            path: target.appendingPathComponent("agent.lock").path
+        )
+        guard agentLock.tryAcquire() else {
+            throw MigrationError.targetNotEmpty("后台代理正在运行，请先退出 CodeTime 再迁移")
+        }
+        defer { agentLock.release() }
 
-        let result = try migrate(source: resolved.url, target: target)
+        clearInterruptedStaging(target: target)
+        let result = try migrate(
+            source: resolved.url,
+            target: target,
+            replaceRoot: request.allowReplaceRoot == true
+        )
         try? FileManager.default.removeItem(at: requestURL)
         return result
+    }
+
+    private static func copySQLiteDatabase(from source: URL, to target: URL) throws {
+        var sourceDB: OpaquePointer?
+        var targetDB: OpaquePointer?
+        guard sqlite3_open_v2(source.path, &sourceDB, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            let message = sourceDB.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            if let sourceDB { sqlite3_close(sourceDB) }
+            throw MigrationError.sourceUnreadable("无法打开旧数据库：\(message)")
+        }
+        defer { sqlite3_close(sourceDB) }
+        guard sqlite3_open_v2(
+            target.path,
+            &targetDB,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+            nil
+        ) == SQLITE_OK else {
+            let message = targetDB.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            if let targetDB { sqlite3_close(targetDB) }
+            throw MigrationError.verificationFailed("无法创建迁移数据库：\(message)")
+        }
+        defer { sqlite3_close(targetDB) }
+        guard let backup = sqlite3_backup_init(targetDB, "main", sourceDB, "main") else {
+            throw MigrationError.verificationFailed("无法启动 SQLite 备份")
+        }
+        let step = sqlite3_backup_step(backup, -1)
+        let finish = sqlite3_backup_finish(backup)
+        guard step == SQLITE_DONE, finish == SQLITE_OK else {
+            throw MigrationError.verificationFailed(
+                "SQLite 备份未完成（step=\(step), finish=\(finish)）"
+            )
+        }
+    }
+
+    private static func verifySQLiteDatabase(at url: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            if let db { sqlite3_close(db) }
+            throw MigrationError.verificationFailed("无法打开迁移后的数据库：\(message)")
+        }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA integrity_check;", -1, &statement, nil) == SQLITE_OK else {
+            let message = String(cString: sqlite3_errmsg(db))
+            throw MigrationError.verificationFailed(
+                "无法校验迁移后的数据库：\(message)（\(url.path)，存在=\(FileManager.default.fileExists(atPath: url.path))）"
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let text = sqlite3_column_text(statement, 0),
+              String(cString: text) == "ok" else {
+            throw MigrationError.verificationFailed("迁移后的数据库完整性校验未通过")
+        }
     }
 
     private static func regularFiles(under root: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
+            options: []
         ) else {
             throw MigrationError.sourceUnreadable(root.path)
         }

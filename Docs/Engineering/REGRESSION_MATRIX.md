@@ -6,7 +6,7 @@
 # 全量（需要 Bundled Kopia）
 Scripts/test.sh
 
-# 全量 + 门禁（要求 0 失败且 CT-001…CT-044 全部存在）
+# 全量 + 门禁（要求 0 失败且 CT-001…CT-057 全部存在）
 Scripts/regression_gate.sh
 
 # 单个用例
@@ -63,7 +63,20 @@ Scripts/test.sh --filter CloudMirrorRegressionTests/testCT001
 | CT-042 | 同上 | 同一秒内多次日志轮转 | 归档名唯一，日志总量有界 | 通过 |
 | CT-043 | 同上 | 活动/缓存表长期增长 | 定期裁剪，表大小有界 | 通过 |
 | CT-044 | 同上 | 磁盘写入 ENOSPC | 错误分类为磁盘空间，仓库不被破坏 | **跳过**（需可控小容量卷，本机未注入） |
-| — | ICloudAcceptanceTests | 两台 Mac 真实 iCloud 发布/恢复 | 跨设备可见、可恢复、上传确认真实 | **跳过**（需 `CODETIME_ICLOUD_TESTS=1` 与真实容器） |
+| CT-045 | SecondRoundRegressionTests | Release 已初始化的空数据库/仓库请求 Beta 迁移 | 迁移请求被接受，目标最终使用 Beta 数据 | 通过 |
+| CT-046 | 同上 | 目标已有空 repositories/cache | 不阻止迁移，整根替换成功 | 通过 |
+| CT-047 | 同上 | Beta 仓库包含隐藏 `.shards` | 隐藏文件完整迁移 | 通过 |
+| CT-048 | 同上 | 迁移复制阶段取消 | 目标保持原样，之后可重新迁移 | 通过 |
+| CT-049 | 同上 | 恢复目录存在损坏文件和残留临时文件 | 自动替换并清理，恢复成功 | 通过 |
+| CT-050 | 同上 | 恢复任务处于 committing | 状态可恢复，重启后继续提交 | 通过 |
+| CT-051 | 同上 | 同一 Repository 多设备 | 严格使用用户选择的 deviceID | 通过 |
+| CT-052 | 同上 | 最新 Generation 对象缺失 | 候选不可恢复并报告原因 | 通过 |
+| CT-053 | 同上 | 云端对象缺失后校验 | 结果失败，数据库不保留 verified | 通过 |
+| CT-054 | 同上 | aborted GC + 不可读墓碑 | 不删除墓碑引用对象 | 通过 |
+| CT-055 | 同上 | 两个 SQLite 连接竞争同一任务 | 只有一个租约成功 | 通过 |
+| CT-056 | 同上 | SQLite 丢失、仓库目录保留 | 重新发现仓库 ID/路径 | 通过 |
+| CT-057 | 同上 | iCloud 镜像目录作为项目 | 明确拒绝 | 通过 |
+| — | ICloudAcceptanceTests | 单 Mac 真实 iCloud 发布/恢复 | 上传确认、发布、恢复哈希一致 | **跳过**（需 `CODETIME_ICLOUD_TESTS=1` 与真实容器；双 Mac 为人工报告） |
 
 ## 3. Schema 与集成用例
 

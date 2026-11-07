@@ -11,6 +11,15 @@ on:
         required: true
         default: beta
         options: [beta, rc, stable]
+      version:
+        description: "Marketing version, e.g. 1.0.0"
+        type: string
+        required: true
+      prerelease:
+        description: "Beta/RC number, e.g. 1"
+        type: string
+        required: false
+        default: "1"
 
 permissions:
   contents: write
@@ -29,30 +38,46 @@ jobs:
     timeout-minutes: 5
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
+      tag: ${{ steps.channel.outputs.tag }}
     steps:
       - name: Classify tag
         id: channel
         env:
           TAG: ${{ github.ref_name }}
           INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
           CHANNEL=""
-          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+          RESOLVED_TAG="$TAG"
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            # Manual dispatch from a branch: build the tag from the requested
+            # version instead of using the branch name.
+            CHANNEL="$INPUT_CHANNEL"
+            case "$CHANNEL" in
+              beta) RESOLVED_TAG="v${INPUT_VERSION}-beta.${INPUT_PRERELEASE:-1}" ;;
+              rc) RESOLVED_TAG="v${INPUT_VERSION}-rc.${INPUT_PRERELEASE:-1}" ;;
+              stable) RESOLVED_TAG="v${INPUT_VERSION}" ;;
+              *) echo "无法识别的手动发布渠道：$CHANNEL" >&2; exit 1 ;;
+            esac
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
             CHANNEL="beta"
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
             CHANNEL="rc"
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             CHANNEL="stable"
-          elif [ -n "${INPUT_CHANNEL:-}" ]; then
-            CHANNEL="$INPUT_CHANNEL"
+          else
+            echo "无法识别的发布 tag：$TAG" >&2
+            exit 1
           fi
           if [ -z "$CHANNEL" ]; then
             echo "无法识别的发布 tag：$TAG" >&2
             exit 1
           fi
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "release channel: $CHANNEL"
+          echo "tag=$RESOLVED_TAG" >> "$GITHUB_OUTPUT"
+          echo "release channel: $CHANNEL ($RESOLVED_TAG)"
 
   regression:
     needs: classify
@@ -90,13 +115,13 @@ jobs:
       - run: brew install xcodegen
       - name: Package pre-release
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.classify.outputs.tag }}
         run: ./Scripts/package_beta.sh
       - name: Publish pre-release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.classify.outputs.tag }}
         run: |
           set -euo pipefail
           NOTES="Docs/releases/${TAG}.md"
@@ -137,12 +162,14 @@ jobs:
           : "${DEVELOPMENT_TEAM:?stable release requires DEVELOPMENT_TEAM secret}"
           : "${APPLE_ID:?stable release requires APPLE_ID secret}"
           : "${NOTARY_PASSWORD:?stable release requires NOTARY_PASSWORD secret}"
+      - name: Require two-Mac iCloud acceptance report
+        run: ./Scripts/require_icloud_acceptance.sh "${{ needs.classify.outputs.tag }}"
       - name: Package, notarize and staple
         env:
           DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.classify.outputs.tag }}
           CODETIME_RELEASE_CHANNEL: stable
         run: ./Scripts/package_release.sh
       - name: Verify signed artifact
@@ -151,7 +178,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.classify.outputs.tag }}
         run: |
           set -euo pipefail
           NOTES="Docs/releases/${TAG}.md"

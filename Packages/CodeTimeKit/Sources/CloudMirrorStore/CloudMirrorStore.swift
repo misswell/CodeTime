@@ -16,6 +16,12 @@ public actor CloudMirrorStore: CloudStore {
         public var coordinatedIO: Bool
         public var uploadTimeout: TimeInterval
         public var lockURL: URL?
+        /// Separate from `lockURL`: local snapshots only need the Kopia repository
+        /// lock, while uploads may wait for iCloud for a long time. GC takes this
+        /// lock so it cannot sweep objects that are still being published.
+        public var publishLockURL: URL?
+        /// Non-fatal diagnostics from post-commit metadata repair.
+        public var warningHandler: (@Sendable (String) -> Void)?
         public var journalStore: any GCJournalProviding
         public var indexStore: any CloudObjectIndexProviding
         public var hashCacheStore: any ObjectHashCacheProviding
@@ -39,6 +45,8 @@ public actor CloudMirrorStore: CloudStore {
             coordinatedIO: Bool = false,
             uploadTimeout: TimeInterval = 900,
             lockURL: URL? = nil,
+            publishLockURL: URL? = nil,
+            warningHandler: (@Sendable (String) -> Void)? = nil,
             journalStore: any GCJournalProviding = NoopGCJournalStore(),
             indexStore: any CloudObjectIndexProviding = NoopObjectIndexStore(),
             hashCacheStore: any ObjectHashCacheProviding = NoopHashCacheStore(),
@@ -57,7 +65,10 @@ public actor CloudMirrorStore: CloudStore {
             self.coordinatedIO = coordinatedIO
             self.uploadTimeout = uploadTimeout
             self.lockURL = lockURL
+            self.publishLockURL = publishLockURL
+            self.warningHandler = warningHandler
             self.journalStore = journalStore
+
             self.indexStore = indexStore
             self.hashCacheStore = hashCacheStore
             self.sweepGrace = sweepGrace
@@ -72,6 +83,7 @@ public actor CloudMirrorStore: CloudStore {
         var identity: String
         var size: Int64
         var modifiedAt: Date
+        var changedAt: Date
     }
 
     private struct ScanItem {
@@ -187,6 +199,20 @@ public actor CloudMirrorStore: CloudStore {
         guard info.repositoryId == configuration.repositoryID else {
             throw CloudStoreError.invalidFormat("recovery-info 仓库不匹配")
         }
+        let masterKey = try configuration.masterKeyProvider.masterKey()
+        guard info.keyFingerprint == Self.keyFingerprint(masterKey) else {
+            throw CloudStoreError.invalidFormat("recovery-info 与当前密钥不匹配")
+        }
+        let plaintext = try CryptoBox.open(
+            info.payload,
+            masterKey: masterKey,
+            context: recoveryContext(repositoryID: info.repositoryId)
+        )
+        let payload = try decoder.decode(RecoveryPayload.self, from: plaintext)
+        guard payload.repositoryId == info.repositoryId,
+              payload.keyFingerprint == info.keyFingerprint else {
+            throw CloudStoreError.invalidFormat("recovery-info 内部数据不一致")
+        }
         return info
     }
 
@@ -200,11 +226,30 @@ public actor CloudMirrorStore: CloudStore {
         guard repositoryId == configuration.repositoryID else {
             throw CloudStoreError.invalidFormat("仓库 ID 与存储配置不匹配")
         }
-        let lock = try await acquireRepositoryLock()
-        defer { lock?.release() }
+        // Publish lock is held for the whole upload, but the Kopia repository
+        // lock is released as soon as local objects have been copied. A slow
+        // iCloud upload must not block the next local snapshot.
+        let publishLock = try await acquirePublishLock()
+        defer { publishLock?.release() }
+        var repositoryLock = try await acquireRepositoryLock()
+        defer { repositoryLock?.release() }
         try await prepare()
         guard fileManager.fileExists(atPath: configuration.repositoryURL.path) else {
             throw CloudStoreError.invalidFormat("本地仓库不存在")
+        }
+        let commit = commitURL(generation.id)
+        if fileManager.fileExists(atPath: commit.path) {
+            // A previous attempt committed the manifest but failed afterwards.
+            // Confirm the existing generation instead of creating a second one.
+            try await access.download(commit, timeout: 120)
+            let existing = try await loadManifest(generationID: generation.id)
+            guard existing.repositoryId == configuration.repositoryID else {
+                throw CloudStoreError.manifestExists(generation.id.uuidString)
+            }
+            try await configuration.uploadTracker.waitForUpload(commit, timeout: configuration.uploadTimeout)
+            repositoryLock?.release()
+            repositoryLock = nil
+            return
         }
 
         let scan = try await scanRepository(previousEntries: nil)
@@ -224,6 +269,11 @@ public actor CloudMirrorStore: CloudStore {
         try await forEachConcurrently(objectList) { item in
             try await self.storeObject(hash: item.hash, source: item.url, expected: item.stamp)
         }
+        // Local object copies are complete. Keep the publish lock (so GC cannot
+        // sweep uncommitted objects), but let the next snapshot take the
+        // repository lock while iCloud finishes uploading.
+        repositoryLock?.release()
+        repositoryLock = nil
         // 2. Wait for the provider to confirm every object.
         try await forEachConcurrently(Array(uniqueObjects.keys)) { hash in
             try await self.configuration.uploadTracker.waitForUpload(
@@ -266,7 +316,6 @@ public actor CloudMirrorStore: CloudStore {
             context: manifestContext(generationID: generation.id)
         )
 
-        let commit = commitURL(generation.id)
         guard !fileManager.fileExists(atPath: commit.path) else {
             throw CloudStoreError.manifestExists(generation.id.uuidString)
         }
@@ -299,8 +348,40 @@ public actor CloudMirrorStore: CloudStore {
             throw publishError
         }
 
-        try await writeRecoveryInfo()
-        try await configuration.indexStore.saveObjectIndex(scan.result.entries, repositoryID: configuration.repositoryID)
+        // The manifest is committed. Recovery-info and the object index are
+        // rebuildable metadata: a failure here must not turn a published
+        // generation into a failed one.
+        do {
+            try await writeRecoveryInfo()
+        } catch {
+            configuration.warningHandler?("已发布清单，但 recovery-info 写入失败：\(error.localizedDescription)")
+        }
+        do {
+            try await configuration.indexStore.saveObjectIndex(
+                scan.result.entries,
+                repositoryID: configuration.repositoryID
+            )
+        } catch {
+            configuration.warningHandler?("已发布清单，但对象索引写入失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// True only when the manifest exists, downloads, decrypts and is confirmed by
+    /// the upload tracker. Used to turn a post-commit failure into idempotent success.
+    public func confirmPublished(generationId: UUID) async -> Bool {
+        let commit = commitURL(generationId)
+        guard fileManager.fileExists(atPath: commit.path) else { return false }
+        do {
+            try await access.download(commit, timeout: 120)
+            _ = try await loadManifest(generationID: generationId)
+            try await configuration.uploadTracker.waitForUpload(
+                commit,
+                timeout: configuration.uploadTimeout
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Bounded fan-out. Publish touches thousands of small objects; doing that
@@ -413,7 +494,12 @@ public actor CloudMirrorStore: CloudStore {
 
             var hash: String?
             if let cached = index[relative],
-               cached.matches(identity: stamp.identity, size: stamp.size, modifiedAt: stamp.modifiedAt) {
+               cached.matches(
+                   identity: stamp.identity,
+                   size: stamp.size,
+                   modifiedAt: stamp.modifiedAt,
+                   changedAt: stamp.changedAt
+               ) {
                 hash = cached.sha256
             }
             if hash == nil,
@@ -421,7 +507,12 @@ public actor CloudMirrorStore: CloudStore {
                    repositoryID: configuration.repositoryID,
                    paths: [relative]
                )[relative],
-               cached.matches(identity: stamp.identity, size: stamp.size, modifiedAt: stamp.modifiedAt) {
+               cached.matches(
+                   identity: stamp.identity,
+                   size: stamp.size,
+                   modifiedAt: stamp.modifiedAt,
+                   changedAt: stamp.changedAt
+               ) {
                 hash = cached.contentHash
             }
             if hash == nil {
@@ -435,6 +526,7 @@ public actor CloudMirrorStore: CloudStore {
                 relativePath: item.relativePath,
                 size: item.stamp.size,
                 modifiedAt: item.stamp.modifiedAt,
+                changedAt: item.stamp.changedAt,
                 fileIdentity: item.stamp.identity,
                 sha256: item.hash,
                 lastVerifiedAt: Date(),
@@ -448,6 +540,7 @@ public actor CloudMirrorStore: CloudStore {
                     fileIdentity: item.stamp.identity,
                     size: item.stamp.size,
                     modifiedAt: item.stamp.modifiedAt,
+                    changedAt: item.stamp.changedAt,
                     contentHash: item.hash,
                     verifiedAt: Date()
                 )
@@ -545,6 +638,9 @@ public actor CloudMirrorStore: CloudStore {
         guard fileManager.fileExists(atPath: url.path) else {
             throw CloudStoreError.objectMissing(hash)
         }
+        // A dataless iCloud placeholder can report an incomplete size; download it
+        // before the size/hash checks so eviction is not reported as corruption.
+        try await access.download(url, timeout: 300)
         guard let stamp = Self.stamp(of: url), stamp.size == expectedSize else {
             throw CloudStoreError.objectCorrupt(hash)
         }
@@ -558,10 +654,12 @@ public actor CloudMirrorStore: CloudStore {
         var info = stat()
         guard stat(url.path, &info) == 0 else { return nil }
         let seconds = Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        let changed = Double(info.st_ctimespec.tv_sec) + Double(info.st_ctimespec.tv_nsec) / 1_000_000_000
         return FileStamp(
             identity: "\(info.st_dev):\(info.st_ino)",
             size: Int64(info.st_size),
-            modifiedAt: Date(timeIntervalSince1970: seconds)
+            modifiedAt: Date(timeIntervalSince1970: seconds),
+            changedAt: Date(timeIntervalSince1970: changed)
         )
     }
 
@@ -586,6 +684,8 @@ public actor CloudMirrorStore: CloudStore {
             guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
                 continue
             }
+            let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
             if let state = Self.unreadableState(of: url), state != .current {
                 if state == .notDownloaded || state == .downloading {
                     do {
@@ -595,7 +695,8 @@ public actor CloudMirrorStore: CloudStore {
                             id: id,
                             readState: .notDownloaded,
                             detail: error.localizedDescription,
-                            manifestPath: url.path
+                            manifestPath: url.path,
+                            manifestModifiedAt: commitDate
                         ))
                         continue
                     }
@@ -604,7 +705,8 @@ public actor CloudMirrorStore: CloudStore {
                         id: id,
                         readState: .unreadable,
                         detail: detail,
-                        manifestPath: url.path
+                        manifestPath: url.path,
+                        manifestModifiedAt: commitDate
                     ))
                     continue
                 }
@@ -623,14 +725,13 @@ public actor CloudMirrorStore: CloudStore {
                     hash = ""
                     hashDetail = "无法计算清单哈希：\(error.localizedDescription)"
                 }
-                let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? manifest.createdAt
+                let publishedAt = commitDate ?? manifest.createdAt
                 let generation = CloudGeneration(
                     id: id,
                     repositoryID: manifest.repositoryId,
                     deviceID: manifest.deviceId,
                     createdAt: manifest.createdAt,
-                    publishedAt: commitDate,
+                    publishedAt: publishedAt,
                     state: .published,
                     manifestHash: hash,
                     objectCount: manifest.integrity.uniqueObjectCount,
@@ -644,7 +745,8 @@ public actor CloudMirrorStore: CloudStore {
                     generation: generation,
                     readState: .valid,
                     detail: hashDetail,
-                    manifestPath: url.path
+                    manifestPath: url.path,
+                    manifestModifiedAt: publishedAt
                 ))
             } catch let error as CloudStoreError {
                 let state: GenerationReadState
@@ -657,14 +759,16 @@ public actor CloudMirrorStore: CloudStore {
                     id: id,
                     readState: state,
                     detail: error.localizedDescription,
-                    manifestPath: url.path
+                    manifestPath: url.path,
+                    manifestModifiedAt: commitDate
                 ))
             } catch {
                 entries.append(CloudGenerationEntry(
                     id: id,
                     readState: .corrupted,
                     detail: error.localizedDescription,
-                    manifestPath: url.path
+                    manifestPath: url.path,
+                    manifestModifiedAt: commitDate
                 ))
             }
         }
@@ -674,8 +778,8 @@ public actor CloudMirrorStore: CloudStore {
         return entries.sorted {
             let left = $0.generation
             let right = $1.generation
-            let leftDate = left?.publishedAt ?? left?.createdAt ?? .distantPast
-            let rightDate = right?.publishedAt ?? right?.createdAt ?? .distantPast
+            let leftDate = $0.manifestModifiedAt ?? left?.publishedAt ?? left?.createdAt ?? .distantPast
+            let rightDate = $1.manifestModifiedAt ?? right?.publishedAt ?? right?.createdAt ?? .distantPast
             if leftDate == rightDate { return $0.id.uuidString > $1.id.uuidString }
             return leftDate > rightDate
         }
@@ -790,6 +894,11 @@ public actor CloudMirrorStore: CloudStore {
             if !contents.isEmpty && !allowResume {
                 throw CodeTimeError.destinationExists(dest.path)
             }
+            if allowResume {
+                // A previous process may have died while writing a staging file.
+                // These temp files are never part of the manifest.
+                removeRestoreTemps(in: dest)
+            }
         } else {
             try await access.ensureDirectory(dest)
         }
@@ -825,8 +934,11 @@ public actor CloudMirrorStore: CloudStore {
             let target = dest.appendingPathComponent(relative)
             if fileManager.fileExists(atPath: target.path) {
                 if allowResume {
-                    let existingHash = try await access.hash(target)
-                    if existingHash == file.contentHash {
+                    let kind = try target.resourceValues(forKeys: [.isDirectoryKey])
+                    guard kind.isDirectory != true else {
+                        throw CodeTimeError.destinationExists(target.path)
+                    }
+                    if let existingHash = try? await access.hash(target), existingHash == file.contentHash {
                         completed += 1
                         completedBytes += file.size
                         await progress?(RestoreProgress(
@@ -838,25 +950,21 @@ public actor CloudMirrorStore: CloudStore {
                         ))
                         continue
                     }
+                    // A partial or damaged file from an interrupted copy is not a
+                    // reason to give up: the verified temp file replaces it below.
+                } else {
+                    throw CodeTimeError.destinationExists(target.path)
                 }
-                throw CodeTimeError.destinationExists(target.path)
             }
 
             try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
-            try await access.ensureDirectory(target.deletingLastPathComponent())
-            do {
-                try await access.copy(object, to: target)
-            } catch {
-                throw CloudStoreError.restoreInterrupted("\(relative)：\(error.localizedDescription)")
-            }
-            guard let stamp = Self.stamp(of: target), stamp.size == file.size else {
-                throw CloudStoreError.restoreInterrupted("复制后大小不一致：\(relative)")
-            }
-            let copiedHash = try await access.hash(target)
-            guard copiedHash == file.contentHash else {
-                try? await access.remove(target)
-                throw CloudStoreError.restoreInterrupted("复制后哈希不一致：\(relative)")
-            }
+            try await installObjectAtomically(
+                object: object,
+                target: target,
+                contentHash: file.contentHash,
+                size: file.size,
+                relativePath: relative
+            )
             completed += 1
             completedBytes += file.size
             await progress?(RestoreProgress(
@@ -869,13 +977,57 @@ public actor CloudMirrorStore: CloudStore {
         }
     }
 
+    private func removeRestoreTemps(in destination: URL) {
+        guard let enumerator = fileManager.enumerator(at: destination, includingPropertiesForKeys: nil) else {
+            return
+        }
+        for case let url as URL in enumerator where url.lastPathComponent.hasPrefix(".ctrestore-") {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    /// Copy to a sibling temp file, verify it, then atomically move it into place.
+    /// A crash can therefore leave only an ignorable temp file, never a target that
+    /// looks complete but contains partial bytes.
+    private func installObjectAtomically(
+        object: URL,
+        target: URL,
+        contentHash: String,
+        size: Int64,
+        relativePath: String
+    ) async throws {
+        try await access.ensureDirectory(target.deletingLastPathComponent())
+        let temp = target.deletingLastPathComponent()
+            .appendingPathComponent(".ctrestore-\(UUID().uuidString)")
+        do {
+            try await access.copy(object, to: temp)
+            guard let stamp = Self.stamp(of: temp), stamp.size == size else {
+                throw CloudStoreError.restoreInterrupted("复制后大小不一致：\(relativePath)")
+            }
+            let copiedHash = try await access.hash(temp)
+            guard copiedHash == contentHash else {
+                throw CloudStoreError.restoreInterrupted("复制后哈希不一致：\(relativePath)")
+            }
+            if fileManager.fileExists(atPath: target.path) {
+                try await access.remove(target)
+            }
+            try await access.move(temp, to: target)
+        } catch {
+            try? await access.remove(temp)
+            if error is CloudStoreError { throw error }
+            throw CloudStoreError.restoreInterrupted("\(relativePath)：\(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Verification
 
     public func verifyGeneration(_ generationId: UUID) async throws -> VerificationResult {
         try await prepare()
         let manifest: CloudManifest
-        do { manifest = try await loadManifest(generationID: generationId) }
-        catch {
+        do {
+            manifest = try await loadManifest(generationID: generationId)
+            try validate(manifest: manifest)
+        } catch {
             return VerificationResult(
                 generationID: generationId,
                 level: .cloudIntegrity,
@@ -946,6 +1098,10 @@ public actor CloudMirrorStore: CloudStore {
         guard repositoryId == configuration.repositoryID else {
             throw CloudStoreError.invalidFormat("仓库 ID 与存储配置不匹配")
         }
+        // Same order as publish: upload lock first, then the local repository
+        // lock. This prevents GC from sweeping objects of an in-flight publish.
+        let publishLock = try await acquirePublishLock()
+        defer { publishLock?.release() }
         let lock = try await acquireRepositoryLock()
         defer { lock?.release() }
         try await prepare()
@@ -959,7 +1115,29 @@ public actor CloudMirrorStore: CloudStore {
             // and which objects were already deleted, so this must fail closed.
             throw CloudStoreError.gcJournalCorrupted("无法读取清理日志：\(error.localizedDescription)")
         }
-        var gc = loadedJournal ?? GCJournal(repositoryID: repositoryId, startedAt: now)
+        var gc: GCJournal
+        if let loaded = loadedJournal, loaded.phase == .aborted {
+            // An aborted journal may have left tombstones that were never restored.
+            // They are valid history until proven otherwise; restore them before a
+            // fresh run, or block GC if that is not possible.
+            do {
+                try await restoreTombstones()
+            } catch {
+                throw CloudStoreError.gcBlocked(
+                    "上一次清理中止且墓碑清单无法恢复：\(error.localizedDescription)"
+                )
+            }
+            do {
+                try await configuration.journalStore.deleteGCJournal(id: loaded.id)
+            } catch {
+                throw CloudStoreError.gcJournalCorrupted(
+                    "无法清理已中止的 GC 日志：\(error.localizedDescription)"
+                )
+            }
+            gc = GCJournal(repositoryID: repositoryId, startedAt: now)
+        } else {
+            gc = loadedJournal ?? GCJournal(repositoryID: repositoryId, startedAt: now)
+        }
         // `gracePeriod` is the user retention window for generations. The delay
         // before deleting objects is the separate synchronization grace: it must
         // never shrink to zero just because the user chose a zero-day retention.
@@ -1092,7 +1270,25 @@ public actor CloudMirrorStore: CloudStore {
             try await persist(.gracePeriod)
         }
 
-        if gc.phase == .tombstoning || gc.phase == .deletingManifests || gc.phase == .awaitingSync {
+        if gc.phase == .tombstoning {
+            // A crash can interrupt the move loop. Finish every planned move
+            // instead of entering the grace period with manifests still visible.
+            try await access.ensureDirectory(tombstonesURL)
+            for id in gc.plannedManifestDeletes {
+                let source = commitURL(id)
+                guard fileManager.fileExists(atPath: source.path) else { continue }
+                let stamp = Int(Date().timeIntervalSince1970 * 1000)
+                let destination = tombstonesURL.appendingPathComponent("\(id.uuidString).\(stamp).ctm")
+                try await access.move(source, to: destination)
+                if !gc.completedManifestDeletes.contains(id) { gc.completedManifestDeletes.append(id) }
+                gc.updatedAt = Date()
+                try await persist(.tombstoning)
+            }
+            gc.graceDeadline = gc.graceDeadline ?? Date().addingTimeInterval(sweepGrace)
+            gc.updatedAt = Date()
+            try await persist(.gracePeriod)
+        } else if gc.phase == .deletingManifests || gc.phase == .awaitingSync {
+            gc.graceDeadline = gc.graceDeadline ?? Date().addingTimeInterval(sweepGrace)
             gc.updatedAt = Date()
             try await persist(.gracePeriod)
         }
@@ -1128,6 +1324,33 @@ public actor CloudMirrorStore: CloudStore {
                 } catch {
                     failure = "重新验证时清单 \(id.uuidString) 不可读：\(error.localizedDescription)"
                     break
+                }
+            }
+            if failure == nil {
+                // Tombstones are still valid history until their grace period ends.
+                // Their objects must stay protected even when the tombstone belongs
+                // to an earlier, aborted GC run.
+                for url in try await tombstoneURLs() {
+                    let name = url.deletingPathExtension().lastPathComponent
+                    let idPart = name.split(separator: ".").first.map(String.init) ?? ""
+                    guard let id = UUID(uuidString: idPart) else {
+                        failure = "重新验证时发现无法识别的墓碑文件名：\(url.lastPathComponent)"
+                        break
+                    }
+                    // Tombstones planned by the current journal are already being
+                    // deleted by this run; only unresolved tombstones (from a
+                    // different/aborted plan) need extra object protection.
+                    if gc.plannedManifestDeletes.contains(id)
+                        || gc.completedManifestDeletes.contains(id) {
+                        continue
+                    }
+                    do {
+                        let manifest = try await loadManifestFromTombstone(id: id, url: url)
+                        for file in manifest.repositoryFiles { validObjects.insert(file.contentHash) }
+                    } catch {
+                        failure = "重新验证时墓碑清单 \(id.uuidString) 不可读：\(error.localizedDescription)"
+                        break
+                    }
                 }
             }
             if let failure {
@@ -1194,6 +1417,25 @@ public actor CloudMirrorStore: CloudStore {
                 }
             }
 
+            // Quarantined objects are preserved for forensic recovery, but they
+            // must not grow forever. Keep them for at least 30 days after the
+            // synchronization grace period.
+            let quarantineCutoff = Date().addingTimeInterval(-max(sweepGrace, 30 * 86_400))
+            if let enumerator = fileManager.enumerator(
+                at: quarantineURL,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey]
+            ) {
+                for case let file as URL in enumerator {
+                    guard let values = try? file.resourceValues(
+                        forKeys: [.contentModificationDateKey, .isRegularFileKey]
+                    ), values.isRegularFile == true,
+                          let modified = values.contentModificationDate,
+                          modified <= quarantineCutoff else { continue }
+                    do { try await access.remove(file) }
+                    catch { gc.lastError = "隔离对象 \(file.lastPathComponent) 清理失败：\(error.localizedDescription)" }
+                }
+            }
+
             gc.completedAt = Date()
             try await persist(.completed, error: gc.lastError)
             return CloudCleanupReport(
@@ -1241,6 +1483,13 @@ public actor CloudMirrorStore: CloudStore {
 
     private func acquireRepositoryLock() async throws -> ProcessFileLock? {
         guard let lockURL = configuration.lockURL else { return nil }
+        let lock = ProcessFileLock(path: lockURL.path)
+        try await lock.acquire(timeout: 600)
+        return lock
+    }
+
+    private func acquirePublishLock() async throws -> ProcessFileLock? {
+        guard let lockURL = configuration.publishLockURL else { return nil }
         let lock = ProcessFileLock(path: lockURL.path)
         try await lock.acquire(timeout: 600)
         return lock
@@ -1447,6 +1696,11 @@ public actor CloudMirrorStore: CloudStore {
                             context: "manifest:\(repositoryID.uuidString):\(id.uuidString)"
                         )
                         let manifest = try decoder.decode(CloudManifest.self, from: plaintext)
+                        guard manifest.repositoryId == repositoryID,
+                              manifest.generationId == id,
+                              manifest.deviceId == info.deviceId else {
+                            throw CloudStoreError.manifestCorrupt("清单与设备/仓库/版本标识不一致")
+                        }
                         readable += 1
                         let commitDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                             .contentModificationDate ?? .distantPast
@@ -1466,6 +1720,21 @@ public actor CloudMirrorStore: CloudStore {
                         }
                     } catch {
                         blocked = blocked ?? "云端版本 \(id.uuidString) 不可读取"
+                    }
+                }
+                // A decryptable manifest is not proof that its repository can be
+                // restored. At minimum every object of the selected generation must
+                // exist before the candidate is offered as restorable.
+                if let latest {
+                    let objects = repo.appendingPathComponent("objects", isDirectory: true)
+                    for file in latest.repositoryFiles {
+                        let object = objects
+                            .appendingPathComponent(String(file.contentHash.prefix(2)), isDirectory: true)
+                            .appendingPathComponent(file.contentHash)
+                        guard FileManager.default.fileExists(atPath: object.path) else {
+                            blocked = blocked ?? "最新版本缺少对象 \(file.contentHash)"
+                            break
+                        }
                     }
                 }
                 let bytes = (try? Self.directorySize(commits)) ?? 0
@@ -1520,11 +1789,15 @@ public actor CloudMirrorStore: CloudStore {
     public static func recover(
         storageRoot: URL,
         recoveryKey: Data,
-        repositoryID: UUID? = nil
+        repositoryID: UUID? = nil,
+        deviceID: UUID? = nil
     ) async throws -> RecoveredAccess {
         var candidates = try await recoverCandidates(storageRoot: storageRoot, recoveryKey: recoveryKey)
         if let repositoryID {
             candidates = candidates.filter { $0.repositoryID == repositoryID }
+        }
+        if let deviceID {
+            candidates = candidates.filter { $0.deviceID == deviceID }
         }
         guard let chosen = candidates.first(where: { $0.integrityOK && $0.latestGenerationID != nil }) ?? candidates.first,
               chosen.blockedReason == nil,
@@ -1554,6 +1827,10 @@ public actor CloudMirrorStore: CloudStore {
                     context: "recovery:\(info.repositoryId.uuidString)"
                 )
                 let payload = try decoder.decode(RecoveryPayload.self, from: plaintext)
+                guard payload.repositoryId == info.repositoryId,
+                      payload.keyFingerprint == info.keyFingerprint else {
+                    throw CloudStoreError.invalidFormat("恢复凭据内部信息不一致")
+                }
                 return RecoveredAccess(
                     repositoryID: info.repositoryId,
                     deviceID: info.deviceId,

@@ -91,7 +91,7 @@ jobs:
           key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
       - run: ./Scripts/fetch_kopia.sh
       - name: Restore + recovery tests
-        run: ./Scripts/test.sh --filter 'RecoveryRegressionTests'
+        run: ./Scripts/test.sh --filter 'RecoveryRegressionTests|SecondRoundRegressionTests'
 
   concurrency-tests:
     needs: recovery-tests

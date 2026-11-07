@@ -50,6 +50,15 @@ public actor BackupScheduler {
     /// Runs one catch-up pass. Used by the agent's `--once` mode and after wake.
     public func runOnce(ignoreSchedule: Bool = false) async {
         guard acquireLeadership() else { return }
+        do {
+            let settings = try await service.currentSettings()
+            // `ignoreSchedule` only bypasses per-project due time. A global pause
+            // still applies to Agent --once.
+            guard settings.scheduler.allowsScheduling else { return }
+        } catch {
+            await service.logger.error("读取调度设置失败：\(error.localizedDescription)")
+            return
+        }
         await processDueRetries()
         do {
             let projects: [Project]
@@ -120,18 +129,25 @@ public actor BackupScheduler {
     /// inside `createSnapshot` still guarantees only one process runs each job.
     private func processDueRetries() async {
         do {
-            let jobs = try await service.dueRetryJobs().filter { $0.type == .backup }
+            let jobs = try await service.dueRetryJobs()
             for job in jobs {
-                do {
-                    _ = try await service.createSnapshot(
-                        projectID: job.projectID,
-                        trigger: job.trigger,
-                        retryJobID: job.id
-                    )
-                } catch {
-                    await service.logger.warning(
-                        "重试备份失败（\(job.projectID.uuidString)）：\(error.localizedDescription)"
-                    )
+                switch job.type {
+                case .backup:
+                    do {
+                        _ = try await service.createSnapshot(
+                            projectID: job.projectID,
+                            trigger: job.trigger,
+                            retryJobID: job.id
+                        )
+                    } catch {
+                        await service.logger.warning(
+                            "重试备份失败（\(job.projectID.uuidString)）：\(error.localizedDescription)"
+                        )
+                    }
+                case .upload:
+                    _ = await service.retryCloudPublish(job: job)
+                default:
+                    continue
                 }
             }
         } catch {

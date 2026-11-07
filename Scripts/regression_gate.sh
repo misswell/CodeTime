@@ -21,7 +21,7 @@ grep -q "with 0 failures" "$OUTPUT" \
   || { echo "regression gate: FAIL (test summary not clean)" >&2; exit 1; }
 
 MISSING=()
-for number in $(seq 1 44); do
+for number in $(seq 1 57); do
   id="$(printf '%03d' "$number")"
   if ! grep -q "testCT${id}_" "$OUTPUT"; then
     MISSING+=("CT-${id}")
@@ -33,4 +33,4 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "regression gate: PASS (CT-001 … CT-044 present, 0 failures)"
+echo "regression gate: PASS (CT-001 … CT-057 present, 0 failures)"

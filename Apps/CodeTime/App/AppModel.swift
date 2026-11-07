@@ -276,20 +276,25 @@ final class AppModel: ObservableObject {
     func requestLegacyMigration(source: URL) async {
         guard let service else { return }
         do {
-            let plan = try DataMigrator.inspect(source: source, target: service.paths.root)
+            let plan = try DataMigrator.inspect(
+                source: source,
+                target: service.paths.root,
+                ignoreTargetConflicts: true
+            )
             guard plan.hasDatabase || plan.repositoryCount > 0 else {
                 showToast("所选目录没有 CodeTime 数据", style: .warning)
                 return
             }
-            if !projects.isEmpty {
-                showToast("当前已有项目，不能合并另一份数据库；请在全新安装上执行迁移", style: .warning)
+            let existingSnapshots = try await service.snapshots(limit: 1)
+            if !projects.isEmpty || !existingSnapshots.isEmpty {
+                showToast("当前已有项目或快照，不能合并另一份数据库；请在全新安装上执行迁移", style: .warning)
                 return
             }
-            if !plan.conflicts.isEmpty {
-                showToast(plan.conflicts.joined(separator: "；"), style: .warning)
-                return
-            }
-            try DataMigrator.requestMigration(source: source, target: service.paths.root)
+            try DataMigrator.requestMigration(
+                source: source,
+                target: service.paths.root,
+                allowReplaceRoot: true
+            )
             showToast("已记录迁移请求：请退出并重新打开 CodeTime 完成导入", style: .success)
         } catch {
             showToast("无法准备迁移：\(error.localizedDescription)", style: .error)

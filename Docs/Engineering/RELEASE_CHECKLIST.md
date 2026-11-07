@@ -8,7 +8,7 @@
 | `v1.0.0-rc.*` | 预发布 | beta 门禁 + Release 构建 + 真实环境验收记录 |
 | `v1.0.0` | 正式版 | 全部门禁 + Developer ID + 公证 + stapling + 双机 iCloud 验收 |
 
-`Scripts/package_release.sh` 只接受 stable 渠道（`CODETIME_RELEASE_CHANNEL=stable`），并要求 tag 与版本一致。
+`Scripts/package_release.sh` 只接受 stable 渠道（`CODETIME_RELEASE_CHANNEL=stable`），要求 tag 与版本一致，并要求双 Mac iCloud 验收报告存在；手动 workflow 需填写 `version`（beta/rc 还需 `prerelease`），工作流会用解析后的 tag。
 
 ## 1. 代码与测试门禁
 
@@ -100,6 +100,7 @@ Scripts/fetch_kopia.sh
 - [ ] 恢复中断后继续，已完成对象不重复下载。
 - [ ] 多设备候选列表显示正确，密钥不匹配时可继续搜索。
 - [ ] 恢复完成后仓库与快照校验通过。
+- [ ] 已按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md` 填写 `<tag>-icloud-acceptance.md`，且 `Scripts/require_icloud_acceptance.sh <tag>` 通过。
 - [ ] Beta 数据迁移到 Stable 后项目、快照、仓库、Bookmark 正常。
 - [ ] 卸载后重新安装，数据与授权行为符合预期。
 - [ ] 稳定版升级与回退：升级后数据可读；回退到上一版本不损坏数据。

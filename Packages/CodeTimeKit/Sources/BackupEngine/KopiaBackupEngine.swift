@@ -450,6 +450,15 @@ public actor KopiaBackupEngine: BackupEngine {
         return paths.sorted()
     }
 
+    /// Snapshot IDs present in the repository, used to prove that a restored
+    /// generation's snapshots really exist rather than only that Kopia connected.
+    public func snapshotIdentifiers() async throws -> Set<String> {
+        try await ensureRepository()
+        let result = try await kopia(["snapshot", "list", "--json", "--all"], timeout: 180)
+        let snapshots = try KopiaJSON.decode([KopiaSnapshotJSON].self, from: result.stdout)
+        return Set(snapshots.map(\.id))
+    }
+
     public func listDirectory(snapshotID: String, path: String) async throws -> [FileEntry] {
         try Task.checkCancellation()
         try await ensureRepository()

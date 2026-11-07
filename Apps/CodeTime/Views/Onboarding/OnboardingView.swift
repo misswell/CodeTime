@@ -500,7 +500,7 @@ struct CloudRecoverySheet: View {
                     .frame(maxHeight: 220)
                 }
 
-                Text("恢复始终选择一份完整、已校验的历史版本；不会混用不同设备的数据。")
+                Text("恢复始终选择一份历史版本；对象在恢复时会逐个校验 SHA-256，不会混用不同设备的数据。")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -522,11 +522,11 @@ struct CloudRecoverySheet: View {
                         Text(candidate.deviceName.isEmpty ? "未命名设备" : candidate.deviceName)
                             .font(.system(size: 12.5, weight: .semibold))
                         if candidate.integrityOK {
-                            Label("完整性通过", systemImage: "checkmark.seal.fill")
+                            Label("清单与对象齐全", systemImage: "checkmark.seal.fill")
                                 .font(.caption2)
                                 .foregroundStyle(CT.success)
                         } else {
-                            Label("完整性未通过", systemImage: "exclamationmark.triangle.fill")
+                            Label("候选不完整", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(CT.warning)
                         }

@@ -31,7 +31,7 @@ final class MemoryJournalStore: GCJournalProviding, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let unfinished = journals.values
-            .filter { $0.repositoryID == repositoryID && $0.phase.isResumable }
+            .filter { $0.repositoryID == repositoryID && $0.phase != .completed }
             .sorted { $0.updatedAt < $1.updatedAt }
         guard var journal = unfinished.last else { return nil }
         if fastForwardGraceDeadline, journal.graceDeadline != nil {

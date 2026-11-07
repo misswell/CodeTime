@@ -20,7 +20,8 @@ public enum ProjectPathValidator {
         url: URL,
         existingProjects: [Project],
         appRoot: URL,
-        mirrorPath: String?
+        mirrorPath: String?,
+        iCloudMirrorPath: String? = nil
     ) -> Result {
         let fileManager = FileManager.default
         var issues: [PathValidationIssue] = []
@@ -69,7 +70,10 @@ public enum ProjectPathValidator {
             (appRoot.appendingPathComponent("recovery", isDirectory: true), "CodeTime 保护副本目录"),
         ]
         if let mirrorPath, !mirrorPath.isEmpty {
-            protectedRoots.append((URL(fileURLWithPath: mirrorPath, isDirectory: true), "云端镜像目录"))
+            protectedRoots.append((URL(fileURLWithPath: mirrorPath, isDirectory: true), "本地镜像目录"))
+        }
+        if let iCloudMirrorPath, !iCloudMirrorPath.isEmpty {
+            protectedRoots.append((URL(fileURLWithPath: iCloudMirrorPath, isDirectory: true), "iCloud 镜像目录"))
         }
         for (root, label) in protectedRoots {
             let realRoot = root

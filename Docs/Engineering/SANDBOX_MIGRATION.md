@@ -87,31 +87,40 @@ Beta 数据目录与 Release 沙盒容器不同；直接切换会表现为“数
 
 1. **选择源目录**：用户在 Onboarding 选择 Beta 数据目录。
 2. **记录请求**：写入 `migration-request.json`，包含源路径与安全作用域 Bookmark。
-3. **下次启动执行**：`DataMigrator.resumePendingMigration` 在数据库打开前运行。
+3. **下次启动执行**：`DataMigrator.performPending` 在数据库打开前运行。
 4. **预检 `inspect`**：
    - 源目录必须存在且可读；
    - 必须包含数据库或备份仓库，否则报 `nothingToMigrate`；
-   - 当前目标不能已有数据库或非空仓库，否则报 `targetNotEmpty`；
+   - 新请求允许替换 Release 刚创建的空数据根；旧请求不会覆盖已有数据；
    - 源仓库不可读时报 `sourceUnreadable`，不当作空。
-5. **复制到 staging**：目标同级的 `.codetime-migration-<id>`。
-6. **逐文件校验**：大小 + SHA-256，任何不一致即失败。
-7. **安装**：只移动 staging 的子项到目标，不覆盖已有文件；冲突即失败。
-8. **写完成标记**：`migration-complete.json`，记录文件数、字节数、时间与源路径。
-9. **保留源目录**：不删除 Beta 数据，允许回退。
-10. **失败处理**：写 `failed` journal，保留错误信息，删除 staging 后抛出；下次可重试。
+5. **进程协调**：获取迁移锁和 Agent 锁；Agent 正在运行时拒绝迁移，避免移动其打开的数据库。
+6. **复制到 staging**：目标同级的 `.codetime-migration-<id>`，包括隐藏文件/目录。
+7. **数据库一致性**：SQLite 主库使用 SQLite Backup API 复制，避免直接复制活动 WAL；随后执行 `PRAGMA integrity_check`。
+8. **逐文件校验**：大小 + SHA-256，任何不一致即失败。
+9. **整根安装**：staging 校验完成后用 `replaceItemAt` 原子替换目标根，旧根保留为 `CodeTime.pre-migration-<timestamp>`；不再逐项覆盖。
+10. **写完成标记**：`migration-complete.json`，记录实际复制文件数、字节数、时间与源路径。
+11. **保留源目录**：不删除 Beta 数据，允许回退。
+12. **失败处理**：写 `failed` journal，保留错误信息，删除 staging 后抛出；取消/失败不会改动目标根，可重试。
 
 ### 5.3 崩溃恢复
 
 - journal 记录 `copying → verifying → installing`。
+- 取消或复制/校验失败时目标根不变；整根替换是单次文件系统操作，不会留下半安装目录。
 - `clearInterruptedStaging` 清理非安装阶段的残留 staging。
 - `installing` 阶段不自动清理，避免删除可能已安装的数据。
-- 目标已有数据库时不会覆盖；由用户确认后另行处理。
 
 ### 5.4 验证
 
-- CT-029：构造 Beta 目录（数据库、仓库、文件），迁移后源目录保留、目标数据完整、文件哈希一致。
+- CT-029：真实 SQLite 数据库、仓库、隐藏文件和源目录保留。
+- CT-045/046：Release 已初始化空数据库/空仓库时仍可迁移。
+- CT-047：隐藏 `.shards` 完整迁移。
+- CT-048：复制阶段取消后目标不变、可重试。
 - CT-034：全新 Sandbox 启动路径初始化成功。
-- CT-030：外部项目、仓库目录、父子路径的授权与拒绝规则。
+- CT-030/057：外部项目、仓库目录、父子路径和 iCloud 镜像路径的授权与拒绝规则。
+
+### 5.5 Keychain 限制
+
+文件迁移不会自动取得 Beta 签名身份下的 Keychain 主密钥与仓库密码。若 Release 迁移后无法读取这些条目，必须使用云端恢复或用户提供的恢复凭据；应用会明确失败，不会生成新密钥覆盖。见 `KNOWN_LIMITATIONS.md`。
 
 ## 6. 首次启动与 Agent
 

@@ -22,13 +22,13 @@ Scripts/regression_gate.sh
 结果：
 
 ```text
-Executed 64 tests, with 4 tests skipped and 0 failures
-regression gate: PASS (CT-001 … CT-044 present, 0 failures)
+Executed 77 tests, with 4 tests skipped and 0 failures
+regression gate: PASS (CT-001 … CT-057 present, 0 failures)
 ```
 
 | 测试类 | 数量 | 失败 | 跳过 | 耗时 |
 |---|---:|---:|---:|---:|
-| CloudMirrorRegressionTests（CT-001…012） | 12 | 0 | 0 | 0.35 s |
+| CloudMirrorRegressionTests（CT-001…012） | 12 | 0 | 0 | 0.36 s |
 | RecoveryRegressionTests（CT-013…020） | 8 | 0 | 0 | 0.09 s |
 | ConcurrencyPersistenceRegressionTests（CT-021…028、041） | 9 | 0 | 0 | 0.05 s |
 | SandboxMigrationRegressionTests（CT-029…040、042…044） | 15 | 0 | 3 | 4.20 s |
@@ -37,16 +37,20 @@ regression gate: PASS (CT-001 … CT-044 present, 0 failures)
 | KopiaEngineIntegrationTests | 2 | 0 | 0 | 5.86 s |
 | ExclusionMatcherTests | 3 | 0 | 0 | 0.004 s |
 | SmokeTests | 4 | 0 | 0 | 0.004 s |
-| ServiceEndToEndTests | 1 | 0 | 0 | 6.26 s |
+| ServiceEndToEndTests | 1 | 0 | 0 | 6.07 s |
+| SecondRoundRegressionTests（CT-045…057） | 13 | 0 | 0 | 2.1 s |
 | ICloudAcceptanceTests | 1 | 0 | 1 | — |
-| **合计** | **64** | **0** | **4** | **20.8 s** |
+| **合计** | **77** | **0** | **4** | **23.2 s** |
 
 跳过项：
 
 - CT-036（10 万文件）：默认关闭；本次单独执行 **通过（33.26 秒）**，见第 4 节。
 - CT-037（100 万文件上限）：默认关闭，本次未执行。
 - CT-044（磁盘满 ENOSPC）：无可控小容量卷，本次未执行。
-- 真实 iCloud 双 Mac 验收：缺少第二台 Mac 与真实容器，本次未执行。
+- 单机真实 iCloud 往返：缺少真实 iCloud 容器，本次未执行。
+- 真实 iCloud 双 Mac 验收：缺少第二台 Mac；仍为 Stable 必需的人工报告门禁。
+
+第二轮 CT-045…CT-057 全部通过，覆盖迁移、恢复提交、多设备绑定、候选对象缺失、虚假 verified、GC 墓碑、双连接租约、仓库重新发现和 iCloud 路径保护。
 
 ## 3. 构建与静态检查
 
@@ -70,8 +74,8 @@ Release 构建以 `CODE_SIGNING_ALLOWED=NO` 编译，仅验证编译与打包流
 | 10 万文件排除预览（CT-036） | 33.26 秒通过 | 含创建 10 万空文件与完整扫描；`permissionErrors = 0`，结果为完整 |
 | 100 万文件扫描（CT-037） | 未执行 | 需要大量 inode 与时间，建议夜间任务独立卷执行 |
 | 大文件哈希（CT-038） | 8 MB 分块哈希与一次性哈希一致 | 验证流式实现正确性，未做吞吐基准 |
-| 全量测试 | 20.8 秒 | 不含构建时间 |
-| 端到端备份/发布/校验/恢复（ServiceEndToEndTests） | 6.26 秒 | 小规模测试夹具 |
+| 全量测试 | 23.2 秒 | 不含构建时间 |
+| 端到端备份/发布/校验/恢复（ServiceEndToEndTests） | 6.07 秒 | 小规模测试夹具 |
 | 恢复故障注入（CT-013…020） | 0.09 秒 | 合成对象，不代表真实仓库规模 |
 | 上传并发 | 未做吞吐基准 | 仅验证并发写同一对象的正确性（CT-008） |
 | 内存峰值 | 未测量 | 无长期运行基准 |

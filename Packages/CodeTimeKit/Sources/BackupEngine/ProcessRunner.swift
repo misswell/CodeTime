@@ -339,7 +339,15 @@ public final class ProcessRunner: @unchecked Sendable {
             ]
             let ready = poll(&descriptors, 2, 40)
             if ready < 0 && errno != EINTR {
-                break
+                let message = String(cString: strerror(errno))
+                if kill(-pid, SIGKILL) != 0 { _ = kill(pid, SIGKILL) }
+                _ = waitForExit(pid, blocking: true)
+                box.clear(pid)
+                throw CodeTimeError.commandFailed(
+                    command: executable.lastPathComponent,
+                    status: -1,
+                    message: "poll 失败：\(message)"
+                )
             }
 
             if ready > 0 {

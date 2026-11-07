@@ -68,13 +68,43 @@
 | REL-003 | Kopia 二进制固定与校验 | `Scripts/fetch_kopia.sh` | 固定 0.23.1、SHA-256、架构、版本、签名与 sidecar 校验 | 脚本实际运行 | PASS |
 | SEC-001 | Entitlements 静态校验 | `Scripts/validate_entitlements.sh` | 校验 iCloud 容器、App Group、Keychain、Kopia 继承权限、Beta 不声明 iCloud | 脚本实际运行 | PASS |
 
+## 第二轮整改（c81fda5 审查反馈）
+
+| ID | 问题 | 修改文件 | 修复内容 | 测试 | 状态 |
+|---|---|---|---|---|---|
+| R2-01 | Beta → Release 目标已初始化时被拒绝 | `DataMigration.swift`、`AppModel.swift` | 请求允许替换新建的空数据根；整根 staging 完成后再原子替换；保留旧根备份 | CT-045、CT-046 | PASS |
+| R2-02 | 迁移逐项安装冲突且不可回滚 | `DataMigration.swift` | 使用 `replaceItemAt` 整根切换；取消/失败时目标不变；备份旧根 | CT-048 | PASS |
+| R2-03 | 迁移跳过隐藏文件 | `DataMigration.swift` | 复制枚举不再跳过隐藏项；计划与实际复制使用同一规则 | CT-029、CT-047 | PASS |
+| R2-04 | 迁移复制活动 SQLite | `DataMigration.swift` | 使用 SQLite Backup API 生成一致快照；校验 `integrity_check` | CT-029 | PASS |
+| R2-05 | 迁移没有进程协调 | `DataMigration.swift` | 迁移锁 + Agent 锁；失败可重试 | CT-048 | PASS |
+| R2-06 | 恢复中断留下半文件 | `CloudMirrorStore.swift` | 临时文件 → 校验 → 原子移动；损坏目标自动替换 | CT-013、CT-049 | PASS |
+| R2-07 | committing 阶段不可续传 | `ReliabilityModels.swift`、`SQLiteStore.swift`、`CodeTimeService.swift` | `.committing` 纳入可恢复状态；已移动仓库继续提交；密钥/记录幂等写入 | CT-050 | PASS |
+| R2-08 | 恢复被 snapshotCount 阻断 | `CodeTimeService.swift` | 移除快照行数门槛，以实际仓库槽位为准 | CT-050、服务测试 | PASS |
+| R2-09 | 多设备恢复未绑定用户选择 | `CloudMirrorStore.swift`、`CodeTimeService.swift` | `recover` 增加 `deviceID` 过滤并校验；恢复凭据内部 ID 必须一致 | CT-051 | PASS |
+| R2-10 | 候选只验证清单可解密 | `CloudMirrorStore.swift` | 校验 manifest 的仓库/设备/版本 ID；最新版本对象存在性；候选不可恢复时禁止选择 | CT-052 | PASS |
+| R2-11 | 校验失败仍标记 verified | `CodeTimeService.swift` | 只有 passed 才写 verified；失败清除 `verifiedAt`；`verifyCloud` 使用含不可读项的入口列表 | CT-053 | PASS |
+| R2-12 | GC 墓碑引用未纳入 Sweep | `CloudMirrorStore.swift`、`SQLiteStore.swift` | aborted 日志先恢复墓碑；Sweep 保护未解决墓碑；tombstoning 中断继续移动计划 | CT-054 | PASS |
+| R2-13 | 租约/CAS 非原子 | `SQLiteStore.swift` | 所有读-检查-写使用 `BEGIN IMMEDIATE`；心跳失败取消任务并停止回写 | CT-055 | PASS |
+| R2-14 | SQLite 丢失后无法发现旧仓库 | `RepositoryDiscovery.swift`、`CodeTimeService.swift` | 扫描 `repositories/*` 与 `repository.json`；唯一仓库复用；多仓库拒绝自动选择 | CT-056 | PASS |
+| R2-15 | iCloud 镜像可作为项目 | `ProjectPathValidator.swift`、`CodeTimeService.swift` | 实际 iCloud 根加入保护路径 | CT-057 | PASS |
+| R2-16 | 上传期间长期占用 Kopia 锁 | `CloudMirrorStore.swift`、`CodeTimeService.swift` | 独立 publish lock；本地对象复制后释放 repository lock | 静态检查 | PASS（静态） |
+| R2-17 | 发布提交后缓存失败被当失败 | `CloudMirrorStore.swift` | manifest 提交后 recovery-info/索引失败仅告警；幂等确认已提交版本 | CT-053、静态检查 | PASS |
+| R2-18 | 云端发布无独立重试 | `CodeTimeService.swift`、`BackupScheduler.swift`、`CloudModels.swift` | `.upload` 任务、退避、幂等确认；发布失败不再等待下一次备份 | 代码路径 + 全量测试 | PASS |
+| R2-19 | `--once` 绕过全局暂停 | `BackupScheduler.swift` | `runOnce` 先检查 `allowsScheduling` | 静态检查 | PASS（静态） |
+| R2-20 | localOnly 显示为 synced | `CodeTimeService.swift` | 区分 `.synced` 与 `.localOnly` | 静态检查 | PASS（静态） |
+| R2-21 | 哈希缓存缺少 ctime | `ReliabilityModels.swift`、`CloudMirrorStore.swift` | FileStamp 增加 ctime；缓存必须匹配 ctime | CT-010 | PASS |
+| R2-22 | GC 看不到隐藏临时对象 | `ICloudSupport.swift`、`CloudMirrorStore.swift` | 对象枚举包含隐藏项；quarantine 按年龄清理 | CT-042、代码路径 | PASS（静态） |
+| R2-23 | 手动发布 TAG 错误 | `.github/workflows/release.yml` | 手动输入 version/prerelease 生成 tag；下游统一使用解析后的 tag | YAML 校验 | PASS（静态） |
+| R2-24 | 伪 iCloud XCTFail 测试 | `SandboxPerformanceRegressionTests.swift`、`Scripts/require_icloud_acceptance.sh` | 改为可执行单机 iCloud 往返；双 Mac 验收改为 Stable 必需的人工报告门禁 | iCloud 测试默认跳过；门禁静态检查 | PARTIAL（真机未执行） |
+
 ## 当前测试汇总
 
 | 类别 | 数量 | 结果 |
 |---|---|---|
-| 全量测试（本机） | 64 | 0 失败，4 跳过 |
-| CT-001…CT-044 | 44 | 41 通过，3 跳过（CT-036/037 规模、CT-044 磁盘满）；另有真实 iCloud 验收测试 1 个跳过 |
+| 全量测试（本机） | 77 | 0 失败，4 跳过 |
+| CT-001…CT-044 | 44 | 41 通过，3 跳过（CT-036/037 规模、CT-044 磁盘满） |
+| CT-045…CT-057 | 13 | 13 通过 |
 | Schema 迁移 | 2 | 通过 |
-| 静态发布检查 | 3 个脚本 | 通过（公证与 stapling 未执行） |
+| 静态发布检查 | 4 个脚本 | 通过（公证、stapling、真实 iCloud 未执行） |
 
 跳过项不是“通过”，原因与执行方式见 `REGRESSION_MATRIX.md` 与 `KNOWN_LIMITATIONS.md`。

@@ -27,6 +27,7 @@ if [[ "$TAG" != "v${VERSION}" ]]; then
   echo "tag $TAG 不是稳定版本 v${VERSION}" >&2
   exit 1
 fi
+"$ROOT/Scripts/require_icloud_acceptance.sh" "$TAG"
 
 DIST="$ROOT/dist"
 NAME="CodeTime-${VERSION}-macos-universal"

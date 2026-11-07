@@ -37,21 +37,8 @@ final class RecoveryRegressionTests: XCTestCase {
         // Simulate an interrupted write that left a damaged file behind.
         try "wrong".write(to: partial.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
 
-        await assertThrowsAsync(
-            try await store.restoreRepository(generationId: generation, destination: partial, allowResume: true)
-        ) { error in
-            guard let code = error as? CodeTimeError else {
-                return XCTFail("应拒绝未验证的既有文件，实际：\(error)")
-            }
-            if case .destinationExists = code { return }
-            XCTFail("应报告目标已存在/冲突，实际：\(code)")
-        }
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: partial.appendingPathComponent("c.txt").path),
-            "中断后不得继续复制剩余文件"
-        )
-
-        try FileManager.default.removeItem(at: partial.appendingPathComponent("b.txt"))
+        // A damaged target file must be replaced automatically; the user must not
+        // have to delete internal staging files by hand.
         let recorder = ProgressRecorder()
         try await store.restoreRepository(
             generationId: generation,

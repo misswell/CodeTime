@@ -138,6 +138,7 @@ public actor CodeTimeService {
     private var bootstrapReport: BootstrapReport?
     private var cachedSettings: AppSettings?
     private var repositoryStateCache: RepositoryState = .missing
+    private var repositoryWasRegistered = false
     private var mirrorAccess: SecurityScopedAccess?
 
     private enum Keys {
@@ -173,6 +174,7 @@ public actor CodeTimeService {
         var settings = try await currentSettings()
         let device = try await loadOrCreateDevice()
         let hadRepository = (try await database.codable(RepositoryRecord.self, forKey: Keys.repository)) != nil
+        repositoryWasRegistered = hadRepository
         let repository = try await loadOrCreateRepository()
         self.device = device
         self.repository = repository
@@ -189,7 +191,19 @@ public actor CodeTimeService {
         // app must not mint a fresh empty repository over unreadable data.
         let state = await engine.repositoryState()
         switch state {
-        case .uninitialized, .ready:
+        case .uninitialized:
+            if hadRepository {
+                // The database says a repository existed, but its directory is gone.
+                // Creating a fresh empty one here would silently orphan the old data.
+                await logger.error("已登记仓库目录缺失，拒绝自动创建空仓库；请从云端或备份恢复")
+            } else {
+                do {
+                    try await engine.ensureRepository()
+                } catch {
+                    await logger.error("备份仓库初始化失败：\(error.localizedDescription)")
+                }
+            }
+        case .ready:
             do {
                 try await engine.ensureRepository()
             } catch {
@@ -226,7 +240,9 @@ public actor CodeTimeService {
             }
         }
         let version = await KopiaBinary.version(at: engineBinaryURL())
-        repositoryStateCache = await engine.repositoryState()
+        var bootState = await engine.repositoryState()
+        if bootState == .uninitialized, repositoryWasRegistered { bootState = .missing }
+        repositoryStateCache = bootState
 
         if !interrupted.isEmpty {
             do {
@@ -296,9 +312,42 @@ public actor CodeTimeService {
     }
 
     private func loadOrCreateRepository() async throws -> RepositoryRecord {
-        if let stored = try await database.codable(RepositoryRecord.self, forKey: Keys.repository) {
+        let stored = try await database.codable(RepositoryRecord.self, forKey: Keys.repository)
+        let discovered = try RepositoryDiscovery.discover(in: paths.repositories)
+        if discovered.count > 1 {
+            throw CodeTimeError.repositoryUnavailable(
+                "发现多个本地备份仓库，请先移走不需要的目录，避免误连到错误的仓库"
+            )
+        }
+
+        if let stored {
+            let root = paths.repositories.appendingPathComponent(stored.id.uuidString, isDirectory: true)
+            let repositoryURL = root.appendingPathComponent("repo", isDirectory: true)
+            let configURL = root.appendingPathComponent("kopia.config")
+            if FileManager.default.fileExists(atPath: repositoryURL.path)
+                || FileManager.default.fileExists(atPath: configURL.path) {
+                var normalized = stored
+                normalized.path = repositoryURL.path
+                normalized.configPath = configURL.path
+                if normalized != stored {
+                    try await persist(repository: normalized)
+                }
+                return normalized
+            }
+            if let found = discovered.first {
+                try await persist(repository: found)
+                return found
+            }
+            // Keep the record so bootstrap can report .uninitialized instead of
+            // silently creating an empty repository.
             return stored
         }
+
+        if let found = discovered.first {
+            try await persist(repository: found)
+            return found
+        }
+
         let id = UUID()
         let root = paths.repositories.appendingPathComponent(id.uuidString, isDirectory: true)
         let record = RepositoryRecord(
@@ -306,9 +355,13 @@ public actor CodeTimeService {
             path: root.appendingPathComponent("repo", isDirectory: true).path,
             configPath: root.appendingPathComponent("kopia.config").path
         )
+        try await persist(repository: record)
+        return record
+    }
+
+    private func persist(repository record: RepositoryRecord) async throws {
         try await database.setCodable(record, forKey: Keys.repository)
         try await database.upsertRepository(record)
-        return record
     }
 
     private static func modelIdentifier() -> String {
@@ -433,7 +486,12 @@ public actor CodeTimeService {
     public func repositoryState() async -> RepositoryState {
         do {
             let engine = try await currentEngine()
-            let state = await engine.repositoryState()
+            var state = await engine.repositoryState()
+            if state == .uninitialized, repositoryWasRegistered {
+                // The database says this repository existed, but its directory is
+                // gone. Report missing rather than "never initialized".
+                state = .missing
+            }
             repositoryStateCache = state
             return state
         } catch {
@@ -479,7 +537,8 @@ public actor CodeTimeService {
             url: url,
             existingProjects: existing,
             appRoot: paths.root,
-            mirrorPath: settings.localMirrorPath
+            mirrorPath: settings.localMirrorPath,
+            iCloudMirrorPath: await iCloudMirrorPath(settings: settings)
         )
         guard validation.isAcceptable else {
             let first = validation.issues[0]
@@ -572,7 +631,8 @@ public actor CodeTimeService {
                 url: URL(fileURLWithPath: project.rootPath),
                 existingProjects: existing,
                 appRoot: paths.root,
-                mirrorPath: settings.localMirrorPath
+                mirrorPath: settings.localMirrorPath,
+                iCloudMirrorPath: await iCloudMirrorPath(settings: settings)
             )
             guard validation.isAcceptable else {
                 let first = validation.issues[0]
@@ -749,7 +809,9 @@ public actor CodeTimeService {
     private func refreshRepositoryStateCache() async {
         do {
             let engine = try await currentEngine()
-            repositoryStateCache = await engine.repositoryState()
+            var state = await engine.repositoryState()
+            if state == .uninitialized, repositoryWasRegistered { state = .missing }
+            repositoryStateCache = state
         } catch {
             await logger.warning("无法读取仓库状态：\(error.localizedDescription)")
         }
@@ -807,6 +869,13 @@ public actor CodeTimeService {
         ) != nil else {
             throw CodeTimeError.leaseConflict(owner: "另一个备份任务")
         }
+        let leaseState = LeaseState()
+        let work = Task { [self] in
+            let engine = try await currentEngine()
+            return try await withProject(project) { resolved in
+                try await engine.createSnapshot(project: resolved, policy: policy, trigger: trigger)
+            }
+        }
         let heartbeat = Task { [database, logger] in
             while !Task.isCancelled {
                 do {
@@ -816,16 +885,23 @@ public actor CodeTimeService {
                 }
                 if Task.isCancelled { return }
                 do {
-                    _ = try await database.renewJobLease(
+                    let renewed = try await database.renewJobLease(
                         id: job.id,
                         owner: owner,
                         expiresAt: Date().addingTimeInterval(leaseDuration)
                     )
+                    if !renewed {
+                        leaseState.markLost()
+                        work.cancel()
+                        await logger.error("备份任务租约已丢失，正在停止当前任务")
+                        return
+                    }
                 } catch {
                     await logger.warning("备份任务心跳写入失败：\(error.localizedDescription)")
                 }
             }
         }
+        defer { heartbeat.cancel() }
 
         try await database.updateProjectRuntime(
             id: projectID,
@@ -835,9 +911,9 @@ public actor CodeTimeService {
         notifyChange()
 
         do {
-            let engine = try await currentEngine()
-            let snapshot = try await withProject(project) { resolved in
-                try await engine.createSnapshot(project: resolved, policy: policy, trigger: trigger)
+            let snapshot = try await work.value
+            if leaseState.isLost {
+                throw CodeTimeError.leaseConflict(owner: "任务租约已被另一个进程接管")
             }
             // The project may have entered deletion while kopia was running. Do not
             // resurrect a row for a project the user already removed.
@@ -855,7 +931,7 @@ public actor CodeTimeService {
             )
 
             heartbeat.cancel()
-            try await finishJob(job.id, state: .succeeded)
+            try await finishJob(job.id, state: .succeeded, owner: owner)
 
             try await recordActivity(ActivityEvent(
                 kind: .backup,
@@ -869,12 +945,13 @@ public actor CodeTimeService {
 
             let cloudError = await publishIfConfigured(snapshot: snapshot)
             if let refreshed = try await database.snapshot(id: snapshot.id) {
-                try await database.updateProjectRuntime(
-                    id: projectID,
-                    status: (refreshed.cloudState == .synced || refreshed.cloudState == .localOnly)
-                        ? .synced
-                        : .warning
-                )
+                let status: ProjectStatus
+                switch refreshed.cloudState {
+                case .synced: status = .synced
+                case .localOnly: status = .localOnly
+                default: status = .warning
+                }
+                try await database.updateProjectRuntime(id: projectID, status: status)
                 notifyChange()
                 return BackupOutcome(snapshot: refreshed, cloudError: cloudError)
             }
@@ -882,6 +959,11 @@ public actor CodeTimeService {
             return BackupOutcome(snapshot: snapshot, cloudError: cloudError)
         } catch {
             heartbeat.cancel()
+            if leaseState.isLost {
+                // Another process owns this job now; do not overwrite its state or
+                // schedule a retry against its lease.
+                throw CodeTimeError.leaseConflict(owner: "任务租约已被另一个进程接管")
+            }
             let errorClass = RetryPolicy.classify(error)
             let retryDelay = allowsRetry
                 ? RetryPolicy.default.delay(attempt: job.retryCount, errorClass: errorClass)
@@ -917,7 +999,7 @@ public actor CodeTimeService {
                 }
             } else {
                 do {
-                    try await finishJob(job.id, state: .failed, errorMessage: error.localizedDescription)
+                    try await finishJob(job.id, state: .failed, errorMessage: error.localizedDescription, owner: owner)
                 } catch {
                     await logger.error("写入任务失败状态出错：\(error.localizedDescription)")
                 }
@@ -1116,8 +1198,15 @@ public actor CodeTimeService {
         result.projectID = projectID
         try await database.insertVerification(result)
         if var snapshot = try await database.snapshot(id: snapshotID) {
-            snapshot.verifiedAt = Date()
-            snapshot.verificationLevel = .localRestore
+            if result.outcome == .passed {
+                snapshot.verifiedAt = Date()
+                snapshot.verificationLevel = .localRestore
+            } else {
+                // A failed verification must never leave an older "verified"
+                // timestamp in place: that is a false success on the dashboard.
+                snapshot.verifiedAt = nil
+                snapshot.verificationLevel = nil
+            }
             try await database.upsertSnapshot(snapshot)
         }
         try await recordActivity(ActivityEvent(
@@ -1137,15 +1226,38 @@ public actor CodeTimeService {
             return nil
         }
         guard let repository else { return nil }
-        let generations = try await store.listGenerations(repositoryId: repository.id)
-        guard let newest = generations.first else { return nil }
-        var result = try await store.verifyGeneration(newest.id)
-        result.projectID = nil
+        // Use the entry list, not `listGenerations`, because the latter silently
+        // drops unreadable generations and would verify an older version while
+        // presenting the result as if the newest version had passed.
+        let entries = try await store.listGenerationEntries(repositoryId: repository.id)
+        guard let newest = entries.first else { return nil }
+
+        let result: VerificationResult
+        if let generation = newest.generation {
+            result = try await store.verifyGeneration(generation.id)
+        } else {
+            result = VerificationResult(
+                generationID: newest.id,
+                level: .cloudIntegrity,
+                outcome: .failed,
+                details: "最新云端版本不可读取：\(newest.detail ?? newest.readState.rawValue)"
+            )
+        }
         try await database.insertVerification(result)
-        var generation = newest
-        generation.state = .verified
-        generation.verifiedAt = Date()
-        try await database.upsertGeneration(generation)
+
+        if var generation = newest.generation {
+            if result.outcome == .passed {
+                generation.state = .verified
+                generation.verifiedAt = Date()
+                generation.errorMessage = nil
+            } else {
+                generation.state = .published
+                generation.verifiedAt = nil
+                generation.errorMessage = "完整性校验失败：\(result.details)"
+            }
+            try await database.upsertGeneration(generation)
+        }
+
         try await recordActivity(ActivityEvent(
             kind: .verification,
             level: result.outcome == .passed ? .success : .error,
@@ -1344,7 +1456,56 @@ public actor CodeTimeService {
             notifyChange()
             return nil
         } catch {
+            // The manifest may already be committed even if a later step failed.
+            // Confirm the actual cloud state before reporting a failed publish.
+            if let generationID = activeGenerationID {
+                if let settings = try? await currentSettings(),
+                   let store = try? await makeCloudStoreIfConfigured(settings: settings),
+                   await store.confirmPublished(generationId: generationID) {
+                    if var generation = try? await database.generation(id: generationID) {
+                        generation.state = .published
+                        generation.publishedAt = generation.publishedAt ?? Date()
+                        generation.errorMessage = nil
+                        try? await database.upsertGeneration(generation)
+                    }
+                    try? await database.updateSnapshotCloud(
+                        id: snapshot.id,
+                        cloudState: .synced,
+                        cloudGenerationID: generationID
+                    )
+                    try? await database.updateProjectRuntime(id: snapshot.projectID, status: .synced)
+                    await logger.warning("云端发布已确认成功，后续本地记录失败已修复")
+                    return nil
+                }
+            }
+
             await logger.error("云端同步失败：\(error.localizedDescription)")
+            if let generationID = activeGenerationID {
+                let errorClass = RetryPolicy.classify(error)
+                if let delay = RetryPolicy.default.delay(attempt: 0, errorClass: errorClass) {
+                    let uploadJob = BackupJob(
+                        projectID: snapshot.projectID,
+                        type: .upload,
+                        state: .queued,
+                        trigger: .scheduled,
+                        repositoryID: repository?.id,
+                        generationID: generationID,
+                        snapshotID: snapshot.id,
+                        errorClass: errorClass
+                    )
+                    do {
+                        try await database.upsertJob(uploadJob)
+                        try await database.scheduleRetry(
+                            uploadJob,
+                            after: delay,
+                            errorClass: errorClass,
+                            message: error.localizedDescription
+                        )
+                    } catch {
+                        await logger.error("无法创建云端发布重试任务：\(error.localizedDescription)")
+                    }
+                }
+            }
             do {
                 if var snapshotState = try await database.snapshot(id: snapshot.id) {
                     snapshotState.cloudState = .failed
@@ -1378,6 +1539,98 @@ public actor CodeTimeService {
             notifyChange()
             return error.localizedDescription
         }
+    }
+
+    /// Retries a cloud publish independently of local snapshots. The lease prevents
+    /// UI and Agent from uploading the same generation at the same time.
+    @discardableResult
+    public func retryCloudPublish(job: BackupJob) async -> Bool {
+        guard let generationID = job.generationID, let repository else { return false }
+        let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
+        guard (try? await database.acquireJobLease(
+            id: job.id,
+            owner: owner,
+            expiresAt: Date().addingTimeInterval(3_600)
+        )) != nil else {
+            return false
+        }
+        do {
+            let settings = try await currentSettings()
+            guard let store = try await makeCloudStoreIfConfigured(settings: settings) else {
+                throw CodeTimeError.cloudNotConfigured
+            }
+            guard var generation = try await database.generation(id: generationID) else {
+                throw CodeTimeError.generationNotFound(generationID.uuidString)
+            }
+            try await store.publish(repositoryId: repository.id, generation: generation)
+            generation.state = .published
+            generation.publishedAt = generation.publishedAt ?? Date()
+            generation.errorMessage = nil
+            try await database.upsertGeneration(generation)
+            if let snapshotID = job.snapshotID {
+                try await database.updateSnapshotCloud(
+                    id: snapshotID,
+                    cloudState: .synced,
+                    cloudGenerationID: generationID
+                )
+            }
+            try await database.updateProjectRuntime(id: job.projectID, status: .synced)
+            try await finishJob(job.id, state: .succeeded, owner: owner)
+            try await recordActivity(ActivityEvent(
+                kind: .upload,
+                level: .success,
+                projectID: job.projectID,
+                message: "云端发布重试成功",
+                details: generation.id.uuidString
+            ))
+            return true
+        } catch {
+            if let settings = try? await currentSettings(),
+               let store = try? await makeCloudStoreIfConfigured(settings: settings),
+               await store.confirmPublished(generationId: generationID) {
+                if var generation = try? await database.generation(id: generationID) {
+                    generation.state = .published
+                    generation.publishedAt = generation.publishedAt ?? Date()
+                    generation.errorMessage = nil
+                    try? await database.upsertGeneration(generation)
+                }
+                if let snapshotID = job.snapshotID {
+                    try? await database.updateSnapshotCloud(
+                        id: snapshotID,
+                        cloudState: .synced,
+                        cloudGenerationID: generationID
+                    )
+                }
+                try? await finishJob(job.id, state: .succeeded, owner: owner)
+                return true
+            }
+            let errorClass = RetryPolicy.classify(error)
+            if let delay = RetryPolicy.default.delay(attempt: job.retryCount, errorClass: errorClass) {
+                do {
+                    try await database.scheduleRetry(
+                        job,
+                        after: delay,
+                        errorClass: errorClass,
+                        message: error.localizedDescription
+                    )
+                } catch {
+                    await logger.error("无法安排云端发布重试：\(error.localizedDescription)")
+                }
+            } else {
+                try? await finishJob(job.id, state: .failed, errorMessage: error.localizedDescription, owner: owner)
+            }
+            try? await database.updateProjectRuntime(
+                id: job.projectID,
+                status: .warning,
+                lastError: "云端发布失败：\(error.localizedDescription)"
+            )
+            return false
+        }
+    }
+
+    private func iCloudMirrorPath(settings: AppSettings) async -> String? {
+        guard settings.iCloudEnabled else { return nil }
+        return await CloudLocation.iCloudStorageRoot()?.path
     }
 
     private func makeCloudStoreIfConfigured(settings: AppSettings) async throws -> CloudMirrorStore? {
@@ -1439,6 +1692,12 @@ public actor CodeTimeService {
             lockURL: URL(fileURLWithPath: repository.configPath)
                 .deletingLastPathComponent()
                 .appendingPathComponent("repository.lock"),
+            publishLockURL: URL(fileURLWithPath: repository.configPath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("publish.lock"),
+            warningHandler: { [logger] message in
+                Task { await logger.warning(message) }
+            },
             uploadParallelism: settings.performance.uploadParallelism
         ))
     }
@@ -1484,24 +1743,26 @@ public actor CodeTimeService {
             throw CodeTimeError.cloudPublishIncomplete(candidate.blockedReason ?? "候选版本不可恢复")
         }
         let key = try RecoveryKey.parse(recoveryKeyText)
-        guard try await database.snapshotCount() == 0 else {
-            throw CodeTimeError.unsupported("本机已有备份数据，请在全新安装的 CodeTime 中执行云端恢复")
-        }
-
+        // Do not gate recovery on stale snapshot rows. A database can retain
+        // metadata after its Kopia repository is lost; the repository slot below
+        // is the authoritative check.
         let recovered = try await CloudMirrorStore.recover(
             storageRoot: storageRoot,
             recoveryKey: key,
-            repositoryID: candidate.repositoryID
+            repositoryID: candidate.repositoryID,
+            deviceID: candidate.deviceID
         )
+        guard recovered.repositoryID == candidate.repositoryID,
+              recovered.deviceID == candidate.deviceID else {
+            throw CodeTimeError.restoreSourceUnavailable("恢复凭据与所选设备不一致")
+        }
         let repositoryRoot = paths.repositories.appendingPathComponent(recovered.repositoryID.uuidString, isDirectory: true)
         let repositoryURL = repositoryRoot.appendingPathComponent("repo", isDirectory: true)
         try FileManager.default.createDirectory(at: repositoryRoot, withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: repositoryURL.path) {
-            let contents = try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
-            guard contents.isEmpty else {
-                throw CodeTimeError.destinationExists(repositoryURL.path)
-            }
-        }
+        let repositoryExists = FileManager.default.fileExists(atPath: repositoryURL.path)
+        let repositoryContents = repositoryExists
+            ? try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
+            : []
 
         var job: CloudRestoreJob
         let resumable: CloudRestoreJob?
@@ -1553,44 +1814,60 @@ public actor CodeTimeService {
         ))
         let staging = URL(fileURLWithPath: job.stagingPath, isDirectory: true)
         let restoreJobID = job.id
+        let stagingExists = FileManager.default.fileExists(atPath: staging.path)
+        let alreadyMoved = !stagingExists && repositoryExists && !repositoryContents.isEmpty
+
+        if !stagingExists && !alreadyMoved {
+            throw CodeTimeError.restoreInterrupted("恢复暂存目录和正式仓库都不存在，请重新开始恢复")
+        }
+        if stagingExists, repositoryExists, !repositoryContents.isEmpty {
+            throw CodeTimeError.destinationExists(repositoryURL.path)
+        }
 
         do {
-            job.state = .downloading
-            try await database.upsertCloudRestoreJob(job)
+            if stagingExists {
+                job.state = .downloading
+                try await database.upsertCloudRestoreJob(job)
 
-            try await store.restoreRepository(
-                generationId: generationID,
-                destination: staging,
-                allowResume: true
-            ) { [weak self] update in
-                guard let self else { return }
-                await self.recordCloudRestoreProgress(
-                    jobID: restoreJobID,
-                    update: update,
-                    progress: progress
-                )
+                try await store.restoreRepository(
+                    generationId: generationID,
+                    destination: staging,
+                    allowResume: true
+                ) { [weak self] update in
+                    guard let self else { return }
+                    await self.recordCloudRestoreProgress(
+                        jobID: restoreJobID,
+                        update: update,
+                        progress: progress
+                    )
+                }
+
+                // Progress callbacks persisted the counters; merge them back so the
+                // report reflects what was actually verified, not the initial zeros.
+                if let persisted = try await database.cloudRestoreJob(id: restoreJobID) {
+                    job.totalFiles = persisted.totalFiles
+                    job.completedFiles = persisted.completedFiles
+                    job.totalBytes = persisted.totalBytes
+                    job.completedBytes = persisted.completedBytes
+                }
+                job.state = .verifying
+                job.updatedAt = Date()
+                try await database.upsertCloudRestoreJob(job)
+                progress?(job)
             }
 
-            // Progress callbacks persisted the counters; merge them back so the
-            // report reflects what was actually verified, not the initial zeros.
-            if let persisted = try await database.cloudRestoreJob(id: restoreJobID) {
-                job.totalFiles = persisted.totalFiles
-                job.completedFiles = persisted.completedFiles
-                job.totalBytes = persisted.totalBytes
-                job.completedBytes = persisted.completedBytes
-            }
-            job.state = .verifying
-            job.updatedAt = Date()
-            try await database.upsertCloudRestoreJob(job)
-            progress?(job)
-
-            // The restore already hashed every copied file. Confirm that the staged
-            // directory really looks like a kopia repository before touching the
-            // real slot; a local kopia.config is recreated by reconnecting.
-            let stagedContents = try FileManager.default.contentsOfDirectory(atPath: staging.path)
-            guard stagedContents.contains("kopia.repository.f")
-                || stagedContents.contains("kopia.repository")
-                || stagedContents.contains(".shards") else {
+            // A crash may have happened after the repository move. In that case
+            // staging is gone, the repository marker is present, and the commit
+            // continues below without re-downloading anything.
+            let stagedContents = stagingExists
+                ? try FileManager.default.contentsOfDirectory(atPath: staging.path)
+                : []
+            let repositoryMarker = stagingExists
+                ? stagedContents
+                : try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
+            guard repositoryMarker.contains("kopia.repository.f")
+                || repositoryMarker.contains("kopia.repository")
+                || repositoryMarker.contains(".shards") else {
                 throw CodeTimeError.restoreVerificationFailed("恢复目录缺少 Kopia 仓库标记文件")
             }
 
@@ -1599,16 +1876,31 @@ public actor CodeTimeService {
             try await database.upsertCloudRestoreJob(job)
             progress?(job)
 
-            if FileManager.default.fileExists(atPath: repositoryURL.path) {
-                let contents = try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
-                guard contents.isEmpty else {
-                    throw CodeTimeError.destinationExists(repositoryURL.path)
+            if stagingExists {
+                if FileManager.default.fileExists(atPath: repositoryURL.path) {
+                    let contents = try FileManager.default.contentsOfDirectory(atPath: repositoryURL.path)
+                    guard contents.isEmpty else {
+                        throw CodeTimeError.destinationExists(repositoryURL.path)
+                    }
+                    try FileManager.default.removeItem(at: repositoryURL)
                 }
-                try FileManager.default.removeItem(at: repositoryURL)
+                try FileManager.default.moveItem(at: staging, to: repositoryURL)
             }
-            try FileManager.default.moveItem(at: staging, to: repositoryURL)
+
+            // Secrets and the repository record are part of the commit. Re-running
+            // them is idempotent, so a crash here is recoverable.
+            try keychain.installSecrets(masterKey: key, repositoryPassword: recovered.repositoryPassword)
+            let record = RepositoryRecord(
+                id: recovered.repositoryID,
+                path: repositoryURL.path,
+                configPath: repositoryRoot.appendingPathComponent("kopia.config").path
+            )
+            try await database.setCodable(record, forKey: Keys.repository)
+            try await database.upsertRepository(record)
+            self.repository = record
+            rebuildEngine()
         } catch {
-            job.state = .failed
+            job.state = job.state == .committing ? .committing : .failed
             job.lastError = error.localizedDescription
             job.updatedAt = Date()
             do {
@@ -1620,17 +1912,6 @@ public actor CodeTimeService {
             throw error
         }
 
-        try keychain.installSecrets(masterKey: key, repositoryPassword: recovered.repositoryPassword)
-        let record = RepositoryRecord(
-            id: recovered.repositoryID,
-            path: repositoryURL.path,
-            configPath: repositoryRoot.appendingPathComponent("kopia.config").path
-        )
-        try await database.setCodable(record, forKey: Keys.repository)
-        try await database.upsertRepository(record)
-        self.repository = record
-        rebuildEngine()
-
         var repositoryCheck = false
         var snapshotCheck = false
         var sources: [String] = []
@@ -1640,7 +1921,12 @@ public actor CodeTimeService {
             try await engine.ensureRepository()
             repositoryCheck = true
             sources = try await engine.snapshotSourcePaths()
-            snapshotCheck = true
+            let expected = try await store.listGenerations(repositoryId: recovered.repositoryID)
+                .first(where: { $0.id == generationID })?.snapshotIDs ?? []
+            let actual = try await engine.snapshotIdentifiers()
+            // A valid repository must contain every snapshot named by the
+            // generation manifest. "The command did not throw" is not a check.
+            snapshotCheck = !expected.isEmpty && Set(expected).isSubset(of: actual)
         } catch {
             do {
                 let engine = try await currentEngine()
@@ -1847,8 +2133,20 @@ public actor CodeTimeService {
         ProcessInfo.processInfo.environment["CODETIME_AGENT_MODE"] == "1"
     }
 
-    private func finishJob(_ jobID: UUID, state: BackupJobState, errorMessage: String? = nil) async throws {
+    private func finishJob(
+        _ jobID: UUID,
+        state: BackupJobState,
+        errorMessage: String? = nil,
+        owner: ProcessIdentity? = nil
+    ) async throws {
         guard var job = try await database.job(id: jobID) else { return }
+        if let owner {
+            guard let lease = job.lease,
+                  lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else {
+                return
+            }
+        }
         job.state = state
         job.finishedAt = Date()
         job.errorMessage = errorMessage
@@ -1932,5 +2230,22 @@ public actor CodeTimeService {
             userInfo: nil,
             deliverImmediately: true
         )
+    }
+}
+
+private final class LeaseState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lost = false
+
+    var isLost: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return lost
+    }
+
+    func markLost() {
+        lock.lock()
+        lost = true
+        lock.unlock()
     }
 }

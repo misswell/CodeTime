@@ -34,7 +34,7 @@ public struct UbiquitousUploadTracker: CloudUploadTracking {
                 }
                 throw CloudStoreError.notICloudItem(url.lastPathComponent)
             }
-            if let containerURL, !url.standardizedFileURL.path.hasPrefix(containerURL.path) {
+            if let containerURL, !Self.isInsideContainer(url, container: containerURL) {
                 throw CloudStoreError.cloudContainerMismatch(url.path)
             }
             if let uploadError = values.ubiquitousItemUploadingError {
@@ -54,7 +54,7 @@ public struct UbiquitousUploadTracker: CloudUploadTracking {
                         try await Task.sleep(nanoseconds: 200_000_000)
                         continue
                     }
-                    if let containerURL, !url.standardizedFileURL.path.hasPrefix(containerURL.path) {
+                    if let containerURL, !Self.isInsideContainer(url, container: containerURL) {
                         throw CloudStoreError.cloudContainerMismatch(url.path)
                     }
                     return
@@ -64,6 +64,12 @@ public struct UbiquitousUploadTracker: CloudUploadTracking {
             try await Task.sleep(nanoseconds: 300_000_000)
         }
         throw CloudStoreError.uploadNotConfirmed(url.lastPathComponent)
+    }
+
+    private static func isInsideContainer(_ url: URL, container: URL) -> Bool {
+        let path = url.standardizedFileURL.pathComponents
+        let root = container.standardizedFileURL.pathComponents
+        return path.count >= root.count && Array(path.prefix(root.count)) == root
     }
 
     /// Metadata errors are surfaced, never swallowed.
@@ -226,7 +232,7 @@ public struct LocalFileAccess: CloudFileAccess {
         try FileManager.default.contentsOfDirectory(
             at: url,
             includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles]
+            options: []
         )
     }
 
@@ -249,7 +255,11 @@ public struct ICloudCoordinatedFileAccess: CloudFileAccess {
     public init() {}
 
     public func read(_ url: URL) async throws -> Data {
-        try coordinateReading(url) { actual in try Data(contentsOf: actual) }
+        // On a new Mac, format.json and recovery-info.json may still be dataless
+        // iCloud placeholders. Reading without downloading can fail or return an
+        // empty file; make the download explicit.
+        try await download(url, timeout: 300)
+        return try coordinateReading(url) { actual in try Data(contentsOf: actual) }
     }
 
     public func writeAtomically(_ data: Data, to url: URL) async throws {
@@ -306,7 +316,7 @@ public struct ICloudCoordinatedFileAccess: CloudFileAccess {
             try FileManager.default.contentsOfDirectory(
                 at: actual,
                 includingPropertiesForKeys: keys,
-                options: [.skipsHiddenFiles]
+                options: []
             )
         }
     }

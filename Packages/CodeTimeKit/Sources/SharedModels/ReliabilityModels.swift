@@ -123,19 +123,23 @@ public struct CloudGenerationEntry: Codable, Identifiable, Hashable, Sendable {
     public var readState: GenerationReadState
     public var detail: String?
     public var manifestPath: String
+    /// Commit file timestamp, available even when the manifest cannot be decrypted.
+    public var manifestModifiedAt: Date?
 
     public init(
         id: UUID,
         generation: CloudGeneration? = nil,
         readState: GenerationReadState,
         detail: String? = nil,
-        manifestPath: String = ""
+        manifestPath: String = "",
+        manifestModifiedAt: Date? = nil
     ) {
         self.id = id
         self.generation = generation
         self.readState = readState
         self.detail = detail
         self.manifestPath = manifestPath
+        self.manifestModifiedAt = manifestModifiedAt
     }
 
     public var isRestorable: Bool { readState == .valid && generation != nil }
@@ -262,8 +266,13 @@ public enum RestoreJobState: String, Codable, Sendable, CaseIterable {
 
     public var isResumable: Bool {
         switch self {
-        case .preparing, .downloading, .verifying, .interrupted, .failed: return true
-        default: return false
+        // `committing` is resumable: a crash after moving the staging repository
+        // must be completed (or rolled back) on the next launch, not treated as a
+        // finished failure.
+        case .preparing, .downloading, .verifying, .committing, .interrupted, .failed:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -430,7 +439,9 @@ public struct RecoveryCandidate: Codable, Identifiable, Hashable, Sendable {
         self.recoveryInfoPath = recoveryInfoPath
     }
 
-    public var isRestorable: Bool { blockedReason == nil && latestGenerationID != nil }
+    public var isRestorable: Bool {
+        blockedReason == nil && latestGenerationID != nil && integrityOK
+    }
 }
 
 // MARK: - Job leases (§6.3)
@@ -668,6 +679,8 @@ public struct ObjectHashCacheEntry: Codable, Hashable, Sendable {
     public var resourceIdentifier: String?
     public var size: Int64
     public var modifiedAt: Date
+    /// Changes even when a caller restores the original mtime on the same inode.
+    public var changedAt: Date?
     public var contentHash: String
     public var algorithm: String
     public var cacheVersion: Int
@@ -679,6 +692,7 @@ public struct ObjectHashCacheEntry: Codable, Hashable, Sendable {
         resourceIdentifier: String? = nil,
         size: Int64,
         modifiedAt: Date,
+        changedAt: Date? = nil,
         contentHash: String,
         algorithm: String = "sha256",
         cacheVersion: Int = 1,
@@ -689,18 +703,26 @@ public struct ObjectHashCacheEntry: Codable, Hashable, Sendable {
         self.resourceIdentifier = resourceIdentifier
         self.size = size
         self.modifiedAt = modifiedAt
+        self.changedAt = changedAt
         self.contentHash = contentHash
         self.algorithm = algorithm
         self.cacheVersion = cacheVersion
         self.verifiedAt = verifiedAt
     }
 
-    public func matches(identity: String, size: Int64, modifiedAt: Date) -> Bool {
-        cacheVersion == ObjectHashCacheEntry.currentVersion
+    public func matches(
+        identity: String,
+        size: Int64,
+        modifiedAt: Date,
+        changedAt candidateChangedAt: Date
+    ) -> Bool {
+        guard let cachedChange = self.changedAt else { return false }
+        return cacheVersion == ObjectHashCacheEntry.currentVersion
             && algorithm == "sha256"
             && fileIdentity == identity
             && self.size == size
             && abs(self.modifiedAt.timeIntervalSince(modifiedAt)) < 0.001
+            && abs(cachedChange.timeIntervalSince(candidateChangedAt)) < 0.001
     }
 
     public static let currentVersion = 1
@@ -710,22 +732,31 @@ public struct CloudObjectIndexEntry: Codable, Hashable, Sendable {
     public var relativePath: String
     public var size: Int64
     public var modifiedAt: Date
+    public var changedAt: Date?
     public var fileIdentity: String
     public var sha256: String
     public var lastVerifiedAt: Date?
     public var uploadState: CloudObjectUploadState
     public var generationReferences: [UUID]
 
-    public func matches(identity: String, size: Int64, modifiedAt: Date) -> Bool {
-        fileIdentity == identity
+    public func matches(
+        identity: String,
+        size: Int64,
+        modifiedAt: Date,
+        changedAt: Date
+    ) -> Bool {
+        guard let cachedChange = self.changedAt else { return false }
+        return fileIdentity == identity
             && self.size == size
             && abs(self.modifiedAt.timeIntervalSince(modifiedAt)) < 0.001
+            && abs(cachedChange.timeIntervalSince(changedAt)) < 0.001
     }
 
     public init(
         relativePath: String,
         size: Int64,
         modifiedAt: Date,
+        changedAt: Date? = nil,
         fileIdentity: String,
         sha256: String,
         lastVerifiedAt: Date? = nil,
@@ -735,6 +766,7 @@ public struct CloudObjectIndexEntry: Codable, Hashable, Sendable {
         self.relativePath = relativePath
         self.size = size
         self.modifiedAt = modifiedAt
+        self.changedAt = changedAt
         self.fileIdentity = fileIdentity
         self.sha256 = sha256
         self.lastVerifiedAt = lastVerifiedAt

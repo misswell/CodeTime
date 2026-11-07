@@ -18,7 +18,7 @@
 KOPIA_PATH="$PWD/Resources/Kopia/kopia" swift test --package-path Packages/CodeTimeKit
 ```
 
-v1.0.0 整改后最近结果：**64 项测试，0 失败，4 跳过（约 21 秒）**。跳过项为 CT-036/CT-037（规模测试）、CT-044（磁盘满注入）与真实 iCloud 双机验收，执行方式见 [`Engineering/REGRESSION_MATRIX.md`](Engineering/REGRESSION_MATRIX.md) 与 [`Engineering/KNOWN_LIMITATIONS.md`](Engineering/KNOWN_LIMITATIONS.md)。
+第二轮整改后最近结果：**77 项测试，0 失败，4 跳过（约 23 秒）**。跳过项为 CT-036/CT-037（规模测试）、CT-044（磁盘满注入）与单机真实 iCloud 往返；双 Mac 验收为 Stable 人工报告门禁。执行方式见 [`Engineering/REGRESSION_MATRIX.md`](Engineering/REGRESSION_MATRIX.md) 与 [`Engineering/KNOWN_LIMITATIONS.md`](Engineering/KNOWN_LIMITATIONS.md)。
 
 下表为 Beta 阶段的测试清单，v1.0.0 新增的 CT-001…CT-044 与 MIG-001/002 以矩阵文档为准。
 

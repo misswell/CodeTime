@@ -158,6 +158,10 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
     public var errorMessage: String?
     public var checkpoint: Data?
     public var repositoryID: UUID?
+    /// Set for `.upload` jobs so a failed cloud publish can be retried without
+    /// waiting for the next local snapshot.
+    public var generationID: UUID?
+    public var snapshotID: String?
     public var lease: JobLease?
     public var retryCount: Int
     public var nextRetryAt: Date?
@@ -177,6 +181,8 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
         errorMessage: String? = nil,
         checkpoint: Data? = nil,
         repositoryID: UUID? = nil,
+        generationID: UUID? = nil,
+        snapshotID: String? = nil,
         lease: JobLease? = nil,
         retryCount: Int = 0,
         nextRetryAt: Date? = nil,
@@ -195,6 +201,8 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
         self.errorMessage = errorMessage
         self.checkpoint = checkpoint
         self.repositoryID = repositoryID
+        self.generationID = generationID
+        self.snapshotID = snapshotID
         self.lease = lease
         self.retryCount = retryCount
         self.nextRetryAt = nextRetryAt
@@ -204,7 +212,7 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, type, state, trigger, createdAt, startedAt, finishedAt
-        case attempt, errorMessage, checkpoint, repositoryID, lease
+        case attempt, errorMessage, checkpoint, repositoryID, generationID, snapshotID, lease
         case retryCount, nextRetryAt, progress, errorClass
     }
 
@@ -222,6 +230,8 @@ public struct BackupJob: Codable, Identifiable, Hashable, Sendable {
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         checkpoint = try c.decodeIfPresent(Data.self, forKey: .checkpoint)
         repositoryID = try c.decodeIfPresent(UUID.self, forKey: .repositoryID)
+        generationID = try c.decodeIfPresent(UUID.self, forKey: .generationID)
+        snapshotID = try c.decodeIfPresent(String.self, forKey: .snapshotID)
         lease = try c.decodeIfPresent(JobLease.self, forKey: .lease)
         retryCount = try c.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
         nextRetryAt = try c.decodeIfPresent(Date.self, forKey: .nextRetryAt)

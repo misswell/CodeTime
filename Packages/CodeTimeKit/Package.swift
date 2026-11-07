@@ -30,7 +30,7 @@ let package = Package(
         .target(
             name: "CodeTimeCore",
             dependencies: [
-                "SharedModels", "Persistence", "CodeTimeSecurity", "BackupEngine",
+                "SharedModels", "Persistence", "CSQLite", "CodeTimeSecurity", "BackupEngine",
                 "CloudMirrorStore", "GitIntegration", "Diagnostics",
             ]
         ),

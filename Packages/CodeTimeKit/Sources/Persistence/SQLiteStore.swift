@@ -271,14 +271,16 @@ public actor SQLiteStore {
     /// Runtime updates go through `updateProjectRuntime`; user edits through
     /// `updateProjectConfig`.
     public func upsertProject(_ project: Project) throws {
-        try upsert(
-            "INSERT INTO projects(id, created_at, payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
-            [.text(project.id.uuidString), .double(project.createdAt.timeIntervalSince1970), .blob(try encode(project))]
-        )
-        try upsert(
-            "UPDATE projects SET lifecycle=?, config_revision=? WHERE id=?",
-            [.text(project.lifecycle.rawValue), .int(Int64(project.configRevision)), .text(project.id.uuidString)]
-        )
+        try transaction {
+            try upsert(
+                "INSERT INTO projects(id, created_at, payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+                [.text(project.id.uuidString), .double(project.createdAt.timeIntervalSince1970), .blob(try encode(project))]
+            )
+            try upsert(
+                "UPDATE projects SET lifecycle=?, config_revision=? WHERE id=?",
+                [.text(project.lifecycle.rawValue), .int(Int64(project.configRevision)), .text(project.id.uuidString)]
+            )
+        }
     }
 
     public func projects() throws -> [Project] {
@@ -313,16 +315,18 @@ public actor SQLiteStore {
         clearLastError: Bool = false,
         accessState: SecurityAccessState? = nil
     ) throws -> Project? {
-        // A project in the deleting/deleted lifecycle must not be resurrected or
-        // re-enabled by a late callback from a job that started before deletion.
-        guard var project = try project(id: id), project.lifecycle == .active else { return nil }
-        if let status { project.status = project.enabled ? status : .disabled }
-        if clearLastBackupAt { project.lastBackupAt = nil } else if let lastBackupAt { project.lastBackupAt = lastBackupAt }
-        if clearLastSnapshotID { project.lastSnapshotID = nil } else if let lastSnapshotID { project.lastSnapshotID = lastSnapshotID }
-        if clearLastError { project.lastError = nil } else if let lastError { project.lastError = lastError }
-        if let accessState { project.accessState = accessState }
-        try writeProjectPayload(project)
-        return project
+        try transactionResult {
+            // A project in the deleting/deleted lifecycle must not be resurrected or
+            // re-enabled by a late callback from a job that started before deletion.
+            guard var project = try project(id: id), project.lifecycle == .active else { return nil }
+            if let status { project.status = project.enabled ? status : .disabled }
+            if clearLastBackupAt { project.lastBackupAt = nil } else if let lastBackupAt { project.lastBackupAt = lastBackupAt }
+            if clearLastSnapshotID { project.lastSnapshotID = nil } else if let lastSnapshotID { project.lastSnapshotID = lastSnapshotID }
+            if clearLastError { project.lastError = nil } else if let lastError { project.lastError = lastError }
+            if let accessState { project.accessState = accessState }
+            try writeProjectPayload(project)
+            return project
+        }
     }
 
     /// Compare-and-set edit of user configuration. `expectedRevision == nil` skips
@@ -334,29 +338,29 @@ public actor SQLiteStore {
         expectedRevision: Int? = nil,
         mutate: (inout Project) -> Void
     ) throws -> Project {
-        guard var current = try project(id: id), current.lifecycle != .deleted else {
-            throw PersistenceError.conflict("项目 \(id.uuidString) 不存在或已删除")
+        try transactionResult {
+            guard let current = try project(id: id), current.lifecycle != .deleted else {
+                throw PersistenceError.conflict("项目 \(id.uuidString) 不存在或已删除")
+            }
+            if let expectedRevision, current.configRevision != expectedRevision {
+                throw PersistenceError.conflict("项目配置已被其他操作修改（期望 r\(expectedRevision)，当前 r\(current.configRevision)）")
+            }
+            var updated = current
+            mutate(&updated)
+            updated.id = current.id
+            updated.createdAt = current.createdAt
+            updated.status = updated.enabled
+                ? (current.status == .disabled ? .idle : current.status)
+                : .disabled
+            updated.lastBackupAt = current.lastBackupAt
+            updated.lastSnapshotID = current.lastSnapshotID
+            updated.lastError = current.lastError
+            updated.accessState = current.accessState
+            updated.lifecycle = current.lifecycle
+            updated.configRevision = current.configRevision + 1
+            try writeProjectPayload(updated)
+            return updated
         }
-        if let expectedRevision, current.configRevision != expectedRevision {
-            throw PersistenceError.conflict("项目配置已被其他操作修改（期望 r\(expectedRevision)，当前 r\(current.configRevision)）")
-        }
-        let runtime = current
-        var updated = current
-        mutate(&updated)
-        updated.id = runtime.id
-        updated.createdAt = runtime.createdAt
-        updated.status = updated.enabled
-            ? (runtime.status == .disabled ? .idle : runtime.status)
-            : .disabled
-        updated.lastBackupAt = runtime.lastBackupAt
-        updated.lastSnapshotID = runtime.lastSnapshotID
-        updated.lastError = runtime.lastError
-        updated.accessState = runtime.accessState
-        updated.lifecycle = runtime.lifecycle
-        updated.configRevision = current.configRevision + 1
-        try writeProjectPayload(updated)
-        current = updated
-        return current
     }
 
     @discardableResult
@@ -372,21 +376,25 @@ public actor SQLiteStore {
     }
 
     public func markProjectDeleting(id: UUID) throws {
-        guard var project = try project(id: id) else { return }
-        project.lifecycle = .deleting
-        project.enabled = false
-        project.status = .disabled
-        project.configRevision += 1
-        try writeProjectPayload(project)
+        try transaction {
+            guard var project = try project(id: id), project.lifecycle != .deleted else { return }
+            project.lifecycle = .deleting
+            project.enabled = false
+            project.status = .disabled
+            project.configRevision += 1
+            try writeProjectPayload(project)
+        }
     }
 
     public func markProjectDeleted(id: UUID) throws {
-        guard var project = try project(id: id) else { return }
-        project.lifecycle = .deleted
-        project.enabled = false
-        project.status = .disabled
-        project.configRevision += 1
-        try writeProjectPayload(project)
+        try transaction {
+            guard var project = try project(id: id) else { return }
+            project.lifecycle = .deleted
+            project.enabled = false
+            project.status = .disabled
+            project.configRevision += 1
+            try writeProjectPayload(project)
+        }
     }
 
     private func writeProjectPayload(_ project: Project) throws {
@@ -573,29 +581,37 @@ public actor SQLiteStore {
     /// Take the lease only when the job is not terminal and any existing lease is
     /// reclaimable (expired AND owner provably gone).
     public func acquireJobLease(id: UUID, owner: ProcessIdentity, expiresAt: Date) throws -> JobLease? {
-        guard var job = try job(id: id), !job.state.isTerminal else { return nil }
-        if let existing = job.lease, !existing.isReclaimable() { return nil }
-        let lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
-        job.lease = lease
-        job.state = .running
-        if job.startedAt == nil { job.startedAt = Date() }
-        try upsertJob(job)
-        return lease
+        try transactionResult {
+            guard var job = try job(id: id), !job.state.isTerminal else { return nil }
+            if let existing = job.lease, !existing.isReclaimable() { return nil }
+            let lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            job.lease = lease
+            job.state = .running
+            if job.startedAt == nil { job.startedAt = Date() }
+            try upsertJob(job)
+            return lease
+        }
     }
 
     public func renewJobLease(id: UUID, owner: ProcessIdentity, expiresAt: Date) throws -> Bool {
-        guard var job = try job(id: id), let lease = job.lease else { return false }
-        guard lease.owner.pid == owner.pid, abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
-        job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
-        try upsertJob(job)
-        return true
+        try transactionResult {
+            guard var job = try job(id: id), let lease = job.lease else { return false }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            try upsertJob(job)
+            return true
+        }
     }
 
     public func releaseJobLease(id: UUID, owner: ProcessIdentity) throws {
-        guard var job = try job(id: id), let lease = job.lease else { return }
-        guard lease.owner.pid == owner.pid, abs(lease.owner.startTime - owner.startTime) < 0.001 else { return }
-        job.lease = nil
-        try upsertJob(job)
+        try transaction {
+            guard var job = try job(id: id), let lease = job.lease else { return }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return }
+            job.lease = nil
+            try upsertJob(job)
+        }
     }
 
     /// Marks leftovers as `.interrupted`. A running job is only reclaimed when its
@@ -791,7 +807,7 @@ public actor SQLiteStore {
     public func resumableCloudRestore(repositoryID: UUID, generationID: UUID) throws -> CloudRestoreJob? {
         let rows = try query("""
         SELECT payload FROM cloud_restore_jobs
-        WHERE repository_id=? AND generation_id=? AND state IN ('preparing','downloading','verifying','interrupted','failed')
+        WHERE repository_id=? AND generation_id=? AND state IN ('preparing','downloading','verifying','committing','interrupted','failed')
         ORDER BY updated_at DESC LIMIT 1
         """, [.text(repositoryID.uuidString), .text(generationID.uuidString)])
         guard let row = rows.first, case .blob(let data) = row[0] else { return nil }
@@ -837,7 +853,7 @@ public actor SQLiteStore {
     public func latestUnfinishedGCJournal(repositoryID: UUID) throws -> GCJournal? {
         let rows = try query("""
         SELECT payload FROM gc_journals
-        WHERE repository_id=? AND phase != 'completed' AND phase != 'aborted'
+        WHERE repository_id=? AND phase != 'completed'
         ORDER BY updated_at DESC LIMIT 1
         """, [.text(repositoryID.uuidString)])
         guard let row = rows.first, case .blob(let data) = row[0] else { return nil }
@@ -1092,14 +1108,16 @@ public actor SQLiteStore {
     // MARK: - Settings with CAS (§6.3)
 
     public func saveSettingsCAS(_ settings: AppSettings, expectedRevision: Int?) throws -> AppSettings {
-        let stored = try codable(AppSettings.self, forKey: Keys.settings)
-        if let expectedRevision, let stored, stored.configRevision != expectedRevision {
-            throw PersistenceError.conflict("设置已被其他进程修改（期望 r\(expectedRevision)，当前 r\(stored.configRevision)）")
+        try transactionResult {
+            let stored = try codable(AppSettings.self, forKey: Keys.settings)
+            if let expectedRevision, let stored, stored.configRevision != expectedRevision {
+                throw PersistenceError.conflict("设置已被其他进程修改（期望 r\(expectedRevision)，当前 r\(stored.configRevision)）")
+            }
+            var updated = settings
+            updated.configRevision = (stored?.configRevision ?? 0) + 1
+            try setCodable(updated, forKey: Keys.settings)
+            return updated
         }
-        var updated = settings
-        updated.configRevision = (stored?.configRevision ?? 0) + 1
-        try setCodable(updated, forKey: Keys.settings)
-        return updated
     }
 
     public func settingsRevision() throws -> Int {
@@ -1143,10 +1161,18 @@ public actor SQLiteStore {
     }
 
     private func transaction(_ body: () throws -> Void) throws {
+        try transactionResult(body)
+    }
+
+    /// Read-check-write operations must hold a write transaction for their whole
+    /// duration. The actor only serializes this process; UI and Agent use separate
+    /// SQLite connections and would otherwise both pass a stale check.
+    private func transactionResult<T>(_ body: () throws -> T) throws -> T {
         try exec("BEGIN IMMEDIATE;")
         do {
-            try body()
+            let result = try body()
             try exec("COMMIT;")
+            return result
         } catch {
             try? exec("ROLLBACK;")
             throw error

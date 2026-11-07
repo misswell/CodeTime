@@ -6,7 +6,8 @@
 
 | 项目 | 原因 | 如何执行 |
 |---|---|---|
-| 真实 iCloud 双 Mac 发布/恢复（CT-ICloud） | 需要两台 Mac、同一 iCloud 账号、签名 Release 构建与真实容器 | 设置 `CODETIME_ICLOUD_TESTS=1`、`CODETIME_ICLOUD_CONTAINER`，按 `RELEASE_CHECKLIST.md` 第 7 节人工验收 |
+| 单机真实 iCloud 往返（ICloudAcceptanceTests） | 默认环境没有真实 iCloud 容器 | 设置 `CODETIME_ICLOUD_TESTS=1`、`CODETIME_ICLOUD_CONTAINER` 后运行；仍不代表双 Mac 验收 |
+| 真实 iCloud 双 Mac 发布/恢复 | 需要两台 Mac、同一 iCloud 账号、签名 Release 构建与真实容器 | 按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md` 填写报告；Stable 脚本会强制检查 |
 | 10 万文件排除预览（CT-036） | 默认门禁关闭，避免 CI 资源消耗 | `CODETIME_SCALE_TESTS=1 Scripts/test.sh --filter testCT036` |
 | 100 万文件扫描上限（CT-037） | 创建 100 万文件耗时且占用大量 inode | `CODETIME_SCALE_TESTS=1 Scripts/test.sh --filter testCT037`（建议独立卷） |
 | 磁盘满故障注入（CT-044） | 本机无可控小容量卷，无法安全制造 ENOSPC | 在独立 APFS 小容量卷或 CI 容器中运行；禁止在用户数据卷上注入 |
@@ -15,7 +16,7 @@
 | 安装、升级、回退、卸载重装 | 需要真实安装环境与上一版本包 | 按 `RELEASE_CHECKLIST.md` 第 7 节执行 |
 | SwiftUI 界面视觉/交互验收 | 未在本环境启动应用逐屏检查 | 使用 Release 构建在 macOS 14/15 上人工检查 |
 
-全量默认测试结果：**64 个测试，0 失败，4 跳过**。跳过项即上表中的 iCloud 验收、CT-036、CT-037、CT-044；它们不计入“通过”。
+全量默认测试结果：**77 个测试，0 失败，4 跳过**。跳过项即上表中的单机 iCloud 验收、CT-036、CT-037、CT-044；它们不计入“通过”。CT-045…CT-057 全部通过。
 
 ## 2. 功能边界
 
@@ -37,6 +38,10 @@
   - 不可读文件失败关闭；
   - 多设备候选与密钥不匹配继续搜索。
 - iCloud 同步延迟、配额不足、账户切换等真实环境差异可能暴露测试未覆盖的行为。
+
+### 2.3.1 Beta → Release 的 Keychain 限制
+
+迁移会复制数据库、仓库和隐藏文件，并修复 RepositoryRecord 路径；但 Beta 的 Keychain 条目属于 Beta 签名身份，Release 的 Keychain Access Group 不一定能读取。若迁移后 `ensureSecrets(allowCreation: false)` 找不到主密钥/仓库密码，应用会明确失败而不是生成新密钥。此时应使用云端恢复流程或由用户提供恢复凭据；不要把文件复制成功误认为完整迁移成功。该限制未在真实 Beta→Release 安装中验收。
 
 ### 2.4 Sandbox
 

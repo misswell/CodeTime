@@ -125,6 +125,8 @@ KopiaBackupEngine.createSnapshot
 
 任何一步失败都不会产生新的可见版本；旧清单继续有效。清单是唯一提交点。
 
+发布使用独立的 `publish.lock`：本地对象复制完成后释放 Kopia `repository.lock`，iCloud 上传等待期间不会阻塞下一次本地快照；GC 获取同一把发布锁，避免清扫尚未提交的对象。提交后的 recovery-info/索引失败只记录告警，不撤销已发布版本。
+
 `CloudMirrorStore` 的存储根可以是：
 
 - `iCloud Drive/CodeTime`（启用 iCloud，`coordinatedIO=true`）。
@@ -140,6 +142,7 @@ KopiaBackupEngine.createSnapshot
 - 每项目使用 `lastBackupAt + interval` 判断，避免重复扫描。
 - 睡眠唤醒后只补跑一次，不补齐每个时间刻度。
 - 失败任务按 60/300/900/1800/3600 秒指数退避（带抖动），永久错误不重试；同一项目用 `activeProjects` 去重。
+- 云端发布失败会创建独立的 `.upload` 任务，由调度器按退避策略重试，不必等待下一次本地备份。
 - 低电量模式 + `pauseOnBattery` 时暂停自动任务。
 - 领导锁保证 UI 与 agent 不会同时创建快照。
 
@@ -182,7 +185,7 @@ SQLite（WAL）保存元数据，不进入 iCloud：
 | 恢复副本 | 写入用户选择的新位置，默认推荐 |
 | 覆盖 | 仅单文件；先复制当前文件到 `recovery/`，失败则中止 |
 | 整项目 | 恢复到空目录，包含目录结构与 `.git` |
-| 跨设备 | 先写入 staging 仓库，逐对象校验，完成仓库/快照校验后再切换；支持中断续跑 |
+| 跨设备 | 先写入 staging 仓库，逐对象校验，完成仓库/快照校验后再切换；临时文件+原子移动，支持 committing 阶段续跑 |
 
 路径安全：
 
