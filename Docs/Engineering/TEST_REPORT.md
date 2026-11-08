@@ -7,8 +7,8 @@
 | 项 | 值 |
 |---|---|
 | 基准 Commit | `c782a5c`（第六轮审查基准 `63a8d86c` 之后的最新 main） |
-| 交付 Commit SHA | 见下方「CI 结果」小节（本报告随该提交一起提交） |
-| CI Run | 见下方「CI 结果」小节（GitHub Actions，`main` push） |
+| 交付 Commit SHA | `88d0af5`（本轮代码最终提交；本报告为随后的 docs-only 提交） |
+| CI Run | `42441771831`（GitHub Actions `CI`，`main` push，10/10 全绿） |
 | 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-116） |
 | 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过） |
 
@@ -87,10 +87,32 @@ regression gate: PASS
 
 - 本轮真实执行了百万文件规模测试（CT-037，`CODETIME_SCALE_TESTS=1`）与 10,000 文件内容校验基准（CT-095）。
 
-### CI 结果
+### CI 结果（Run `42441771831`，Commit `88d0af5`）
 
-> 推送后由 GitHub Actions `CI` 工作流在 `main` 上执行；具体的 Commit SHA、Run ID 以该次运行为准。
-> 失败时门禁输出失败套件、失败用例与断言详情（`Scripts/regression_gate.sh` 第 2 节）。
+| Job | 结果 |
+|---|---|
+| build | ✓ 2m17s |
+| unit-tests | ✓ 1m19s |
+| integration-tests | ✓ 1m16s |
+| cloud-tests | ✓ 1m20s |
+| recovery-tests | ✓ 1m0s |
+| concurrency-tests | ✓ 53s |
+| security-tests | ✓ 1m26s |
+| release-build | ✓ 2m23s |
+| entitlements | ✓ 13s |
+| regression-gate | ✓ 12m34s |
+
+CI 的 regression-gate 与本地一致：`CODETIME_SCALE_TESTS=1`，CT-036/037 规模测试真实执行，
+CT-098 的 SIGKILL 矩阵因门禁先构建 `CodeTimeCrashChild` 而不会跳过。
+
+### 终审（独立 Code Review）
+
+对 `c782a5c..88d0af5` 的独立审查：**P1 零项**；12 项 P2 中，P2-1（关停无法证明生产者已停）、
+P2-2（--once 忽略不安全 drain）、P2-3（claim 后首次写入失败导致租约泄漏）、
+P2-4（旧版完成记录使幂等失效）、P2-5（生产代码未走状态机/未记录永久失败）、
+P2-6（测试未驱动生产入口）、P2-7（基准未校验符号链接）、P2-8（基准 --check 参数与失败开放）、
+P2-9（janitor 被单个 journal 冻结）、P2-10（锁等待阻塞 actor）、P2-12（不可完成的重试）
+已在 `88d0af5` 修复；P2-11（预览高估可删对象）保留为已登记权衡，方向安全。
 
 ## 8. 已知限制
 
