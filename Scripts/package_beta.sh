@@ -63,7 +63,16 @@ PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 
   exit 1
 }
 "$ROOT/Scripts/validate_entitlements.sh"
-codesign --verify --deep --strict "$APP"
+# CT-127-era CI diagnostics: a silent codesign --verify failure on runners is
+# undiagnosable from logs alone; print the bundle's signature state on failure.
+if ! codesign --verify --deep --strict "$APP" 2>/tmp/codetime-codesign.err; then
+  echo "==> codesign --verify --deep --strict FAILED:" >&2
+  cat /tmp/codetime-codesign.err >&2 || true
+  codesign -dv "$APP" 2>&1 | head -6 >&2 || true
+  echo "==> nested binaries:" >&2
+  codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -20 >&2 || true
+  exit 1
+fi
 xattr -cr "$APP" 2>/dev/null || true
 
 mkdir -p "$STAGE"
