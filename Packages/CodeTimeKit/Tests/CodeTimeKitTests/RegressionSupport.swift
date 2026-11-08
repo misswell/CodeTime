@@ -267,7 +267,8 @@ struct RegressionCloud {
         hashCacheStore: any ObjectHashCacheProviding = NoopHashCacheStore(),
         sweepGrace: TimeInterval = 3_600,
         maxScannedFiles: Int = 2_000_000,
-        uploadParallelism: Int = 4
+        uploadParallelism: Int = 4,
+        fileAccess: (any CloudFileAccess)? = nil
     ) -> CloudMirrorStore {
         CloudMirrorStore(configuration: .init(
             storageRoot: workspace.storageRoot,
@@ -287,7 +288,8 @@ struct RegressionCloud {
             hashCacheStore: hashCacheStore,
             sweepGrace: sweepGrace,
             maxScannedFiles: maxScannedFiles,
-            uploadParallelism: uploadParallelism
+            uploadParallelism: uploadParallelism,
+            fileAccessOverride: fileAccess
         ))
     }
 

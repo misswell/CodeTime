@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-116）
+# 回归测试矩阵（CT-001 … CT-128）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -120,10 +120,22 @@
 | CT-114 | `testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild` | Regression Gate 允许关键测试跳过 | 是 | 否 |
 | CT-115 | `testCT115_BenchmarkVerifiesContentAndHasBaseline` | 性能基准缺少实际内容校验和回归阈值 | 是 | 否 |
 | CT-116 | `testCT116_TestReportBindsCommitRunAndGateResult` | TEST_REPORT 未同步最新 CI 结果 | 是 | 否 |
+| CT-117 | `testCT117_OversizedFileProtectionCopySurvivesItsOwnPrune` | 超预算保护副本被自身 prune 删除 | 是 | 否 |
+| CT-118 | `testCT118_OversizedDirectoryProtectionKeptWithOverBudgetStatus` | 超额目录保护未保留/未上报 | 是 | 否 |
+| CT-119 | `testCT119_SourceMutatedDuringCopyAbortsInsteadOfFakeProtection` | 复制期间源变化被伪装成保护成功 | 是 | 否 |
+| CT-120 | `testCT120_TamperedProtectionCopyFailsVerificationAndListing` | 保护副本损坏无法被发现 | 是 | 否 |
+| CT-121 | `testCT121_PruneNeverDeletesNewestOrActiveCopies` | 清理策略可能删除最新/活动副本 | 是 | 否 |
+| CT-122 | `testCT122_ActiveRestoreCopyProtectedFromPrune` | 清理与恢复并发时副本被误删 | 是 | 否 |
+| CT-123 | `testCT123_DuplicateObjectsVerifiedOncePerUniqueHash` | 云端重复对象重复哈希 | 是 | 否 |
+| CT-124 | `testCT124_ClonedDatabaseOnNewMacMintsNewDeviceIdentity` | 迁移助理克隆导致两台 Mac 共享设备身份 | 是 | 否 |
+| CT-125 | `testCT125_TwoMacsPublishingConcurrentlyKeepIndependentGenerations` | 双 Mac 并发发布互相破坏（双设备模拟） | 是 | 否 |
+| CT-126 | `testCT126_GCOnOneMacNeverDeletesOtherMacsCommittedObjects` | 一台设备 GC 误删另一台设备对象（双设备模拟） | 是 | 否 |
+| CT-127 | `testCT127_TestReportBindingMismatchFailsConsistencyCheck` | 测试报告绑定错误 Commit | 是 | 否 |
+| CT-128 | `testCT128_SkippedTestsCountedAsPassedFailTheCheck` | 跳过项计入通过/文档统计漂移 | 是 | 否 |
 
 ## 门禁规则（CT-114）
 
-- 索引必须恰好登记 CT-001…CT-116，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-128，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`；标记了门禁直接失败。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 只有 `manualAcceptance=true` 的条目（CT-037 百万文件、CT-044 磁盘满）允许跳过，且必须写明原因。

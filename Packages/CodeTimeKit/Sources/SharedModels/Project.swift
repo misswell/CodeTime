@@ -162,12 +162,23 @@ public struct DeviceIdentity: Codable, Identifiable, Hashable, Sendable {
     public var name: String
     public var model: String
     public var createdAt: Date
+    /// CT-124: stable hardware anchor (IOPlatformUUID). `nil` = unknown or a
+    /// legacy record. Two physical machines must never share an identity whose
+    /// anchor is set — a mismatch mints a new identity instead.
+    public var hardwareUUID: String?
 
-    public init(id: UUID = UUID(), name: String, model: String, createdAt: Date = Date()) {
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        model: String,
+        createdAt: Date = Date(),
+        hardwareUUID: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.model = model
         self.createdAt = createdAt
+        self.hardwareUUID = hardwareUUID
     }
 }
 

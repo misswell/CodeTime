@@ -32,6 +32,10 @@ public actor CloudMirrorStore: CloudStore {
         public var maxScannedFiles: Int
         /// Bounded concurrency for object copy/verify and hashing during publish.
         public var uploadParallelism: Int
+        /// Diagnostic/test seam (CT-123): replaces the derived file access so
+        /// callers can observe real hash operations. Nil = derive from
+        /// `coordinatedIO` as before.
+        public var fileAccessOverride: (any CloudFileAccess)?
 
         public init(
             storageRoot: URL,
@@ -52,7 +56,8 @@ public actor CloudMirrorStore: CloudStore {
             hashCacheStore: any ObjectHashCacheProviding = NoopHashCacheStore(),
             sweepGrace: TimeInterval = 3_600,
             maxScannedFiles: Int = 2_000_000,
-            uploadParallelism: Int = 4
+            uploadParallelism: Int = 4,
+            fileAccessOverride: (any CloudFileAccess)? = nil
         ) {
             self.storageRoot = storageRoot
             self.repositoryID = repositoryID
@@ -74,6 +79,7 @@ public actor CloudMirrorStore: CloudStore {
             self.sweepGrace = sweepGrace
             self.maxScannedFiles = maxScannedFiles
             self.uploadParallelism = max(1, uploadParallelism)
+            self.fileAccessOverride = fileAccessOverride
         }
     }
 
@@ -105,9 +111,8 @@ public actor CloudMirrorStore: CloudStore {
 
     public init(configuration: Configuration) {
         self.configuration = configuration
-        self.access = configuration.coordinatedIO
-            ? ICloudCoordinatedFileAccess()
-            : LocalFileAccess()
+        self.access = configuration.fileAccessOverride
+            ?? (configuration.coordinatedIO ? ICloudCoordinatedFileAccess() : LocalFileAccess())
         self.encoder = JSONEncoder()
         self.encoder.outputFormatting = [.sortedKeys]
         self.encoder.dateEncodingStrategy = .iso8601
@@ -946,6 +951,7 @@ public actor CloudMirrorStore: CloudStore {
         }
 
         let total = manifest.repositoryFiles.count
+        var verifiedHashes = Set<String>()
         var completed = 0
         var completedBytes: Int64 = 0
         await progress?(RestoreProgress(
@@ -999,7 +1005,13 @@ public actor CloudMirrorStore: CloudStore {
                 }
             }
 
-            try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
+            // CT-123: within one restore pass every unique object is fully
+            // verified once; later files referencing the same object reuse the
+            // verdict instead of re-downloading and re-hashing it.
+            if !verifiedHashes.contains(file.contentHash) {
+                try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
+                verifiedHashes.insert(file.contentHash)
+            }
             try await installObjectAtomically(
                 object: object,
                 target: target,
@@ -1077,27 +1089,86 @@ public actor CloudMirrorStore: CloudStore {
                 details: "清单不可用：\(error.localizedDescription)"
             )
         }
-        var bytes: Int64 = 0
-        var verified = 0
+        // CT-123: `repositoryFiles` is a file list — many files can reference
+        // the same content-addressed object. Verify each UNIQUE object once,
+        // check that every reference of a hash agrees on its size, and keep
+        // the full failure list for diagnostics.
+        let groups = Dictionary(grouping: manifest.repositoryFiles, by: \.contentHash)
         var failures: [String] = []
-        for file in manifest.repositoryFiles {
-            do {
-                try await verifyStoredObject(hash: file.contentHash, expectedSize: file.size)
-                verified += 1
-                bytes += file.size
-            } catch {
-                failures.append("\(file.relativePath)：\(error.localizedDescription)")
+        if groups.count != manifest.integrity.uniqueObjectCount {
+            failures.append(
+                "唯一对象数与清单声明不一致：实际 \(groups.count)，声明 \(manifest.integrity.uniqueObjectCount)"
+            )
+        }
+        for hash in groups.keys.sorted() {
+            let files = groups[hash]!
+            let sizes = Set(files.map(\.size))
+            if sizes.count > 1 {
+                let references = files
+                    .map { "\($0.relativePath)=\($0.size)" }
+                    .sorted()
+                    .prefix(4)
+                    .joined(separator: "、")
+                failures.append("\(hash)：同一对象的引用大小不一致：\(references)")
             }
         }
-        let complete = failures.isEmpty && verified == manifest.repositoryFiles.count && !manifest.repositoryFiles.isEmpty
+        let verifiable = groups.keys.sorted().filter { hash in
+            Set(groups[hash]!.map(\.size)).count <= 1
+        }
+        var verifiedObjects = 0
+        var verifiedBytes: Int64 = 0
+        await withTaskGroup(of: (String, Error?).self) { group in
+            var index = 0
+            let width = max(1, min(configuration.uploadParallelism, verifiable.count))
+            for _ in 0..<width where index < verifiable.count {
+                let hash = verifiable[index]
+                index += 1
+                group.addTask {
+                    do {
+                        try await self.verifyStoredObject(hash: hash, expectedSize: groups[hash]!.first!.size)
+                        return (hash, nil)
+                    } catch {
+                        return (hash, error)
+                    }
+                }
+            }
+            while let (hash, error) = await group.next() {
+                if let error {
+                    let references = groups[hash]!.map(\.relativePath).sorted().prefix(4).joined(separator: "、")
+                    failures.append("\(hash)：对象校验失败（引用：\(references)）：\(error.localizedDescription)")
+                } else {
+                    verifiedObjects += 1
+                    verifiedBytes += groups[hash]!.first!.size
+                }
+                if index < verifiable.count {
+                    let next = verifiable[index]
+                    index += 1
+                    group.addTask {
+                        do {
+                            try await self.verifyStoredObject(hash: next, expectedSize: groups[next]!.first!.size)
+                            return (next, nil)
+                        } catch {
+                            return (next, error)
+                        }
+                    }
+                }
+            }
+        }
+        if failures.count > 5 {
+            configuration.warningHandler?("verifyGeneration 失败明细：\(failures.joined(separator: "；"))")
+        }
+        let complete = failures.isEmpty
+            && verifiedObjects == groups.count
+            && verifiedObjects == manifest.integrity.uniqueObjectCount
+            && !manifest.repositoryFiles.isEmpty
         return VerificationResult(
             generationID: generationId,
             level: .cloudIntegrity,
             outcome: complete ? .passed : .failed,
             details: complete
-                ? "校验 \(manifest.repositoryFiles.count) 个对象、\(manifest.integrity.uniqueObjectCount) 个唯一哈希"
-                : "校验失败（\(failures.count) 项）：\(failures.prefix(3).joined(separator: "；"))",
-            bytesChecked: bytes
+                ? "校验 \(manifest.repositoryFiles.count) 个文件引用、\(verifiedObjects) 个唯一对象、\(verifiedBytes) 字节"
+                : "校验失败（\(failures.count) 项）：\(failures.prefix(5).joined(separator: "；"))",
+            bytesChecked: verifiedBytes
         )
     }
 

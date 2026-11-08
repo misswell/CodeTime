@@ -19,7 +19,7 @@ python3 - "$INDEX" "$ROOT" <<'PY' || { echo "regression gate: FAIL (invalid inde
 import json, sys, os
 index_path, root = sys.argv[1], sys.argv[2]
 entries = json.load(open(index_path))
-expected = [f"CT-{i:03d}" for i in range(1, 117)]
+expected = [f"CT-{i:03d}" for i in range(1, 129)]
 ids = [e.get("id") for e in entries]
 if ids != expected:
     missing = sorted(set(expected) - set(ids))
@@ -57,6 +57,15 @@ for e in entries:
         print(f"indexed test {e['id']} {e['test']} not found in sources", file=sys.stderr)
         sys.exit(1)
 PY
+
+# --- 1b. Test-report consistency (CT-127 / CT-128) -----------------------------
+# One machine-readable block in TEST_REPORT is the source of truth; the other
+# engineering docs must quote the same numbers and skipped tests may never be
+# counted as passed.
+python3 "$ROOT/Scripts/check_test_report.py" --repo-root "$ROOT" || {
+  echo "regression gate: FAIL (test report inconsistent)" >&2
+  exit 1
+}
 
 # --- 2. Run the suite ---------------------------------------------------------
 if [ -n "${REGRESSION_OUTPUT_FILE:-}" ]; then
@@ -142,4 +151,4 @@ print(sum(1 for e in json.load(open('$INDEX')) if e.get('required')))
 echo "regression gate: PASS"
 echo "  executed: $EXECUTED tests, 0 failures"
 echo "  skipped (manual acceptance only): ${SKIPPED:-none}"
-echo "  index: CT-001 … CT-116 ($REQUIRED_COUNT required)"
+echo "  index: CT-001 … CT-128 ($REQUIRED_COUNT required)"

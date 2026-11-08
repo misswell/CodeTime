@@ -133,6 +133,9 @@ public actor CodeTimeService {
     private var device: DeviceIdentity?
     private var repository: RepositoryRecord?
     private var engineCache: KopiaBackupEngine?
+    /// CT-124: injectable hardware-identity anchor (IOPlatformUUID in
+    /// production) so tests can simulate a database moving between Macs.
+    private let hardwareUUIDProvider: @Sendable () -> String?
     private var activeProjects: Set<UUID> = []
     private var backupGateClosed = false
     private var bootstrapReport: BootstrapReport?
@@ -153,7 +156,8 @@ public actor CodeTimeService {
     public init(
         paths: AppPaths? = nil,
         keychain: KeychainStore = .shared,
-        kopiaBinaryURL: URL? = nil
+        kopiaBinaryURL: URL? = nil,
+        hardwareUUIDProvider: (@Sendable () -> String?)? = nil
     ) throws {
         let paths = try paths ?? AppPaths.standard()
         try paths.createDirectories()
@@ -163,6 +167,7 @@ public actor CodeTimeService {
         self.logger = FileLogger(fileURL: paths.logs.appendingPathComponent("codetime.log"))
         self.gitInspector = GitInspector()
         self.kopiaBinaryURL = kopiaBinaryURL ?? KopiaBinary.locate()
+        self.hardwareUUIDProvider = hardwareUUIDProvider ?? { PlatformIdentity.currentHardwareUUID() }
     }
 
     // MARK: - Bootstrap
@@ -320,11 +325,42 @@ public actor CodeTimeService {
     }
 
     private func loadOrCreateDevice() async throws -> DeviceIdentity {
+        let currentHardware = hardwareUUIDProvider()
         if let stored = try await database.codable(DeviceIdentity.self, forKey: Keys.device) {
+            if let storedUUID = stored.hardwareUUID, let currentHardware, storedUUID != currentHardware {
+                // CT-124: Migration Assistant can clone the app data onto a
+                // different Mac. The stored identity must never be reused by
+                // two machines — mint a fresh one; the previous device's cloud
+                // data stays untouched under its own device ID.
+                let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+                let device = DeviceIdentity(
+                    id: UUID(),
+                    name: hostName,
+                    model: Self.modelIdentifier(),
+                    hardwareUUID: currentHardware
+                )
+                try await database.setCodable(device, forKey: Keys.device)
+                await logger.warning(
+                    "检测到硬件身份变化：原设备 \(stored.id.uuidString)（\(storedUUID.prefix(8))…）与本机（\(currentHardware.prefix(8))…）不一致，已生成新设备身份 \(device.id.uuidString)；原设备的云端仓库保留"
+                )
+                return device
+            }
+            if let currentHardware, stored.hardwareUUID == nil {
+                // Adopt the hardware anchor on the first boot after upgrading.
+                var adopted = stored
+                adopted.hardwareUUID = currentHardware
+                try await database.setCodable(adopted, forKey: Keys.device)
+                return adopted
+            }
             return stored
         }
         let hostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
-        let device = DeviceIdentity(id: UUID(), name: hostName, model: Self.modelIdentifier())
+        let device = DeviceIdentity(
+            id: UUID(),
+            name: hostName,
+            model: Self.modelIdentifier(),
+            hardwareUUID: currentHardware
+        )
         try await database.setCodable(device, forKey: Keys.device)
         return device
     }
@@ -1239,13 +1275,32 @@ public actor CodeTimeService {
                 try await withProject(project) { resolved in
                     let target = try Self.safeTargetURL(projectRoot: resolved.rootPath, relativePath: relativePath)
                     if FileManager.default.fileExists(atPath: target.path) {
-                        let backup = try ProtectedCopyStore.createCopy(
-                            target: target,
-                            projectID: project.id,
-                            projectRoot: URL(fileURLWithPath: resolved.rootPath),
-                            recoveryRoot: paths.recovery
+                        let receipt: ProtectedCopyStore.CopyReceipt
+                        do {
+                            receipt = try ProtectedCopyStore.createCopy(
+                                target: target,
+                                projectID: project.id,
+                                projectRoot: URL(fileURLWithPath: resolved.rootPath),
+                                recoveryRoot: paths.recovery
+                            )
+                        } catch {
+                            // CT-117: an overwrite without a working protection
+                            // copy must never proceed — fail loudly instead.
+                            await logger.error("覆盖前保护副本创建失败，已中止覆盖恢复：\(error.localizedDescription)")
+                            throw error
+                        }
+                        // CT-122: the restore below references this copy, so it
+                        // stays protected from every prune until the restore ends.
+                        ProtectedCopyStore.registerActiveCopy(receipt.directory)
+                        defer { ProtectedCopyStore.unregisterActiveCopy(receipt.directory) }
+                        await logger.info(
+                            "覆盖前已保护当前文件：\(receipt.directory.path)（\(receipt.sizeBytes) 字节\(receipt.overBudget ? "，超出保护容量预算，副本已保留" : "")）"
                         )
-                        await logger.info("覆盖前已保护当前文件：\(backup.path)")
+                        for removal in receipt.removals {
+                            await logger.info(
+                                "保护副本清理：删除 \(removal.directory.lastPathComponent)（\(removal.bytes) 字节，原因 \(removal.reason.rawValue)）"
+                            )
+                        }
                     }
                     try await runRegisteredOperation(
                         id: job.id,
@@ -1471,6 +1526,9 @@ public actor CodeTimeService {
                 guard result.outcome == .passed else {
                     throw CodeTimeError.integrityFailure(result.details)
                 }
+                // CT-120 / 二.7: the periodic verify task also re-verifies the
+                // local protection copies; corrupt ones are marked invalid.
+                try await auditProtectionCopies()
             case .cleanup:
                 guard let report = try await cleanupCloud() else {
                     try await recordMaintenanceSkip(task, reason: "未配置云端镜像", at: started, interval: intervalSeconds)
@@ -1499,6 +1557,25 @@ public actor CodeTimeService {
                 await logger.error("无法保存维护失败状态：\(error.localizedDescription)")
             }
             await logger.warning("维护任务 \(task.displayName) 失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// CT-120 / 二.7: re-verifies every project's protection copies. Corrupt
+    /// copies are marked `.invalid` on disk by `ProtectedCopyStore.verifyCopy`;
+    /// any failure fails the verify maintenance task so it surfaces in status.
+    private func auditProtectionCopies() async throws {
+        let projects = try await database.projects()
+        var failures: [String] = []
+        for project in projects {
+            for failure in ProtectedCopyStore.auditProject(projectID: project.id, recoveryRoot: paths.recovery) {
+                failures.append("\(project.name)：\(failure.directory.lastPathComponent) — \(failure.reason)")
+            }
+        }
+        guard failures.isEmpty else {
+            for failure in failures {
+                await logger.error("保护副本校验失败：\(failure)")
+            }
+            throw CodeTimeError.integrityFailure("\(failures.count) 个保护副本校验失败")
         }
     }
 

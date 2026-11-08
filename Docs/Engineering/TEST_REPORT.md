@@ -1,16 +1,23 @@
-# CodeTime 测试报告 — 第六轮可靠性整改
+# CodeTime 测试报告 — 第七轮可靠性整改
 
 本报告绑定具体的提交与 CI 运行，**不是**历史结果的沿用。任何一项未真实执行都明确标记。
+三份工程文档（TEST_REPORT / IMPLEMENTATION_STATUS / KNOWN_LIMITATIONS）的测试统计以下方顶部的
+test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.py` 强制校验
+（CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
+
+<!-- test-report
+{"commit":"ece7fff64a260c7d0acf2ef5d4f4789738e29820","run":"42441771831","executed":166,"failures":0,"skipped":2,"passed":164,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满"],"note":"代码提交内该块绑定第七轮审查基准 commit 与上一轮 run；交付 commit 与 CI run 在 CI 后的 docs 提交中更新"}
+-->
 
 ## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 基准 Commit | `c782a5c`（第六轮审查基准 `63a8d86c` 之后的最新 main） |
-| 交付 Commit SHA | `88d0af5`（本轮代码最终提交；本报告为随后的 docs-only 提交） |
-| CI Run | `42441771831`（GitHub Actions `CI`，`main` push，10/10 全绿） |
-| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-116） |
-| 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过） |
+| 基准 Commit | `ece7fff`（第七轮审查基准，main 最新） |
+| 交付 Commit SHA | 见「CI 结果」小节（本报告随代码提交提交，docs 提交回填） |
+| CI Run | 见「CI 结果」小节（GitHub Actions，`main` push） |
+| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-128） |
+| 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过、含报告一致性检查） |
 
 ## 2. 环境
 
@@ -22,37 +29,35 @@
 | Kopia | 0.23.1（内置 universal） |
 | 云端测试载体 | 本地镜像目录（Cloud Format v1） |
 
-## 3. 测试规模
+## 3. 测试规模与口径（本轮统一）
 
-- XCTest 总数：见「CI 结果」小节的最终计数（本文件不预填未执行数字）。
-- 必需（required）回归：CT-001 … CT-116 中除两个人工验收项外的全部。
-- 人工验收项（允许跳过，原因登记在索引）：
-  - **CT-037** 百万文件规模测试（Stress）——由 `Scripts/benchmark.sh stress` 或夜间任务执行。
-  - **CT-044** 磁盘写满（ENOSPC）——需可控小容量卷，由真机验收清单覆盖。
-- 真实双 Mac iCloud 往返（`testSingleMacICloudRoundTrip`）：**NOT RUN**，需真实 iCloud 容器与两台设备。
+- **本地门禁**（发布验收依据）：`CODETIME_SCALE_TESTS=1`，XCTest 共 **166** 个，全部真实执行：
+  **164 通过，0 失败，2 跳过**。跳过项仅为两个人工验收测试（见第 6 节），不计入“通过”。
+- **CI**：不设置 `CODETIME_SCALE_TESTS`，规模测试（CT-036/CT-037/CT-117 的 3GiB 变体）在 CI 中
+  跳过；CI 结果见「CI 结果」小节，两处口径分开陈述，不再混用。
+- 必需（required）回归：CT-001 … CT-128 中除人工验收项外的全部（128 项里 126 项 required）。
+- 人工验收项（允许跳过，原因登记在索引）：无（CT-036/CT-037 在 scale=1 下于本地门禁真实执行；
+  磁盘写满与双 Mac iCloud 属真机验收，不入索引或显式 NOT RUN）。
 
-## 4. 第六轮新增覆盖（CT-099 … CT-116）
+## 4. 第七轮整改覆盖（CT-117 … CT-128）
 
 | 编号 | 内容 | 测试方式 |
 |---|---|---|
-| CT-099 | 验收脚本对 CI 注入环境免疫 | 真实执行 `require_icloud_acceptance.sh` |
-| CT-100 | publish-stable 先 checkout 再读 notes | workflow 结构断言 |
-| CT-101 | 取消终止并回收 Kopia 子进程；drain 等到全部退出 | 真实 `/bin/sleep` 子进程 + 真实 kopia 备份 |
-| CT-102 | 提交位置判定覆盖全部崩溃位 | 生产纯函数 7 种组合 |
-| CT-103 | failed 可重试、permanentlyFailed 终态、租约回收 | 真实 SQLite claim |
-| CT-104 | 仓库级互斥 | 真实 flock 双句柄 |
-| CT-105 | iCloud 默认只预览；退役需显式记录 | 真实 CloudMirrorStore（coordinated） |
-| CT-106 | 被篡改 journal 路径绝不删除 | 真实文件系统 + 真实清理函数 |
-| CT-107 | 符号链接 staging 在写入前被拒 | 真实符号链接 + SafePath |
-| CT-108 | janitor 不跟随仓库目录符号链接 | 真实 bootstrap |
-| CT-109 | 新 RequestID 重新迁移 | 真实迁移两次 |
-| CT-110 | 单事务状态重算 | 真实 SQLite |
-| CT-111 | 目标路径跨进程互斥 | 真实 flock |
-| CT-112 | 活的恢复任务不被其他 bootstrap 回收 | 真实 SQLite |
-| CT-113 | Coordinator 承担策略；显式状态机 | 真实 Coordinator + 状态机断言 |
-| CT-114 | required 不可跳过；门禁构建 CrashChild | 索引/脚本断言 |
-| CT-115 | 基准内容校验 + 基线阈值 | 真实 300 文件基准（size+SHA+结构+隐藏+符号链接） |
-| CT-116 | 报告绑定 Commit/CI Run | 本文件 |
+| CT-117 | 超预算保护副本不得被自身 prune 删除；返回前验证存在 | 真实 `ProtectedCopyStore.createCopy`（4MiB/1MiB 预算 + scale=1 下真实 3GiB 稀疏文件） |
+| CT-118 | 超额目录保护保留并上报超额；符号链接计入树摘要 | 真实目录副本 + `status` |
+| CT-119 | 复制期间源变化：副本不一致立即失败；源持续变化重试一次后中止 | 注入复制处理器驱动真实复制/校验路径 |
+| CT-120 | 篡改副本校验失败、磁盘标记 invalid、列表剔除、审计发现 | 真实 `verifyCopy`/`listManifests`/`auditProject` |
+| CT-121 | prune 绝不删除最新副本与活动副本 | 真实 prune（预算注入） |
+| CT-122 | 活动恢复引用的副本在解除引用前不得删除 | 真实注册表 + prune |
+| CT-123 | 云端重复对象每个唯一哈希只完整校验一次；恢复复用校验结果 | 真实 `verifyGeneration`/`restoreRepository` + 哈希计数 access |
+| CT-124 | 迁移助理克隆数据库：硬件锚点不一致换发新身份；同机多进程共享身份；旧记录采用 | 真实 `CodeTimeService.bootstrap`（注入平台 UUID） |
+| CT-125 | 双 Mac 并发发布互不破坏（双设备模拟） | 真实 CloudMirrorStore 双设备身份 |
+| CT-126 | 一台设备 GC 不得删除另一台设备已提交对象（双设备模拟） | 真实 CloudMirrorStore + cleanup |
+| CT-127 | 报告绑定错误 Commit 时一致性检查失败 | 真实执行 `Scripts/check_test_report.py` |
+| CT-128 | 跳过项计入通过或文档统计不一致时门禁失败 | 真实执行 `Scripts/check_test_report.py` |
+
+**CT-125/CT-126 是双设备语义模拟（两个真实设备身份 + 真实存储与 GC 代码路径），不等于双 Mac
+真机 iCloud 验收**；后者见第 6 节 NOT RUN。
 
 ## 5. 性能结果（独立子进程，内容校验通过）
 
@@ -63,6 +68,7 @@
 
 - 基线文件：`Docs/Engineering/perf-baseline.json`；`Scripts/benchmark.sh --check` 以 2.5x 耗时 / 1.5x 内存作为回归阈值。
 - 入口：`Scripts/benchmark.sh [small|medium|large|stress]`；Large=100,000、Stress=1,000,000 为手动/夜间入口。
+- 本轮新增：CT-117 在 scale=1 下对真实 3GiB 稀疏文件执行保护副本全流程（复制+双向哈希+校验）。
 
 ## 6. 未执行项（不声称通过）
 
@@ -70,51 +76,42 @@
 |---|---|---|
 | 双 Mac iCloud 真机验收 | **NOT RUN** | 需要两台真实 Mac 与真实 iCloud；Stable 发布前置条件（`require_icloud_acceptance.sh` 强制） |
 | 真实 Keychain 跨签名迁移 | **NOT RUN** | 需要 Developer ID 真机环境 |
-| CT-037 百万文件 | **NOT RUN** | 人工/夜间规模测试 |
 | CT-044 磁盘写满 | **NOT RUN** | 需要可控 ENOSPC 卷 |
 
 ## 7. 执行结果
 
-### 本地门禁（提交前，真实运行）
+### 本地门禁（提交前，真实运行，CODETIME_SCALE_TESTS=1）
 
 ```
 regression gate: PASS
-  executed: 154 tests, 0 failures
+  executed: 166 tests, 0 failures
   skipped (manual acceptance only): testCT044_DiskFullLeavesRepositoryUntouched
                                     testSingleMacICloudRoundTrip
-  index: CT-001 … CT-116 (114 required)
+  index: CT-001 … CT-128 (126 required)
+  test-report check: PASS
 ```
 
-- 本轮真实执行了百万文件规模测试（CT-037，`CODETIME_SCALE_TESTS=1`）与 10,000 文件内容校验基准（CT-095）。
+- CT-036（10 万文件预览）、CT-037（百万文件上限）与 CT-117 的 3GiB 变体在 scale=1 下真实执行，
+  不再作为“未执行项”出现；CT-037 的历史矛盾（第 6 节标 NOT RUN、第 7 节称已执行）由此口径消除。
 
-### CI 结果（Run `42441771831`，Commit `88d0af5`）
+### CI 结果（Run 待回填，Commit 待回填）
 
 | Job | 结果 |
 |---|---|
-| build | ✓ 2m17s |
-| unit-tests | ✓ 1m19s |
-| integration-tests | ✓ 1m16s |
-| cloud-tests | ✓ 1m20s |
-| recovery-tests | ✓ 1m0s |
-| concurrency-tests | ✓ 53s |
-| security-tests | ✓ 1m26s |
-| release-build | ✓ 2m23s |
-| entitlements | ✓ 13s |
-| regression-gate | ✓ 12m34s |
+| build | 待 CI |
+| unit-tests | 待 CI |
+| regression-gate | 待 CI |
 
-CI 的 regression-gate 与本地一致：`CODETIME_SCALE_TESTS=1`，CT-036/037 规模测试真实执行，
-CT-098 的 SIGKILL 矩阵因门禁先构建 `CodeTimeCrashChild` 而不会跳过。
+（docs 提交将回填真实 Run ID 与 Commit SHA；回填前本节不得引用未发生的运行。）
 
-### 终审（独立 Code Review）
+## 8. 第七轮修复映射
 
-对 `c782a5c..88d0af5` 的独立审查：**P1 零项**；12 项 P2 中，P2-1（关停无法证明生产者已停）、
-P2-2（--once 忽略不安全 drain）、P2-3（claim 后首次写入失败导致租约泄漏）、
-P2-4（旧版完成记录使幂等失效）、P2-5（生产代码未走状态机/未记录永久失败）、
-P2-6（测试未驱动生产入口）、P2-7（基准未校验符号链接）、P2-8（基准 --check 参数与失败开放）、
-P2-9（janitor 被单个 journal 冻结）、P2-10（锁等待阻塞 actor）、P2-12（不可完成的重试）
-已在 `88d0af5` 修复；P2-11（预览高估可删对象）保留为已登记权衡，方向安全。
-
-## 8. 已知限制
-
-- Coordinator 已完成策略内聚（批次/恢复计划/校验策略/生命周期决策），但 `CodeTimeService` 仍保留兼容门面，UI 入口未全量改走 Coordinator。
-- `codeTimeService` 规模仍较大，属下一轮架构工作，不影响本轮数据安全结论。
+| 问题 | 代码 | 测试 |
+|---|---|---|
+| P1 超预算副本被 prune 删除 | `ProtectedCopyStore.swift`（prune 保护最新/活动副本、超额保留、返回前验证）、`CodeTimeService.swift`（注册表接入、失败显式中止） | CT-117、CT-118、CT-121、CT-122 |
+| P2 目录副本未与源比对 | `ProtectedCopyStore.swift`（源/副本独立树摘要 v2，含符号链接与大小；重试一次；不完整不写 verified manifest） | CT-118、CT-119 |
+| P2 listManifests 仅 JSON 解码 | `ProtectedCopyStore.swift`（payload 存在性+类型+lifecycle 过滤、verifyCopy/auditProject、维护钩子） | CT-120 |
+| P2 云端重复对象重复哈希 | `CloudMirrorStore.swift`（按唯一 SHA-256 去重、大小一致性、有界并发、三项统计；restore 复用） | CT-123 |
+| P2 设备身份无迁移检测 | `PlatformIdentity.swift`、`CodeTimeService.swift`、`SharedModels/Project.swift`（IOPlatformUUID 锚点） | CT-124 |
+| P2 双设备并发 | 既有 per-device 目录隔离验证 | CT-125、CT-126（模拟）；真机验收 NOT RUN |
+| P2 文档统计漂移 | `Scripts/check_test_report.py` + 门禁接线 | CT-127、CT-128 |
