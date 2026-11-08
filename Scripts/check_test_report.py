@@ -106,11 +106,29 @@ def check_commit_binding(block: dict, repo_root: Path, use_git: bool) -> None:
         fail(f"交付 Commit SHA 格式非法：{commit}")
     if not use_git:
         return
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", commit, "HEAD"],
-        capture_output=True,
-    )
-    if result.returncode != 0:
+
+    def is_ancestor() -> int:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", commit, "HEAD"],
+            capture_output=True,
+        ).returncode
+
+    status = is_ancestor()
+    if status != 0:
+        # Shallow CI checkouts truncate history, which breaks merge-base even
+        # for genuine ancestors. Fetch the exact commit once and retry; a
+        # still-failing binding is genuinely wrong.
+        shallow = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--is-shallow-repository"],
+            capture_output=True, text=True,
+        ).stdout.strip() == "true"
+        if shallow:
+            subprocess.run(
+                ["git", "-C", str(repo_root), "fetch", "--no-tags", "--quiet", commit],
+                capture_output=True,
+            )
+            status = is_ancestor()
+    if status != 0:
         fail(f"交付 Commit {commit} 不是当前 HEAD 的祖先（报告绑定错误）")
     run = str(block["run"])
     if not run or not re.fullmatch(r"\d+", run):
