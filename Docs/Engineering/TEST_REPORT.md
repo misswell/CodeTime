@@ -6,7 +6,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 （CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
 
 <!-- test-report
-{"commit":"ece7fff64a260c7d0acf2ef5d4f4789738e29820","run":"42441771831","executed":166,"failures":0,"skipped":2,"passed":164,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满"],"note":"代码提交内该块绑定第七轮审查基准 commit 与上一轮 run；交付 commit 与 CI run 在 CI 后的 docs 提交中更新"}
+{"commit":"09cb4368ab0e6e2ad1b70a4717f718cdf4ca8658","run":"42500937876","executed":166,"failures":0,"skipped":2,"passed":164,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满"]}
 -->
 
 ## 1. 绑定信息
@@ -14,8 +14,8 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 | 项 | 值 |
 |---|---|
 | 基准 Commit | `ece7fff`（第七轮审查基准，main 最新） |
-| 交付 Commit SHA | 见「CI 结果」小节（本报告随代码提交提交，docs 提交回填） |
-| CI Run | 见「CI 结果」小节（GitHub Actions，`main` push） |
+| 交付 Commit SHA | `09cb436`（第七轮交付；`dd6177b` 为整改主体，`09cb436` 为门禁 CI 修复） |
+| CI Run | `42500937876`（GitHub Actions `CI`，`main` push，10/10 全绿） |
 | 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-128） |
 | 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过、含报告一致性检查） |
 
@@ -94,15 +94,23 @@ regression gate: PASS
 - CT-036（10 万文件预览）、CT-037（百万文件上限）与 CT-117 的 3GiB 变体在 scale=1 下真实执行，
   不再作为“未执行项”出现；CT-037 的历史矛盾（第 6 节标 NOT RUN、第 7 节称已执行）由此口径消除。
 
-### CI 结果（Run 待回填，Commit 待回填）
+### CI 结果（Run `42500937876`，Commit `09cb436`）
 
 | Job | 结果 |
 |---|---|
-| build | 待 CI |
-| unit-tests | 待 CI |
-| regression-gate | 待 CI |
+| build | ✓ |
+| unit-tests | ✓ |
+| integration-tests | ✓ |
+| cloud-tests | ✓ |
+| recovery-tests | ✓ |
+| concurrency-tests | ✓ |
+| security-tests | ✓ |
+| release-build | ✓ |
+| entitlements | ✓ |
+| regression-gate | ✓（Full suite + CT-001…CT-128 gate，CODETIME_SCALE_TESTS=1） |
 
-（docs 提交将回填真实 Run ID 与 Commit SHA；回填前本节不得引用未发生的运行。）
+10/10 全绿。CI 的 regression-gate 使用完整历史 checkout（`fetch-depth: 0`）以支持 CT-127 的
+commit 祖先校验。
 
 ## 8. 第七轮修复映射
 
