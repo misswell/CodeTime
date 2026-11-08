@@ -206,14 +206,20 @@ final class FifthRoundRegressionTests: XCTestCase {
         process.arguments = command
         var environment = ProcessInfo.processInfo.environment
         for (k, v) in env { environment[k] = v }
+        // CI 注入的 GITHUB_SHA 会泄漏进被测脚本，让 commit 校验对上 CI 的真实
+        // commit 而不是 fixture。除非用例显式提供，一律隔离。
+        if env["GITHUB_SHA"] == nil { environment.removeValue(forKey: "GITHUB_SHA") }
         process.environment = environment
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try? process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        let process2 = process
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process2.standardOutput = outPipe
+        process2.standardError = errPipe
+        try? process2.run()
+        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            + errPipe.fileHandleForReading.readDataToEndOfFile()
+        process2.waitUntilExit()
+        return (process2.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 
     func testCT083_AcceptanceReportMustBindImmutableArtifact() throws {
