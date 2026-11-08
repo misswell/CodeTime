@@ -48,6 +48,11 @@ else
   tail -40 "$OUTPUT"
   if [ "$STATUS" -ne 0 ]; then
     echo "regression gate: FAIL (test command exited $STATUS)" >&2
+    # Failure diagnostics: which suites/cases failed and why. The transcript is
+    # ephemeral, so everything actionable must be echoed here.
+    grep -E "Test Suite .* (failed|passed)" "$OUTPUT" | grep failed >&2 || true
+    grep -E "failed \(" "$OUTPUT" | head -30 >&2 || true
+    grep -E "error:" "$OUTPUT" | head -30 >&2 || true
     exit 1
   fi
 fi
