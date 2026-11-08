@@ -138,6 +138,12 @@ public enum SafePath {
         try validateRaw(path)
         let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else {
+            // O_NOFOLLOW on a symlink reports ENOTDIR on macOS; lstat gives the
+            // precise reason for the caller (and for the audit log).
+            var info = stat()
+            if lstat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFLNK {
+                throw SafePathError.isSymlink(path: path)
+            }
             if errno == ELOOP { throw SafePathError.isSymlink(path: path) }
             throw SafePathError.notADirectory(path: path)
         }

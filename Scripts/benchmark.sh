@@ -20,12 +20,22 @@ if [ "${1:-}" = "--check" ]; then
   shift
 fi
 
-case "${1:-small}" in
+SCALE="${1:-small}"
+case "$SCALE" in
   small)  FILES="${2:-300}" ;;
   medium) FILES="${2:-10000}" ;;
   large)  FILES="${2:-100000}" ;;
   stress) FILES="${2:-1000000}" ;;
-  *) FILES="${2:-300}" ;;
+  *)
+    if [[ "$SCALE" =~ ^[0-9]+$ ]]; then
+      # Explicit file count is allowed: `benchmark.sh 5000`.
+      FILES="$SCALE"
+      SCALE="custom"
+    else
+      echo "unknown scale: $SCALE (use small|medium|large|stress|<fileCount>)" >&2
+      exit 2
+    fi
+    ;;
 esac
 
 if [ ! -x "$CHILD" ] || [ -n "$(find "$ROOT/Packages/CodeTimeKit/Sources" -newer "$CHILD" -name '*.swift' -print -quit 2>/dev/null)" ]; then
@@ -41,7 +51,7 @@ fi
 WORK="$(mktemp -d /tmp/codetime-bench-XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "benchmark: $FILES files (scale ${1:-small}, content-verified)"
+echo "benchmark: $FILES files (scale $SCALE, content-verified)"
 OUTPUT="$("$CHILD" bench "$WORK" "$FILES")"
 echo "$OUTPUT"
 
@@ -71,7 +81,10 @@ def ratio(name, limit):
     base = entry.get(name)
     if base in (None, 0):
         return
-    actual = float(metrics.get(name, 0))
+    if name not in metrics:
+        failures.append(f"{name}: missing from benchmark output")
+        return
+    actual = float(metrics[name])
     if actual > base * limit:
         failures.append(f"{name}: {actual} > {base}*{limit}")
 ratio("backupDurationMs", 2.5)

@@ -829,6 +829,8 @@ public actor CodeTimeService {
         retryJobID: UUID? = nil,
         allowsRetry: Bool = true
     ) async throws -> BackupOutcome {
+        try beginWorkClaim()
+        defer { endWorkClaim() }
         guard let project = try await database.project(id: projectID) else {
             throw CodeTimeError.repositoryUnavailable("项目不存在")
         }
@@ -1134,6 +1136,9 @@ public actor CodeTimeService {
             throw CodeTimeError.snapshotNotFound(request.snapshotID)
         }
 
+        try beginWorkClaim()
+        defer { endWorkClaim() }
+
         var job = RestoreJob(
             projectID: request.projectID,
             snapshotID: request.snapshotID,
@@ -1149,7 +1154,7 @@ public actor CodeTimeService {
             "restore-target-\(Self.stablePathHash(request.destination.standardizedFileURL.path)).lock"
         )
         let targetLock = RepositoryLock(path: targetLockURL.path)
-        guard Self.acquireFileLock(targetLock, timeout: 60) else {
+        guard await Self.acquireFileLock(targetLock, timeout: 60) else {
             throw CodeTimeError.repositoryUnavailable(
                 "另一个恢复任务正在写入 \(request.destination.path)"
             )
@@ -1172,6 +1177,16 @@ public actor CodeTimeService {
             expiresAt: Date().addingTimeInterval(restoreLeaseDuration)
         ) != nil else {
             throw CodeTimeError.leaseConflict(owner: "另一个恢复任务")
+        }
+        do {
+            _ = try await database.upsertRestoreJob(job, owner: restoreOwner)
+        } catch {
+            do {
+                try await database.releaseRestoreLease(id: job.id, owner: restoreOwner)
+            } catch {
+                await logger.error("本地恢复首次写入失败后释放租约失败：\(error.localizedDescription)")
+            }
+            throw error
         }
         let restoreLeaseState = LeaseState()
         let restoreHeartbeat = Task { [database, logger] in
@@ -2029,6 +2044,14 @@ public actor CodeTimeService {
         var updatedAt: Date
     }
 
+    /// P2-6: the single validation every restore staging path must pass before
+    /// any download or filesystem write. Extracted so tests can exercise the
+    /// production function instead of re-implementing its steps.
+    static func validateRestoreStaging(_ path: String, repositoryRoot: URL) throws -> URL {
+        try SafePath.assertRealDirectoryNotSymlink(path)
+        return try SafePath.containedDirectChild(path, within: repositoryRoot)
+    }
+
     static func restoreCommitJournalURL(repositoryRoot: URL, jobID: UUID) -> URL {
         repositoryRoot.appendingPathComponent(
             "restore-commit-\(jobID.uuidString.prefix(8)).json",
@@ -2108,13 +2131,19 @@ public actor CodeTimeService {
         return (journalProvesMove || stateProvesMove) ? .alreadyCommitted : .blockedDestination
     }
 
-    /// Blocking cross-process lock with a timeout, used for repository-level
-    /// mutual exclusion (CT-104).
-    static func acquireFileLock(_ lock: RepositoryLock, timeout: TimeInterval) -> Bool {
+    /// Cross-process lock with a timeout. Async on purpose (P2-10): the previous
+    /// `Thread.sleep` loop ran ON the service actor and froze every other call in
+    /// the process for up to the timeout.
+    static func acquireFileLock(_ lock: RepositoryLock, timeout: TimeInterval) async -> Bool {
         if lock.tryAcquire() { return true }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.2)
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return false
+            }
+            if Task.isCancelled { return false }
             if lock.tryAcquire() { return true }
         }
         return false
@@ -2139,6 +2168,8 @@ public actor CodeTimeService {
         guard candidate.isRestorable, let generationID = candidate.latestGenerationID else {
             throw CodeTimeError.cloudPublishIncomplete(candidate.blockedReason ?? "候选版本不可恢复")
         }
+        try beginWorkClaim()
+        defer { endWorkClaim() }
         let key = try RecoveryKey.parse(recoveryKeyText)
         // Do not gate recovery on stale snapshot rows. A database can retain
         // metadata after its Kopia repository is lost; the repository slot below
@@ -2170,7 +2201,7 @@ public actor CodeTimeService {
         var repositoryLock: RepositoryLock? = RepositoryLock(
             path: repositoryRoot.appendingPathComponent("repository.lock").path
         )
-        guard let acquiredLock = repositoryLock, Self.acquireFileLock(acquiredLock, timeout: 120) else {
+        guard let acquiredLock = repositoryLock, await Self.acquireFileLock(acquiredLock, timeout: 120) else {
             throw CodeTimeError.repositoryUnavailable(
                 "仓库 \(recovered.repositoryID.uuidString.prefix(8)) 正被另一个恢复任务使用"
             )
@@ -2271,7 +2302,7 @@ public actor CodeTimeService {
 
         let stagingExists = FileManager.default.fileExists(atPath: job.stagingPath)
         if stagingExists {
-            try SafePath.assertRealDirectoryNotSymlink(job.stagingPath)
+            _ = try Self.validateRestoreStaging(job.stagingPath, repositoryRoot: repositoryRoot)
         }
         // A journal that describes a different staging directory is not ours.
         if let loaded = journal, loaded.stagingPath != job.stagingPath,
@@ -2299,7 +2330,11 @@ public actor CodeTimeService {
             )
             try SafePath.assertRealDirectoryNotSymlink(job.stagingPath)
         case .resumeCommit:
-            break
+            // P2-12: staging next to a non-empty repository is not resolvable by
+            // retrying — surface it as a blocked destination instead of looping.
+            if repositoryExists, !repositoryContents.isEmpty {
+                throw CodeTimeError.destinationExists(repositoryURL.path)
+            }
         case .blockedDestination:
             throw CodeTimeError.destinationExists(repositoryURL.path)
         }
@@ -2313,10 +2348,20 @@ public actor CodeTimeService {
             job.retryCount = 0
         } else if adoptingMovedRepository {
             job.state = .committing
+        } else if job.state == .committing {
+            // P2-5: `committing → preparing` is illegal. When the journal proves
+            // the move did NOT happen, the job re-enters at `verifying` (the
+            // staging content is re-checked before the move).
+            job.state = .verifying
+            job.retryCount += 1
         } else {
             job.state = .preparing
             job.retryCount += 1
         }
+        assert(
+            RestoreStateMachine.allows(job.state, job.state),
+            "restore state write must be a legal state"
+        )
         job.lastError = nil
         if isFreshJob {
             try await database.upsertCloudRestoreJob(job)
@@ -2330,7 +2375,18 @@ public actor CodeTimeService {
         ) != nil else {
             throw CodeTimeError.leaseConflict(owner: "另一个恢复任务")
         }
-        _ = try await database.upsertCloudRestoreJob(job, owner: owner)
+        // P2-3: if this first write fails, the lease must not leak — a live
+        // owner's lease is not reclaimable and would block an immediate retry.
+        do {
+            _ = try await database.upsertCloudRestoreJob(job, owner: owner)
+        } catch {
+            do {
+                try await database.releaseCloudRestoreLease(id: job.id, owner: owner)
+            } catch {
+                await logger.error("首次状态写入失败后释放租约失败：\(error.localizedDescription)")
+            }
+            throw error
+        }
 
         // CT-101: registered so a shutdown can stop this job and wait for it.
         let cancelFlag = CancellationFlag()
@@ -2494,9 +2550,10 @@ public actor CodeTimeService {
             rebuildEngine()
         } catch {
             let cancelled = Self.isCancellation(error)
+            let permanent = RetryPolicy.classify(error).isPermanent && !cancelled
             job.state = job.state == .committing
                 ? .committing
-                : (cancelled ? .interrupted : .retryableFailed)
+                : (cancelled ? .interrupted : (permanent ? .permanentlyFailed : .retryableFailed))
             job.lastError = error.localizedDescription
             job.updatedAt = Date()
             _ = try? await database.upsertCloudRestoreJob(job, owner: owner)
@@ -2647,6 +2704,10 @@ public actor CodeTimeService {
         }
     }
 
+    /// How long an unreferenced staging directory survives before the janitor
+    /// reclaims it (P2-9). Re-downloading is always possible.
+    static let abandonedStagingLifetime: TimeInterval = 30 * 86_400
+
     /// Reclaims abandoned cloud-restore staging directories. A `restore-*`
     /// directory is only removed when it is a validated direct child of a
     /// repository root, no resumable job references it, and no commit journal
@@ -2684,19 +2745,30 @@ public actor CodeTimeService {
                 let children = (try? fm.contentsOfDirectory(
                     at: repositoryDir, includingPropertiesForKeys: nil
                 )) ?? []
-                // A commit journal means a crash inside the commit window — the
-                // resumable job logic owns every staging dir in this repository
-                // root, never the janitor. (Journal files are named
-                // `restore-commit-<jobID8>.json`; do NOT match them with
-                // isStagingName — every restore-* name shares that prefix.)
-                let hasCommitJournal = children.contains {
-                    $0.lastPathComponent.hasPrefix("restore-commit-") &&
-                    $0.lastPathComponent.hasSuffix(".json")
-                }
-                guard !hasCommitJournal else { continue }
+                // P2-9: a commit journal only protects ITS OWN staging directory.
+                // Treating any journal as "skip the whole repository" let one
+                // failed restore freeze staging cleanup forever.
+                let journalJobPrefixes: Set<String> = Set(children.compactMap { url -> String? in
+                    let name = url.lastPathComponent
+                    guard name.hasPrefix("restore-commit-"), name.hasSuffix(".json") else { return nil }
+                    return String(name.dropFirst("restore-commit-".count).dropLast(".json".count))
+                })
                 for child in children where SafePath.isStagingName(child.lastPathComponent) {
                     let childStandardized = child.standardizedFileURL.path
                     guard liveStaging.contains(childStandardized) == false else { continue }
+                    // A journal whose job prefix matches this staging name owns it.
+                    let ownedByJournal = journalJobPrefixes.contains { prefix in
+                        child.lastPathComponent.contains(prefix)
+                    }
+                    if ownedByJournal { continue }
+                    // Retryable staging is preserved, but not forever: after the
+                    // expiry it is reclaimed (the data is re-downloadable).
+                    let age = (try? URL(fileURLWithPath: childStandardized)
+                        .resourceValues(forKeys: [.contentModificationDateKey])
+                        .contentModificationDate.map { Date().timeIntervalSince($0) }) ?? nil
+                    let expired = (age ?? 0) > Self.abandonedStagingLifetime
+                    let referencedByResumableJob = !liveStaging.isEmpty
+                    if referencedByResumableJob && !expired { continue }
                     do {
                         // Never recurse into an unvalidated path. Staging dirs
                         // are direct children of THIS repository dir, not of the
@@ -2818,6 +2890,32 @@ public actor CodeTimeService {
     }
 
     private var registeredWork: [UUID: RegisteredWork] = [:]
+    /// Claims that have entered a blocking operation but have not registered a
+    /// cancellable task yet (the claim happens before the job ID exists).
+    /// Drain waits for this to reach zero, closing the register-after-claim gap.
+    private var pendingWorkClaims = 0
+    /// Set synchronously by `drainActiveWork`; every blocking entry point checks
+    /// it BEFORE its first await.
+    private var shuttingDown = false
+
+    /// Synchronous gate: throws when a shutdown is in progress, so a job can
+    /// never start between "drain decided" and the process exiting.
+    func beginWorkClaim() throws {
+        guard !shuttingDown else { throw CodeTimeError.cancelled }
+        pendingWorkClaims += 1
+    }
+
+    func endWorkClaim() {
+        pendingWorkClaims = max(0, pendingWorkClaims - 1)
+    }
+
+    public func beginShutdown() {
+        shuttingDown = true
+    }
+
+    public func cancelShutdown() {
+        shuttingDown = false
+    }
 
     func registerWork(_ info: ActiveWorkInfo, cancel: @escaping @Sendable () -> Void) {
         registeredWork[info.id] = RegisteredWork(info: info, cancel: cancel)
@@ -2836,8 +2934,10 @@ public actor CodeTimeService {
     /// running after the timeout — a non-empty result means the caller must NOT
     /// release locks or exit (the migration then fails safely instead).
     public func drainActiveWork(timeout: TimeInterval = 30) async -> [ActiveWorkInfo] {
+        shuttingDown = true
+        defer { shuttingDown = false }
         let snapshot = registeredWork.values.map { $0.info }
-        guard !snapshot.isEmpty else { return [] }
+        guard !snapshot.isEmpty || pendingWorkClaims > 0 else { return [] }
         await logger.warning("正在停止 \(snapshot.count) 个进行中的任务：\(snapshot.map(\.kind.rawValue).joined(separator: ", "))")
         for work in registeredWork.values {
             work.cancel()
@@ -2847,7 +2947,9 @@ public actor CodeTimeService {
             // Both conditions are required: every job must have finished its own
             // cleanup (state persisted, repository lock released) AND every child
             // process must be provably reaped.
-            if registeredWork.isEmpty, ActiveChildProcesses.shared.livePIDs().isEmpty {
+            if registeredWork.isEmpty,
+               pendingWorkClaims == 0,
+               ActiveChildProcesses.shared.livePIDs().isEmpty {
                 return []
             }
             try? await Task.sleep(nanoseconds: 100_000_000)

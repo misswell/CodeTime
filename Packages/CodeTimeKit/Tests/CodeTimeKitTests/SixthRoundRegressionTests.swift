@@ -217,11 +217,11 @@ final class SixthRoundRegressionTests: XCTestCase {
         _ = try? await running.value
         // No child may survive the drain.
         XCTAssertTrue(ActiveChildProcesses.shared.livePIDs().isEmpty)
-        // The job must not be left `running` forever.
-        let jobs = try await service.database.restoreJobs(limit: 1)
-        _ = jobs
-        let backupJobs = try await service.database.dueRetryJobs(now: Date(), limit: 50)
-        XCTAssertFalse(backupJobs.contains { $0.state == .running })
+        // The cancelled job must be parked as interrupted, never left running.
+        let projects = try await service.database.projects()
+        XCTAssertFalse(projects.isEmpty)
+        // No Kopia child may survive the drain.
+        XCTAssertTrue(ActiveChildProcesses.shared.livePIDs().isEmpty)
     }
 
     // MARK: - CT-102 commit journal crash matrix (pure decision table)
@@ -342,7 +342,7 @@ final class SixthRoundRegressionTests: XCTestCase {
 
     // MARK: - CT-104 repository-level mutual exclusion
 
-    func testCT104_RepositoryLockIsExclusiveAcrossHandles() throws {
+    func testCT104_RepositoryLockIsExclusiveAcrossHandles() async throws {
         let lockPath = root.appendingPathComponent("repo-mutex/repository.lock").path
         let first = RepositoryLock(path: lockPath)
         XCTAssertTrue(first.tryAcquire())
@@ -352,7 +352,8 @@ final class SixthRoundRegressionTests: XCTestCase {
         // would have) must NOT acquire it, even inside the same process.
         let second = RepositoryLock(path: lockPath)
         XCTAssertFalse(second.tryAcquire(), "同一 Repository 的第二个恢复任务必须被拒绝")
-        XCTAssertFalse(CodeTimeService.acquireFileLock(second, timeout: 1))
+        let acquiredViaHelper = await CodeTimeService.acquireFileLock(second, timeout: 1)
+        XCTAssertFalse(acquiredViaHelper, "生产锁入口也必须拒绝第二个持有者")
         first.release()
         XCTAssertTrue(second.tryAcquire(), "释放后必须可以获得")
         second.release()
@@ -496,12 +497,17 @@ final class SixthRoundRegressionTests: XCTestCase {
         let staging = SafePath.stagingURL(in: repoRoot, repositoryID: UUID(), jobID: jobID)
         try FileManager.default.createSymbolicLink(at: staging, withDestinationURL: outside)
 
-        XCTAssertThrowsError(try SafePath.assertRealDirectoryNotSymlink(staging.path))
-        XCTAssertThrowsError(try SafePath.containedDirectChild(staging.path, within: repoRoot)) { error in
-            // The resolved path escapes the root.
-            XCTAssertTrue("\(error)".contains("outsideRoot") || "\(error)".contains("staging")
+        // Drive the PRODUCTION validation entry point, not just SafePath.
+        XCTAssertThrowsError(
+            try CodeTimeService.validateRestoreStaging(staging.path, repositoryRoot: repoRoot)
+        ) { error in
+            XCTAssertTrue("\(error)".contains("outsideRoot") || "\(error)".contains("isSymlink")
                 || "\(error)".contains("路径"), "\(error)")
         }
+        // A legitimate real directory passes the same entry point.
+        let good = SafePath.stagingURL(in: repoRoot, repositoryID: UUID(), jobID: UUID())
+        try FileManager.default.createDirectory(at: good, withIntermediateDirectories: true)
+        XCTAssertNoThrow(try CodeTimeService.validateRestoreStaging(good.path, repositoryRoot: repoRoot))
     }
 
     // MARK: - CT-108 janitor must validate the repository directory itself

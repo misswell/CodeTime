@@ -49,7 +49,14 @@ enum AgentRunner {
             let runOnce = CommandLine.arguments.contains("--once")
             if runOnce {
                 await scheduler.runOnce()
-                _ = await scheduler.stopAndDrain(timeout: 30)
+                // P2-2: an unsafe drain must NOT exit — a child may still write.
+                let remaining = await scheduler.stopAndDrain(timeout: 30)
+                guard remaining.isEmpty else {
+                    FileHandle.standardError.write(Data(
+                        "仍有任务未能退出（\(remaining.joined(separator: ","))），--once 拒绝退出。\n".utf8
+                    ))
+                    exit(1)
+                }
                 exit(0)
             }
 

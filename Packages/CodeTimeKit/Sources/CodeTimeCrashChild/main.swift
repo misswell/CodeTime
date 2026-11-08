@@ -58,6 +58,8 @@ func sha256Hex(_ data: Data) -> String {
 /// directories, an EMPTY file, a HIDDEN file, a file with non-ASCII/special
 /// characters and a symlink — and the restored tree is compared file by file
 /// (existence, size, SHA-256). "kopia exited 0" is not a correctness check.
+nonisolated(unsafe) var symlinkExpectation: (relative: String, destination: String)?
+
 func makeDataset(root: URL, fileCount: Int) throws -> [String: (size: Int, hash: String)] {
     let fm = FileManager.default
     try fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -91,7 +93,12 @@ func makeDataset(root: URL, fileCount: Int) throws -> [String: (size: Int, hash:
     let target = root.appendingPathComponent("dir0/file0.txt")
     let link = root.appendingPathComponent("dir0/link-to-file0")
     if fm.fileExists(atPath: link.path) { try? fm.removeItem(at: link) }
-    try? fm.createSymbolicLink(atPath: link.path, withDestinationPath: target.lastPathComponent)
+    do {
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: target.lastPathComponent)
+        symlinkExpectation = (relative: "dir0/link-to-file0", destination: "file0.txt")
+    } catch {
+        symlinkExpectation = nil
+    }
     return manifest
 }
 
@@ -121,6 +128,17 @@ func verifyRestoredTree(root: URL, manifest: [String: (size: Int, hash: String)]
     // Hidden file must be present too (the scan must not skip it silently).
     if !fm.fileExists(atPath: root.appendingPathComponent(".hidden-config").path) {
         mismatches.append("missing-hidden:.hidden-config")
+    }
+    // P2-7: the symlink must be restored AS A SYMLINK with the same destination.
+    if let expectation = symlinkExpectation {
+        let link = root.appendingPathComponent(expectation.relative)
+        let values = try? link.resourceValues(forKeys: [.isSymbolicLinkKey])
+        if values?.isSymbolicLink != true {
+            mismatches.append("symlink-not-a-link:\(expectation.relative)")
+        } else if let destination = try? fm.destinationOfSymbolicLink(atPath: link.path),
+                  destination != expectation.destination {
+            mismatches.append("symlink-destination:\(expectation.relative)")
+        }
     }
     return (checked, mismatches)
 }

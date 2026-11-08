@@ -22,8 +22,13 @@ public actor BackupScheduler {
         leadership?.release()
     }
 
+    /// Once false, no new tick may start. Set synchronously before draining so a
+    /// tick cannot slip between "loop cancelled" and "drain finished".
+    private var acceptingWork = true
+
     public func start(checkImmediately: Bool = true) {
         guard loopTask == nil else { return }
+        acceptingWork = true
         loopTask = Task { [weak self] in
             if checkImmediately {
                 await self?.tick()
@@ -36,11 +41,15 @@ public actor BackupScheduler {
         }
     }
 
-    /// Cancels acceptance of new work. The running tick, if any, keeps executing
-    /// until the lifecycle coordinator proves it stopped.
-    public func stopAcceptingNewWork() {
+    /// Cancels acceptance of new work and WAITS for the producer loop to exit.
+    /// Awaiting the cancelled loop is what closes the CT-101 gap: without it a
+    /// tick could still be between two projects when `prepareForExit` runs.
+    public func stopAcceptingNewWork() async {
+        acceptingWork = false
         loopTask?.cancel()
+        let task = loopTask
         loopTask = nil
+        await task?.value
     }
 
     /// Releases leadership. Only call this AFTER the lifecycle coordinator
@@ -56,7 +65,7 @@ public actor BackupScheduler {
     /// Returns the work kinds still running — callers must not release the
     /// process locks or exit while this is non-empty.
     public func stopAndDrain(timeout: TimeInterval = 30) async -> [String] {
-        stopAcceptingNewWork()
+        await stopAcceptingNewWork()
         let decision = await LifecycleCoordinator(service).prepareForExit(timeout: timeout)
         switch decision {
         case .safeToExit:
@@ -120,6 +129,7 @@ public actor BackupScheduler {
     }
 
     public func tick() async {
+        guard acceptingWork else { return }
         guard !ticking else { return }
         ticking = true
         defer { ticking = false }
@@ -140,6 +150,7 @@ public actor BackupScheduler {
             } else {
                 let trigger: BackupTrigger = pendingWakeCatchUp ? .wakeCatchUp : .scheduled
                 for project in due {
+                    guard acceptingWork, !Task.isCancelled else { return }
                     do {
                         _ = try await service.createSnapshot(projectID: project.id, trigger: trigger)
                     } catch {

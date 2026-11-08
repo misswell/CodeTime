@@ -484,21 +484,24 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
     private static func completionAlreadyAnswers(
         completion: Completion, request: Request, source: URL, target: URL
     ) -> Bool {
+        let sameSource = URL(fileURLWithPath: completion.sourceRoot).standardizedFileURL
+            == source.standardizedFileURL
+        // P2-4: completions written before CT-109 have NO targetRoot and NO
+        // requestID. Falling through to false would let a residual request
+        // re-run and replace the whole data root, so legacy records still match
+        // on the source directory (the pre-CT-109 behaviour).
         guard let completionTarget = completion.targetRoot else {
-            // Legacy completion: no target recorded.
-            return false
+            return sameSource
         }
-        guard URL(fileURLWithPath: completionTarget).standardizedFileURL == target.standardizedFileURL else {
+        guard URL(fileURLWithPath: completionTarget).standardizedFileURL
+            == target.standardizedFileURL else {
             return false
         }
         if let completionID = completion.requestID, let requestID = request.id {
             return completionID == requestID
         }
-        // Legacy: same source directory counts as "answered" only when the
-        // completion has no request ID (pre-CT-109 records).
-        return completion.requestID == nil
-            && URL(fileURLWithPath: completion.sourceRoot).standardizedFileURL
-                == source.standardizedFileURL
+        // Legacy completion WITH a target: same source counts as answered.
+        return sameSource
     }
 
     /// CT-085: how long the migration waits for a live source agent to exit after
