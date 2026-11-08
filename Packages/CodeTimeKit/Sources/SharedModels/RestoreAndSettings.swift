@@ -47,6 +47,8 @@ public struct RestoreJob: Codable, Identifiable, Hashable, Sendable {
     public var errorMessage: String?
     public var restoredFileCount: Int
     public var restoredBytes: Int64
+    /// CT-111: cross-process lease. Only the owner may update the job.
+    public var lease: JobLease?
 
     public init(
         id: UUID = UUID(),
@@ -60,7 +62,8 @@ public struct RestoreJob: Codable, Identifiable, Hashable, Sendable {
         finishedAt: Date? = nil,
         errorMessage: String? = nil,
         restoredFileCount: Int = 0,
-        restoredBytes: Int64 = 0
+        restoredBytes: Int64 = 0,
+        lease: JobLease? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -74,6 +77,7 @@ public struct RestoreJob: Codable, Identifiable, Hashable, Sendable {
         self.errorMessage = errorMessage
         self.restoredFileCount = restoredFileCount
         self.restoredBytes = restoredBytes
+        self.lease = lease
     }
 }
 

@@ -298,6 +298,11 @@ jobs:
     timeout-minutes: 15
     environment: stable-release
     steps:
+      # CT-100: the release notes (Docs/releases/<tag>.md) live in the repo —
+      # without a checkout the publish step can never find them.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download verified candidate
         uses: actions/download-artifact@v4
         with:

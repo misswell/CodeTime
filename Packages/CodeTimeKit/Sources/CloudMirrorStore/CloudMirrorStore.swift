@@ -1132,10 +1132,138 @@ public actor CloudMirrorStore: CloudStore {
 
     // MARK: - Garbage collection (§3.7)
 
+    /// CT-105: pure read-only GC preview used when physical deletion is disabled.
+    /// Computes the retention decision and the object set that WOULD be deleted.
+    /// Any unreadable manifest fails safe (nothing is reported as deletable).
+    private func cleanupPreview(
+        repositoryId: UUID,
+        gracePeriod: TimeInterval,
+        minimumGenerations: Int
+    ) async throws -> CloudCleanupReport {
+        let urls: [URL]
+        do {
+            urls = try await manifestURLs().filter {
+                UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil
+            }
+        } catch {
+            return CloudCleanupReport(
+                retainedGenerations: 0,
+                skippedReason: "无法枚举云端清单（\(error.localizedDescription)），GC 仅保留数据"
+            )
+        }
+        var entries: [(url: URL, manifest: CloudManifest)] = []
+        for url in urls {
+            do {
+                let manifest = try await loadManifestFromURL(url)
+                entries.append((url, manifest))
+            } catch {
+                return CloudCleanupReport(
+                    retainedGenerations: 0,
+                    skippedReason: "存在不可读清单（\(url.lastPathComponent)），无法证明删除安全，已保留全部对象"
+                )
+            }
+        }
+        entries.sort { $0.manifest.createdAt > $1.manifest.createdAt }
+        let cutoff = Date().addingTimeInterval(-max(0, gracePeriod))
+        let protectedCount = max(2, minimumGenerations)
+        var protectedHashes = Set<String>()
+        var doomedHashes: [String] = []
+        var doomedGenerations = 0
+        for (index, entry) in entries.enumerated() {
+            let isProtected = index < protectedCount || entry.manifest.createdAt > cutoff
+            if isProtected {
+                protectedHashes.formUnion(entry.manifest.repositoryFiles.map(\.contentHash))
+            } else {
+                doomedGenerations += 1
+                doomedHashes.append(contentsOf: entry.manifest.repositoryFiles.map(\.contentHash))
+            }
+        }
+        let planned = Set(doomedHashes).subtracting(protectedHashes)
+        var plannedBytes: Int64 = 0
+        for hash in planned {
+            if let values = try? objectURL(hash).resourceValues(forKeys: [.fileSizeKey]) {
+                plannedBytes += Int64(values.fileSize ?? 0)
+            }
+        }
+        _ = plannedBytes
+        return CloudCleanupReport(
+            deletedObjects: 0,
+            freedBytes: 0,
+            retainedGenerations: entries.count,
+            skippedReason: "安全策略：iCloud 模式默认只生成待清理列表，不执行物理删除（可在“立即清理”中显式确认）",
+            plannedDeletes: planned.count,
+            plannedGenerationDeletes: doomedGenerations
+        )
+    }
+
+    private func loadManifestFromURL(_ url: URL) async throws -> CloudManifest {
+        let data: Data
+        do {
+            data = try await access.read(url)
+        } catch {
+            throw CloudStoreError.manifestUnavailable(error.localizedDescription)
+        }
+        do {
+            let plaintext = try CryptoBox.open(
+                data,
+                masterKey: try configuration.masterKeyProvider.masterKey(),
+                context: "manifest"
+            )
+            return try decoder.decode(CloudManifest.self, from: plaintext)
+        } catch {
+            throw CloudStoreError.manifestCorrupt(url.lastPathComponent)
+        }
+    }
+
+    /// CT-105: explicit device retirement. Only a deliberate user action writes
+    /// this record; a device is never retired because it is offline or old.
+    public func retireDevice(_ deviceID: UUID, reason: String) async throws {
+        guard deviceID != configuration.deviceID else {
+            throw CloudStoreError.invalidFormat("不能退役当前设备")
+        }
+        let directory = baseURL.appendingPathComponent("devices/\(deviceID.uuidString)", isDirectory: true)
+        guard fileManager.fileExists(atPath: directory.path) else {
+            throw CloudStoreError.objectMissing("设备目录不存在：\(deviceID.uuidString)")
+        }
+        let record: [String: String] = [
+            "deviceID": deviceID.uuidString,
+            "retiredAt": ISO8601DateFormatter().string(from: Date()),
+            "retiredBy": configuration.deviceID.uuidString,
+            "reason": reason,
+        ]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try await access.writeAtomically(
+            try encoder.encode(record),
+            to: directory.appendingPathComponent("retired.json")
+        )
+    }
+
+    /// `CloudStore` conformance: same as the explicit policy overload with the
+    /// safest default (report-only for iCloud).
     public func cleanup(
         repositoryId: UUID,
         gracePeriod: TimeInterval,
         minimumGenerations: Int
+    ) async throws -> CloudCleanupReport {
+        try await cleanup(
+            repositoryId: repositoryId,
+            gracePeriod: gracePeriod,
+            minimumGenerations: minimumGenerations,
+            allowPhysicalDelete: false
+        )
+    }
+
+    /// CT-105: iCloud has no cross-device deletion acknowledgement, so physical
+    /// deletion is REPORT-ONLY by default for coordinated (iCloud) storage. Only
+    /// an explicit user action passes `allowPhysicalDelete: true`; automatic
+    /// maintenance never does. Non-coordinated (local mirror) stores keep the
+    /// previous behaviour.
+    public func cleanup(
+        repositoryId: UUID,
+        gracePeriod: TimeInterval,
+        minimumGenerations: Int,
+        allowPhysicalDelete: Bool
     ) async throws -> CloudCleanupReport {
         guard repositoryId == configuration.repositoryID else {
             throw CloudStoreError.invalidFormat("仓库 ID 与存储配置不匹配")
@@ -1165,7 +1293,11 @@ public actor CloudMirrorStore: CloudStore {
         }
         let otherDevices = allDevices.filter { url in
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            return isDir && url.lastPathComponent != configuration.deviceID.uuidString
+            guard isDir, url.lastPathComponent != configuration.deviceID.uuidString else { return false }
+            // CT-105: only an EXPLICIT retirement record lets GC ignore a device.
+            // A device that is merely offline / not yet synced is never retired.
+            let retired = url.appendingPathComponent("retired.json")
+            return !fileManager.fileExists(atPath: retired.path)
         }
         if !otherDevices.isEmpty {
             return CloudCleanupReport(
@@ -1175,6 +1307,19 @@ public actor CloudMirrorStore: CloudStore {
         }
 
         try await prepare()
+
+        // CT-105: report-only mode. Compute what would be deleted, tombstone
+        // nothing, delete nothing. This runs before any journal side effect so a
+        // preview can never leave the store in a half-GC state.
+        let physicalDeletionAllowed = allowPhysicalDelete || !configuration.coordinatedIO
+        if !physicalDeletionAllowed {
+            let reportOnly = try await cleanupPreview(
+                repositoryId: repositoryId,
+                gracePeriod: gracePeriod,
+                minimumGenerations: minimumGenerations
+            )
+            return reportOnly
+        }
 
         let now = Date()
         let loadedJournal: GCJournal?

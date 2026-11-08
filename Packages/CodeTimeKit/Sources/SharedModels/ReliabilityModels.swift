@@ -243,7 +243,14 @@ public enum RestoreJobState: String, Codable, Sendable, CaseIterable {
     case verifying
     case committing
     case completed
+    /// CT-103: legacy retryable failure (old rows decode here). Treated exactly
+    /// like `retryableFailed`: the job may be claimed and resumed.
     case failed
+    /// A failure the user can retry (network, disk, cancellation, crash).
+    case retryableFailed
+    /// A failure that cannot succeed without a new job (key mismatch, corrupt
+    /// manifest, wrong identity). Never claimable again.
+    case permanentlyFailed
     case cancelled
     case interrupted
 
@@ -254,26 +261,39 @@ public enum RestoreJobState: String, Codable, Sendable, CaseIterable {
         case .verifying: return "校验完整性"
         case .committing: return "提交仓库"
         case .completed: return "已完成"
-        case .failed: return "失败"
+        case .failed, .retryableFailed: return "失败（可重试）"
+        case .permanentlyFailed: return "永久失败"
         case .cancelled: return "已取消"
         case .interrupted: return "已中断"
         }
     }
 
+    /// CT-103: terminal means "this job will never make progress again".
+    /// Retryable failures are NOT terminal — they can be claimed and resumed.
     public var isTerminal: Bool {
-        self == .completed || self == .failed || self == .cancelled
+        switch self {
+        case .completed, .cancelled, .permanentlyFailed: return true
+        default: return false
+        }
     }
 
+    /// Whether the job may be claimed and continued (resume download/commit).
     public var isResumable: Bool {
         switch self {
         // `committing` is resumable: a crash after moving the staging repository
-        // must be completed (or rolled back) on the next launch, not treated as a
-        // finished failure.
-        case .preparing, .downloading, .verifying, .committing, .interrupted, .failed:
+        // must be completed on the next launch, not treated as a failure.
+        case .preparing, .downloading, .verifying, .committing, .interrupted,
+             .failed, .retryableFailed:
             return true
         default:
             return false
         }
+    }
+
+    /// Whether the staging directory must be preserved (it may contain verified
+    /// objects or the only copy of a prepared repository).
+    public var preservesStaging: Bool {
+        !isTerminal
     }
 }
 

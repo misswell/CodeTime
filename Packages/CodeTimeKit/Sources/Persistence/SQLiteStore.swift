@@ -593,6 +593,47 @@ public actor SQLiteStore {
         }
     }
 
+    /// CT-110: recomputes the project's runtime status in ONE write transaction:
+    /// lifecycle check, live-job check, newest snapshot, cloud state and the
+    /// status write are all inside the same `BEGIN IMMEDIATE`. Two competing
+    /// services can never interleave a stale snapshot over a newer one.
+    /// Returns the status written (nil when the project is gone/inactive).
+    @discardableResult
+    public func recomputeProjectRuntimeState(projectID: UUID) throws -> ProjectStatus? {
+        try transactionResult { () -> ProjectStatus? in
+            guard var project = try project(id: projectID), project.lifecycle == .active else {
+                return nil
+            }
+            let running: [BackupJob] = try query(
+                "SELECT payload FROM jobs WHERE project_id=? AND state='running'",
+                [.text(projectID.uuidString)]
+            ).compactMap { row -> BackupJob? in
+                guard case .blob(let data) = row[0] else { return nil }
+                return try decode(BackupJob.self, from: data)
+            }
+            let hasLiveBackup = running.contains {
+                $0.type == .backup && $0.lease?.isReclaimable() == false
+            }
+            let status: ProjectStatus
+            if hasLiveBackup {
+                status = .backingUp
+            } else if let latest = try snapshots(projectID: projectID, limit: 1).first {
+                status = ProjectStatus.derived(
+                    cloudState: latest.cloudState,
+                    snapshotStatus: latest.status
+                )
+            } else {
+                return project.status
+            }
+            project.status = project.enabled ? status : .disabled
+            if status == .synced || status == .localOnly {
+                project.lastError = nil
+            }
+            try writeProjectPayload(project)
+            return project.status
+        }
+    }
+
     /// The live (running, lease not reclaimable) job for a project, if any.
     /// CT-091: used by the unified status recompute so a live backup pins the
     /// project status and a late upload callback cannot clobber it.
@@ -868,6 +909,12 @@ public actor SQLiteStore {
         ])
     }
 
+    public func restoreJob(id: UUID) throws -> RestoreJob? {
+        guard let row = try query("SELECT payload FROM restore_jobs WHERE id=?", [.text(id.uuidString)]).first,
+              case .blob(let data) = row[0] else { return nil }
+        return try decode(RestoreJob.self, from: data)
+    }
+
     public func restoreJobs(limit: Int = 100) throws -> [RestoreJob] {
         try query("SELECT payload FROM restore_jobs ORDER BY created_at DESC LIMIT ?", [.int(Int64(limit))]).compactMap { row in
             guard case .blob(let data) = row[0] else { return nil }
@@ -876,7 +923,13 @@ public actor SQLiteStore {
     }
 
     @discardableResult
-    public func recoverInterruptedRestoreJobs(now: Date = Date()) throws -> [UUID] {
+    /// CT-112: a running restore job is reclaimed ONLY when its original owner is
+    /// provably gone (lease expired AND the process dead) — or, for legacy rows
+    /// without a lease, after a grace period. A job owned by a live UI/Agent
+    /// process is never touched just because another service bootstrapped.
+    public func recoverInterruptedRestoreJobs(
+        now: Date = Date(), legacyGrace: TimeInterval = 600
+    ) throws -> [UUID] {
         let running = try query("SELECT payload FROM restore_jobs WHERE state='running'", []).compactMap { row -> RestoreJob? in
             guard case .blob(let data) = row[0] else { return nil }
             return try decode(RestoreJob.self, from: data)
@@ -884,9 +937,16 @@ public actor SQLiteStore {
         var recovered: [UUID] = []
         for var job in running {
             guard job.status == .running else { continue }
+            if let lease = job.lease {
+                guard lease.isReclaimable(now: now) else { continue }
+            } else if now.timeIntervalSince(job.createdAt) < legacyGrace {
+                // Legacy unleased row: a peer process may still be running it.
+                continue
+            }
             job.status = .failed
             job.finishedAt = now
             job.errorMessage = "恢复任务在完成前被中断，请重试"
+            job.lease = nil
             try upsertRestoreJob(job)
             recovered.append(job.id)
         }
@@ -928,7 +988,8 @@ public actor SQLiteStore {
     public func resumableCloudRestore(repositoryID: UUID, generationID: UUID) throws -> CloudRestoreJob? {
         let rows = try query("""
         SELECT payload FROM cloud_restore_jobs
-        WHERE repository_id=? AND generation_id=? AND state IN ('preparing','downloading','verifying','committing','interrupted','failed')
+        WHERE repository_id=? AND generation_id=?
+          AND state IN ('preparing','downloading','verifying','committing','interrupted','failed','retryableFailed')
         ORDER BY updated_at DESC LIMIT 1
         """, [.text(repositoryID.uuidString), .text(generationID.uuidString)])
         guard let row = rows.first, case .blob(let data) = row[0] else { return nil }
@@ -937,6 +998,76 @@ public actor SQLiteStore {
 
     public func deleteCloudRestoreJob(id: UUID) throws {
         try upsert("DELETE FROM cloud_restore_jobs WHERE id=?", [.text(id.uuidString)])
+    }
+
+    // MARK: Local restore lease (CT-111)
+
+    /// Atomically claims a local restore job. Terminal jobs and jobs whose lease
+    /// is still held by a live owner cannot be claimed.
+    public func claimRestoreJob(
+        id: UUID, owner: ProcessIdentity, expiresAt: Date
+    ) throws -> RestoreJob? {
+        try transactionResult {
+            guard var job = try self.restoreJob(id: id),
+                  job.status == .running else { return nil }
+            if let existing = job.lease, !existing.isReclaimable() { return nil }
+            job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            try self.upsertRestoreJob(job)
+            return job
+        }
+    }
+
+    public func renewRestoreLease(id: UUID, owner: ProcessIdentity, expiresAt: Date) throws -> Bool {
+        try transactionResult {
+            guard var job = try self.restoreJob(id: id), let lease = job.lease else { return false }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            job.lease = JobLease(owner: owner, heartbeatAt: Date(), leaseExpiresAt: expiresAt)
+            try self.upsertRestoreJob(job)
+            return true
+        }
+    }
+
+    /// Owner-checked write; the row's current lease is preserved.
+    @discardableResult
+    public func upsertRestoreJob(_ job: RestoreJob, owner: ProcessIdentity) throws -> Bool {
+        try transactionResult {
+            guard let current = try self.restoreJob(id: job.id), let lease = current.lease else {
+                return false
+            }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return false }
+            var payload = job
+            payload.lease = lease
+            try self.upsertRestoreJob(payload)
+            return true
+        }
+    }
+
+    public func releaseRestoreLease(id: UUID, owner: ProcessIdentity) throws {
+        try transaction {
+            guard var job = try self.restoreJob(id: id), let lease = job.lease else { return }
+            guard lease.owner.pid == owner.pid,
+                  abs(lease.owner.startTime - owner.startTime) < 0.001 else { return }
+            job.lease = nil
+            try self.upsertRestoreJob(job)
+        }
+    }
+
+    /// Whether another live restore is already writing to the same target path.
+    public func liveRestoreForTarget(_ targetPath: String, excluding id: UUID) throws -> RestoreJob? {
+        let running: [RestoreJob] = try query(
+            "SELECT payload FROM restore_jobs WHERE state='running'", []
+        ).compactMap { row -> RestoreJob? in
+            guard case .blob(let data) = row[0] else { return nil }
+            return try decode(RestoreJob.self, from: data)
+        }
+        let standardized = URL(fileURLWithPath: targetPath).standardizedFileURL.path
+        return running.first {
+            $0.id != id
+                && URL(fileURLWithPath: $0.targetPath).standardizedFileURL.path == standardized
+                && $0.lease?.isReclaimable() == false
+        }
     }
 
     // MARK: Cloud restore lease (CT-087, Goal §3.2)

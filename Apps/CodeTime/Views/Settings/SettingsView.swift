@@ -190,6 +190,9 @@ private struct GeneralSettingsView: View {
 }
 
 private struct CloudSettingsView: View {
+    /// CT-105: gates the destructive cloud-cleanup confirmation.
+    @State private var showCleanupConfirmation = false
+
     @EnvironmentObject var model: AppModel
 
     private var cloudCheck: (passed: Bool, detail: String)? {
@@ -293,9 +296,23 @@ private struct CloudSettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         Button("立即清理") {
-                            Task { await model.cleanupCloud() }
+                            // CT-105: the dialog offers a safe preview or an
+                            // explicitly confirmed physical deletion.
+                            showCleanupConfirmation = true
                         }
                         .buttonStyle(.bordered)
+                        .confirmationDialog(
+                            "确认物理删除云端旧对象？",
+                            isPresented: $showCleanupConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("仅预览（安全）", role: .cancel) {}
+                            Button("确认删除", role: .destructive) {
+                                Task { await model.cleanupCloud(allowPhysicalDelete: true) }
+                            }
+                        } message: {
+                            Text("iCloud 无法证明其他设备已经看到这些旧版本。删除不可恢复，仅在确认所有设备都不再需要历史版本时执行。")
+                        }
                         Spacer()
                         Button("从云端恢复…") {
                             model.showCloudRecovery = true

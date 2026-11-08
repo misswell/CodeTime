@@ -625,12 +625,32 @@ final class FifthRoundRegressionTests: XCTestCase {
         let sentinel = target.appendingPathComponent("database/codetime.sqlite")
         XCTAssertTrue(FileManager.default.fileExists(atPath: sentinel.path))
 
-        // CT-090: simulate a residual request (e.g. deletion failed after a
-        // successful migration). The lifecycle-dir completion record must make
-        // the re-run a no-op that never replaces the (now newer) Release data.
-        try DataMigrator.requestMigration(source: source, target: target, allowReplaceRoot: true)
+        // CT-090: simulate a RESIDUAL request — the same request file that was
+        // already answered (deletion failed after a successful migration). The
+        // lifecycle-dir completion record must make the re-run a no-op and never
+        // replace the now newer Release data.
+        let lifecycleDir = target.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
+        let completionURL = lifecycleDir.appendingPathComponent(DataMigrator.completionName)
+        let completionData = try Data(contentsOf: completionURL)
+        let completion = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: completionData) as? [String: Any]
+        )
+        let completedRequestID = try XCTUnwrap(completion["requestID"] as? String)
+        // Recreate the request file with the ALREADY-COMPLETED request ID.
+        let bookmark = try SecurityScopedBookmarks.makeBookmark(for: source)
+        let residual = """
+        {"id":"\(completedRequestID)","sourcePath":"\(source.path)",\
+        "sourceBookmark":"\(bookmark.base64EncodedString())",\
+        "createdAt":"2026-11-07T00:00:00Z","allowReplaceRoot":true}
+        """
+        try residual.write(
+            to: lifecycleDir.appendingPathComponent(DataMigrator.requestName),
+            atomically: true,
+            encoding: .utf8
+        )
         let second = try DataMigrator.performPending(target: target)
-        XCTAssertNil(second, "同一来源的残留请求不得再次执行数据替换")
+        XCTAssertNil(second, "同一 RequestID 的残留请求不得再次执行数据替换")
         XCTAssertTrue(FileManager.default.fileExists(atPath: sentinel.path), "Release 数据不得被覆盖")
         XCTAssertFalse(DataMigrator.hasPendingRequest(target: target), "残留请求应被清理")
     }

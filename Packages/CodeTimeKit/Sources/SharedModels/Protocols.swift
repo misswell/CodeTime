@@ -62,12 +62,26 @@ public struct CloudCleanupReport: Codable, Hashable, Sendable {
     public var freedBytes: Int64
     public var retainedGenerations: Int
     public var skippedReason: String?
+    /// CT-105: objects that WOULD be deleted. Populated even when physical
+    /// deletion is disabled, so the UI can show a safe cleanup preview.
+    public var plannedDeletes: Int
+    /// Generations that would be retired (tombstoned) by a full GC run.
+    public var plannedGenerationDeletes: Int
 
-    public init(deletedObjects: Int = 0, freedBytes: Int64 = 0, retainedGenerations: Int = 0, skippedReason: String? = nil) {
+    public init(
+        deletedObjects: Int = 0,
+        freedBytes: Int64 = 0,
+        retainedGenerations: Int = 0,
+        skippedReason: String? = nil,
+        plannedDeletes: Int = 0,
+        plannedGenerationDeletes: Int = 0
+    ) {
         self.deletedObjects = deletedObjects
         self.freedBytes = freedBytes
         self.retainedGenerations = retainedGenerations
         self.skippedReason = skippedReason
+        self.plannedDeletes = plannedDeletes
+        self.plannedGenerationDeletes = plannedGenerationDeletes
     }
 }
 

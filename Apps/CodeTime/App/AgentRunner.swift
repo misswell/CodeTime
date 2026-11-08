@@ -49,7 +49,7 @@ enum AgentRunner {
             let runOnce = CommandLine.arguments.contains("--once")
             if runOnce {
                 await scheduler.runOnce()
-                await scheduler.stop()
+                _ = await scheduler.stopAndDrain(timeout: 30)
                 exit(0)
             }
 
@@ -60,7 +60,17 @@ enum AgentRunner {
                 let source = DispatchSource.makeSignalSource(signal: sig, queue: signalQueue)
                 source.setEventHandler {
                     Task {
-                        await scheduler.stop()
+                        // CT-101: never exit while a Kopia child may still write.
+                        let remaining = await scheduler.stopAndDrain(timeout: 30)
+                        if !remaining.isEmpty {
+                            let kinds = remaining.map(\.kind.rawValue).joined(separator: ",")
+                            FileHandle.standardError.write(Data(
+                                "仍有任务未能退出（\(kinds)），保留锁并继续运行。\n".utf8
+                            ))
+                            return
+                        }
+                        instanceLock?.release()
+                        lifecycleLock.release()
                         exit(0)
                     }
                 }
@@ -77,26 +87,41 @@ enum AgentRunner {
             _ = wakeObserver
 
             await scheduler.start()
-            // CT-085 (§4.1 agent stop protocol): the persisted migration request
-            // doubles as the stop signal. The agent polls it every 30s; on request
-            // it stops accepting NEW tasks and exits. A task already in flight is
-            // NOT awaited here — instead its Kopia repository lock stays held by
-            // the running child, and the migration's source-side lockSource()
-            // re-check refuses to start (or the post-copy verification fails on a
-            // torn pack), so a mid-flight migration fails safely and can be
-            // retried once the task finishes. The migration never replaces data
-            // under a live writer.
+            // CT-085/CT-101 agent stop protocol (the request file is the signal):
+            //   1. stop accepting new tasks (scheduler loop cancelled),
+            //   2. cancel every in-flight job and WAIT for it to persist its state,
+            //   3. terminate any surviving Kopia process group and reap it,
+            //   4. only when nothing is left running: release agent + lifecycle
+            //      locks and exit.
+            // If any step cannot prove completion, the locks are KEPT and the
+            // agent keeps running — the migration then fails safely instead of
+            // copying a repository a live writer still owns.
             while true {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
-                if DataMigrator.hasPendingRequest(target: paths.root) {
-                    FileHandle.standardError.write(
-                        Data("收到数据迁移请求：Agent 停止调度并退出。\n".utf8)
-                    )
-                    await scheduler.stop()
-                    instanceLock?.release()
-                    lifecycleLock.release()
-                    exit(0)
+                guard DataMigrator.hasPendingRequest(target: paths.root) else { continue }
+
+                FileHandle.standardError.write(
+                    Data("收到数据迁移请求：停止调度并等待进行中的任务退出…\n".utf8)
+                )
+                let remaining = await scheduler.stopAndDrain(timeout: 30)
+                if !remaining.isEmpty {
+                    FileHandle.standardError.write(Data(
+                        "迁移请求未能安全停止（仍在运行：\(remaining.map(\.kind.rawValue))），继续运行以保护数据。\n".utf8
+                    ))
+                    continue
                 }
+                // Last resort: any child that outlived its task must be gone.
+                let childrenGone = await service.terminateOrphanChildren(grace: 5)
+                guard childrenGone else {
+                    FileHandle.standardError.write(Data(
+                        "仍有 Kopia 子进程未能确认退出，继续持有锁并等待。\n".utf8
+                    ))
+                    continue
+                }
+                FileHandle.standardError.write(Data("所有任务已退出，Agent 释放锁并退出。\n".utf8))
+                instanceLock?.release()
+                lifecycleLock.release()
+                exit(0)
             }
         } catch {
             FileHandle.standardError.write(Data("CodeTimeAgent 启动失败：\(error.localizedDescription)\n".utf8))

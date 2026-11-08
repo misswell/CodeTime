@@ -924,14 +924,23 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func cleanupCloud() async {
+    /// CT-105: default is a read-only PREVIEW. Physical deletion requires an
+    /// explicit user confirmation (the settings button asks first).
+    func cleanupCloud(allowPhysicalDelete: Bool = false) async {
         do {
-            let report = try await service?.cleanupCloud()
+            let report = try await service?.cleanupCloud(allowPhysicalDelete: allowPhysicalDelete)
             if let report {
-                if let reason = report.skippedReason {
+                if report.deletedObjects > 0 {
+                    showToast("已清理 \(report.deletedObjects) 个对象", style: .success)
+                } else if report.plannedDeletes > 0 {
+                    showToast(
+                        "可清理 \(report.plannedDeletes) 个对象（\(report.plannedGenerationDeletes) 个历史版本）；安全策略下未执行删除",
+                        style: .warning
+                    )
+                } else if let reason = report.skippedReason {
                     showToast("清理已暂停：\(reason)", style: .warning)
                 } else {
-                    showToast("已清理 \(report.deletedObjects) 个对象", style: .success)
+                    showToast("没有需要清理的对象", style: .success)
                 }
             }
             await refreshAll(silent: true)

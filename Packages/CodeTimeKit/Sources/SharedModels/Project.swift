@@ -141,6 +141,20 @@ public enum ProjectStatus: String, Codable, Sendable, CaseIterable {
         default: return false
         }
     }
+
+
+    /// CT-110: the single status rule used by every caller (service recompute and
+    /// the store-level atomic recompute). A snapshot with read failures is never
+    /// reported as synced.
+    public static func derived(cloudState: CloudSyncState, snapshotStatus: SnapshotStatus) -> ProjectStatus {
+        if snapshotStatus != .complete { return .warning }
+        switch cloudState {
+        case .synced: return .synced
+        case .localOnly: return .localOnly
+        case .uploading, .pending: return .publishing
+        default: return .warning
+        }
+    }
 }
 
 public struct DeviceIdentity: Codable, Identifiable, Hashable, Sendable {

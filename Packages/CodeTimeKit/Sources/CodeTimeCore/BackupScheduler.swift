@@ -36,6 +36,24 @@ public actor BackupScheduler {
         }
     }
 
+    /// CT-101: cancels the loop and WAITS for every in-flight job to finish and
+    /// for every Kopia child to be reaped before leadership is released.
+    /// Returns the work that is still running — callers must not release the
+    /// process locks or exit while this is non-empty.
+    public func stopAndDrain(timeout: TimeInterval = 30) async -> [CodeTimeService.ActiveWorkInfo] {
+        loopTask?.cancel()
+        loopTask = nil
+        let remaining = await service.drainActiveWork(timeout: timeout)
+        if remaining.isEmpty {
+            leadership?.release()
+            leadership = nil
+        }
+        // On timeout the leadership lock is deliberately KEPT: a replacement
+        // process must not start scheduling while a child may still be writing.
+        return remaining
+    }
+
+    /// Non-draining stop, for `--once` runs that already awaited their work.
     public func stop() {
         loopTask?.cancel()
         loopTask = nil

@@ -86,6 +86,9 @@ public enum DataMigrator {
     }
 
     private struct Request: Codable {
+        /// CT-109: unique per user-initiated migration. A completed request never
+        /// blocks a NEW request from the same source directory.
+        var id: UUID?
         var sourcePath: String
         var sourceBookmark: Data
         var createdAt: Date
@@ -108,7 +111,10 @@ public enum DataMigrator {
 
     private struct Completion: Codable {
         var jobID: UUID
+        /// CT-109: the request this completion answers.
+        var requestID: UUID?
         var sourceRoot: String
+        var targetRoot: String?
         var migratedAt: Date
         var fileCount: Int
         var totalBytes: Int64
@@ -194,6 +200,7 @@ public enum DataMigrator {
         source: URL,
         target: URL,
         jobID: UUID = UUID(),
+        requestID: UUID? = nil,
         replaceRoot: Bool = false,
         isCancelled: () -> Bool = { false },
         progress: (Double) -> Void = { _ in }
@@ -332,7 +339,9 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
 
             let completion = Completion(
                 jobID: jobID,
+                requestID: requestID,
                 sourceRoot: plan.sourceRoot.path,
+                targetRoot: target.path,
                 migratedAt: Date(),
                 fileCount: copiedCount,
                 totalBytes: plan.totalBytes
@@ -375,6 +384,31 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
     }
 
     /// A previous run left staging data behind; remove it so a retry starts clean.
+    /// Expected staging directory for a migration job. The name is derived ONLY
+    /// from the job ID; a persisted path is never trusted on its own.
+    public static func expectedStagingURL(target: URL, jobID: UUID) -> URL {
+        target.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-migration-\(jobID.uuidString.prefix(8))", isDirectory: true)
+    }
+
+    /// CT-106: a journal's `stagingPath` is untrusted input. Only the exact
+    /// derived directory — direct child of the target's parent, matching
+    /// `.codetime-migration-<jobID8>`, not a symlink — may ever be deleted.
+    /// Anything else is preserved for manual inspection (and reported).
+    private static func validatedStagingURL(journal: Journal, target: URL) -> URL? {
+        let expected = expectedStagingURL(target: target, jobID: journal.jobID).path
+        let persisted = URL(fileURLWithPath: journal.stagingPath).standardizedFileURL.path
+        guard persisted == URL(fileURLWithPath: expected).standardizedFileURL.path else {
+            return nil
+        }
+        do {
+            try SafePath.assertRealDirectoryNotSymlink(expected)
+        } catch {
+            return nil
+        }
+        return URL(fileURLWithPath: expected, isDirectory: true)
+    }
+
     public static func clearInterruptedStaging(target: URL) {
         // The journal may be in the target or the lifecycle dir (which survives
         // whole-root replacement). Check both locations.
@@ -390,17 +424,21 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileName),
               let journal = try? decoder.decode(Journal.self, from: data) else { return }
+        // CT-106: never delete an unvalidated path. A tampered/corrupt journal
+        // keeps the directory for manual handling.
+        guard let staging = validatedStagingURL(journal: journal, target: target) else {
+            return
+        }
         if journal.state == "installing" {
             // Whole-root replacement is a single rename. If the target still
             // exists, the prepared staging directory is safe to reclaim; if the
             // target is gone, keep it for manual recovery instead of deleting
             // the only prepared copy.
-            if FileManager.default.fileExists(atPath: target.path) {
-                try? FileManager.default.removeItem(atPath: journal.stagingPath)
-            }
+            guard FileManager.default.fileExists(atPath: target.path) else { return }
+            try? FileManager.default.removeItem(at: staging)
             return
         }
-        try? FileManager.default.removeItem(atPath: journal.stagingPath)
+        try? FileManager.default.removeItem(at: staging)
     }
 
     // MARK: - Deferred migration (runs before the database is opened)
@@ -415,6 +453,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
     ) throws {
         let bookmark = try SecurityScopedBookmarks.makeBookmark(for: source)
         let request = Request(
+            id: UUID(),
             sourcePath: source.path,
             sourceBookmark: bookmark,
             createdAt: Date(),
@@ -437,6 +476,29 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         FileManager.default.fileExists(atPath: target.deletingLastPathComponent()
             .appendingPathComponent(".codetime-lifecycle", isDirectory: true)
             .appendingPathComponent(requestName).path)
+    }
+
+    /// CT-109: a completion answers THIS request only when the request IDs match
+    /// (new format) or, for legacy records without an ID, when source and target
+    /// both match. A new request from the same source therefore runs again.
+    private static func completionAlreadyAnswers(
+        completion: Completion, request: Request, source: URL, target: URL
+    ) -> Bool {
+        guard let completionTarget = completion.targetRoot else {
+            // Legacy completion: no target recorded.
+            return false
+        }
+        guard URL(fileURLWithPath: completionTarget).standardizedFileURL == target.standardizedFileURL else {
+            return false
+        }
+        if let completionID = completion.requestID, let requestID = request.id {
+            return completionID == requestID
+        }
+        // Legacy: same source directory counts as "answered" only when the
+        // completion has no request ID (pre-CT-109 records).
+        return completion.requestID == nil
+            && URL(fileURLWithPath: completion.sourceRoot).standardizedFileURL
+                == source.standardizedFileURL
     }
 
     /// CT-085: how long the migration waits for a live source agent to exit after
@@ -514,8 +576,9 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         let completionURL = lifecycleDir.appendingPathComponent(completionName)
         if let completionData = try? Data(contentsOf: completionURL),
            let completion = try? decoder.decode(Completion.self, from: completionData),
-           URL(fileURLWithPath: completion.sourceRoot).standardizedFileURL
-               == resolved.url.standardizedFileURL {
+           completionAlreadyAnswers(
+               completion: completion, request: request, source: resolved.url, target: target
+           ) {
             do {
                 try FileManager.default.removeItem(at: requestURL)
             } catch {
@@ -585,6 +648,7 @@ try write(journal, to: lifecycleDir.appendingPathComponent(journalName))
         let result = try migrate(
             source: resolved.url,
             target: target,
+            requestID: request.id,
             replaceRoot: request.allowReplaceRoot == true
         )
         maybeCrash(at: "after-complete")

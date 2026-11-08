@@ -645,15 +645,36 @@ final class ThirdRoundRegressionTests: XCTestCase {
         try json.write(to: target.appendingPathComponent(DataMigrator.journalName), atomically: true, encoding: .utf8)
     }
 
+    /// CT-106: staging must be the DERIVED directory for the journal's job ID;
+    /// a journal that names any other path is not trusted for deletion.
+    private func writeDerivedMigrationJournal(
+        target: URL, state: String, staging: URL, jobID: UUID
+    ) throws {
+
+        let json = """
+        {"jobID":"\(jobID.uuidString)","state":"\(state)","sourceRoot":"\(staging.path)",\
+        "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
+        "updatedAt":"2026-11-07T00:00:00Z"}
+        """
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try json.write(
+            to: target.appendingPathComponent(DataMigrator.journalName),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
     func testCT067_InterruptedMigrationStagingIsReclaimed() async throws {
         // installing + target present: the prepared copy is redundant and must go.
+        // CT-106: the staging name must match the journal's job ID derivation.
         let parentA = root.appendingPathComponent("case-a", isDirectory: true)
         try FileManager.default.createDirectory(at: parentA, withIntermediateDirectories: true)
         let targetA = parentA.appendingPathComponent("target", isDirectory: true)
-        let stagingA = parentA.appendingPathComponent(".codetime-migration-aaaa", isDirectory: true)
+        let jobA = UUID()
+        let stagingA = DataMigrator.expectedStagingURL(target: targetA, jobID: jobA)
         try FileManager.default.createDirectory(at: stagingA, withIntermediateDirectories: true)
         try "data".write(to: stagingA.appendingPathComponent("f"), atomically: true, encoding: .utf8)
-        try writeMigrationJournal(target: targetA, state: "installing", staging: stagingA)
+        try writeDerivedMigrationJournal(target: targetA, state: "installing", staging: stagingA, jobID: jobA)
         DataMigrator.clearInterruptedStaging(target: targetA)
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagingA.path))
 
@@ -661,9 +682,10 @@ final class ThirdRoundRegressionTests: XCTestCase {
         let parentB = root.appendingPathComponent("case-b", isDirectory: true)
         try FileManager.default.createDirectory(at: parentB, withIntermediateDirectories: true)
         let targetB = parentB.appendingPathComponent("target", isDirectory: true)
-        let stagingB = parentB.appendingPathComponent(".codetime-migration-bbbb", isDirectory: true)
+        let jobB = UUID()
+        let stagingB = DataMigrator.expectedStagingURL(target: targetB, jobID: jobB)
         try FileManager.default.createDirectory(at: stagingB, withIntermediateDirectories: true)
-        try writeMigrationJournal(target: targetB, state: "copying", staging: stagingB)
+        try writeDerivedMigrationJournal(target: targetB, state: "copying", staging: stagingB, jobID: jobB)
         DataMigrator.clearInterruptedStaging(target: targetB)
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagingB.path))
 

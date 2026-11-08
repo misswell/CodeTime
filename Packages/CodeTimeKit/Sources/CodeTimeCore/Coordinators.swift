@@ -82,8 +82,8 @@ public struct CloudPublishCoordinator: Sendable {
     }
 
     @discardableResult
-    public func cleanupCloud() async throws -> CloudCleanupReport? {
-        try await service.cleanupCloud()
+    public func cleanupCloud(allowPhysicalDelete: Bool = false) async throws -> CloudCleanupReport? {
+        try await service.cleanupCloud(allowPhysicalDelete: allowPhysicalDelete)
     }
 
     @discardableResult

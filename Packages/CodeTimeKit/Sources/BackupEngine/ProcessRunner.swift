@@ -92,6 +92,7 @@ private final class PIDBox: @unchecked Sendable {
         startTime = ProcessIdentity.processStartTime(value)
         let shouldKill = cancelled
         lock.unlock()
+        ActiveChildProcesses.shared.register(pid: value, startTime: startTime)
         if shouldKill { Self.signalGroup(value, startTime: startTime, sig: SIGTERM) }
     }
 
@@ -104,6 +105,7 @@ private final class PIDBox: @unchecked Sendable {
             startTime = 0
         }
         lock.unlock()
+        ActiveChildProcesses.shared.unregister(pid: value)
     }
 
     func cancel() {
@@ -132,6 +134,83 @@ private final class PIDBox: @unchecked Sendable {
         if kill(-pid, sig) != 0 {
             _ = kill(pid, sig)
         }
+    }
+}
+
+/// CT-101: every live Kopia child is registered here so a process shutdown can
+/// (a) prove no child is still writing and (b) hard-terminate the whole process
+/// group as a last resort. Entries are removed only after `waitpid` has reaped
+/// the child, so an entry always means "this child may still be running".
+public final class ActiveChildProcesses: @unchecked Sendable {
+    public static let shared = ActiveChildProcesses()
+
+    private struct Entry {
+        let pid: pid_t
+        let startTime: Double
+    }
+
+    private let lock = NSLock()
+    private var entries: [pid_t: Entry] = [:]
+
+    func register(pid: pid_t, startTime: Double) {
+        guard pid > 0 else { return }
+        lock.lock()
+        entries[pid] = Entry(pid: pid, startTime: startTime)
+        lock.unlock()
+    }
+
+    func unregister(pid: pid_t) {
+        lock.lock()
+        entries.removeValue(forKey: pid)
+        lock.unlock()
+    }
+
+    /// PIDs of children that are still alive right now. Dead PIDs are pruned.
+    public func livePIDs() -> [pid_t] {
+        lock.lock()
+        let snapshot = Array(entries.values)
+        lock.unlock()
+        var live: [pid_t] = []
+        for entry in snapshot {
+            if ProcessIdentity.isAlive(entry.pid, startTime: entry.startTime) {
+                live.append(entry.pid)
+            } else {
+                unregister(pid: entry.pid)
+            }
+        }
+        return live
+    }
+
+    /// Sends SIGTERM to every live child group, escalates to SIGKILL after the
+    /// grace period, and polls until no registered child is alive. Returns true
+    /// only when every child is provably gone — callers must NOT release locks
+    /// (or exit) on false.
+    public func terminateAll(grace: TimeInterval = 5, killWait: TimeInterval = 5) -> Bool {
+        terminateAll(sig: SIGTERM)
+        if waitUntilEmpty(timeout: grace) { return true }
+        terminateAll(sig: SIGKILL)
+        return waitUntilEmpty(timeout: killWait)
+    }
+
+    private func terminateAll(sig: Int32) {
+        lock.lock()
+        let snapshot = Array(entries.values)
+        lock.unlock()
+        for entry in snapshot {
+            guard ProcessIdentity.isAlive(entry.pid, startTime: entry.startTime) else { continue }
+            if kill(-entry.pid, sig) != 0 {
+                _ = kill(entry.pid, sig)
+            }
+        }
+    }
+
+    private func waitUntilEmpty(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if livePIDs().isEmpty { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return livePIDs().isEmpty
     }
 }
 

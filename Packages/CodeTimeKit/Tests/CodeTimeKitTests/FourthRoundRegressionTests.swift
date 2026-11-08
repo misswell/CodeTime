@@ -321,7 +321,9 @@ extension FourthRoundRegressionTests {
         // clearInterruptedStaging must not delete valid migration data.
         let target = root.appendingPathComponent("ct075-target", isDirectory: true)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-        let staging = root.appendingPathComponent(".codetime-migration-ct075", isDirectory: true)
+        // CT-106: staging name must be the derived `.codetime-migration-<jobID8>`.
+        let jobID = UUID()
+        let staging = DataMigrator.expectedStagingURL(target: target, jobID: jobID)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: staging.appendingPathComponent("database"), withIntermediateDirectories: true)
         try "important".write(to: staging.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
@@ -330,7 +332,7 @@ extension FourthRoundRegressionTests {
         try FileManager.default.createDirectory(at: target.appendingPathComponent("database"), withIntermediateDirectories: true)
         try "old".write(to: target.appendingPathComponent("database/codetime.sqlite"), atomically: true, encoding: .utf8)
         let journalJSON = """
-        {"jobID":"\(UUID().uuidString)","state":"installing","sourceRoot":"\(staging.path)",\
+        {"jobID":"\(jobID.uuidString)","state":"installing","sourceRoot":"\(staging.path)",\
         "stagingPath":"\(staging.path)","startedAt":"2026-11-07T00:00:00Z",\
         "updatedAt":"2026-11-07T00:00:00Z"}
         """
