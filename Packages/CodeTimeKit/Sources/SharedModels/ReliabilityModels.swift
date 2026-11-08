@@ -297,6 +297,38 @@ public enum RestoreJobState: String, Codable, Sendable, CaseIterable {
     }
 }
 
+/// CT-113: the explicit restore state machine. Every write of a restore job state
+/// goes through `allows(_:_:)`; an illegal transition is a bug, not a warning.
+public enum RestoreStateMachine {
+    /// Legal transitions. Terminal states allow no further progress; `committing`
+    /// may only move forward to completed or to a resumable/parked failure, never
+    /// back to downloading (that would re-download over a moved repository).
+    public static func allowedNext(from state: RestoreJobState) -> Set<RestoreJobState> {
+        switch state {
+        case .preparing:
+            return [.downloading, .verifying, .committing, .interrupted, .retryableFailed, .failed, .permanentlyFailed, .cancelled]
+        case .downloading:
+            return [.downloading, .verifying, .committing, .interrupted, .retryableFailed, .failed, .permanentlyFailed, .cancelled]
+        case .verifying:
+            return [.verifying, .committing, .interrupted, .retryableFailed, .failed, .permanentlyFailed, .cancelled]
+        case .committing:
+            // A crash keeps `committing`; success completes it; any failure parks it
+            // as resumable — never back to preparing/downloading.
+            return [.committing, .completed, .interrupted, .retryableFailed, .failed, .permanentlyFailed]
+        case .interrupted, .failed, .retryableFailed:
+            // A resumed job re-enters the machine at preparing or goes straight to
+            // committing when the journal proves the move already happened.
+            return [.preparing, .downloading, .verifying, .committing, .interrupted, .retryableFailed, .permanentlyFailed, .cancelled]
+        case .completed, .cancelled, .permanentlyFailed:
+            return []
+        }
+    }
+
+    public static func allows(_ from: RestoreJobState, _ to: RestoreJobState) -> Bool {
+        from == to || allowedNext(from: from).contains(to)
+    }
+}
+
 /// A resumable cloud-to-local repository restore. Progress is persisted after every
 /// verified object so a power loss never forces a full re-download.
 public struct CloudRestoreJob: Codable, Identifiable, Hashable, Sendable {

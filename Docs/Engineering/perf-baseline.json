@@ -1,0 +1,15 @@
+{
+  "300": {
+    "backupDurationMs": 1855,
+    "restoreDurationMs": 3333,
+    "peakMemoryMB": 12.7,
+    "measuredOn": "Apple Silicon arm64, macOS 27.2, kopia 0.23.1",
+    "note": "Local baseline. CI machines differ; --check uses 2.5x/1.5x tolerances."
+  },
+  "10000": {
+    "backupDurationMs": 2045,
+    "restoreDurationMs": 39536,
+    "peakMemoryMB": 12.0,
+    "measuredOn": "Apple Silicon arm64, macOS 27.2, kopia 0.23.1"
+  }
+}

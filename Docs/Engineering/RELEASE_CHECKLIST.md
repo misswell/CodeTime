@@ -113,3 +113,14 @@ Scripts/fetch_kopia.sh
 - [ ] 发布说明列出已知限制（见 `KNOWN_LIMITATIONS.md`）。
 - [ ] 保留上一版本安装包与校验值，支持回退。
 - [ ] 监控启动失败、迁移失败、iCloud 同步失败日志。
+
+
+## 第六轮门禁（CT-100 / CT-114）
+
+- [ ] `Scripts/regression_gate.sh` 通过（索引 CT-001…CT-116，required 不可跳过，CrashChild 已构建）。
+- [ ] `CI` 工作流 10/10 通过，`regression-gate` 日志含 `executed: N tests, 0 failures`。
+- [ ] Candidate 构建不依赖验收报告（`Scripts/package_release.sh` 不再调用 `require_icloud_acceptance.sh`）。
+- [ ] 验收报告提交在 **`release-acceptance` 分支**（不在发布 tag 的源 commit 中）。
+- [ ] Acceptance 作业下载**同一个不可变 Candidate**，`EXPECTED_ARTIFACT_SHA` 与报告 SHA-256 精确匹配。
+- [ ] `publish-stable` 先 checkout 再读取 `Docs/releases/<tag>.md`（CT-100）。
+- [ ] 手动 `workflow_dispatch` 必须提供存在的 `release_tag`，且指向本次构建 commit（`validate_release_tag.sh`）。

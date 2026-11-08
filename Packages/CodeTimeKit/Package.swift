@@ -39,7 +39,7 @@ let package = Package(
         // a test harness, not a product.
         .executableTarget(
             name: "CodeTimeCrashChild",
-            dependencies: ["CodeTimeCore", "SharedModels", "BackupEngine"]
+            dependencies: ["CodeTimeCore", "SharedModels", "BackupEngine", "CodeTimeSecurity"]
         ),
         .testTarget(
             name: "CodeTimeKitTests",

@@ -36,21 +36,35 @@ public actor BackupScheduler {
         }
     }
 
-    /// CT-101: cancels the loop and WAITS for every in-flight job to finish and
-    /// for every Kopia child to be reaped before leadership is released.
-    /// Returns the work that is still running — callers must not release the
-    /// process locks or exit while this is non-empty.
-    public func stopAndDrain(timeout: TimeInterval = 30) async -> [CodeTimeService.ActiveWorkInfo] {
+    /// Cancels acceptance of new work. The running tick, if any, keeps executing
+    /// until the lifecycle coordinator proves it stopped.
+    public func stopAcceptingNewWork() {
         loopTask?.cancel()
         loopTask = nil
-        let remaining = await service.drainActiveWork(timeout: timeout)
-        if remaining.isEmpty {
-            leadership?.release()
-            leadership = nil
+    }
+
+    /// Releases leadership. Only call this AFTER the lifecycle coordinator
+    /// reported `safeToExit` — the lock is what keeps a replacement process from
+    /// scheduling while a child may still be writing.
+    public func releaseLeadership() {
+        leadership?.release()
+        leadership = nil
+    }
+
+    /// CT-101/CT-113: cancels the loop and waits for every in-flight job to
+    /// finish, delegating the "is it safe?" decision to LifecycleCoordinator.
+    /// Returns the work kinds still running — callers must not release the
+    /// process locks or exit while this is non-empty.
+    public func stopAndDrain(timeout: TimeInterval = 30) async -> [String] {
+        stopAcceptingNewWork()
+        let decision = await LifecycleCoordinator(service).prepareForExit(timeout: timeout)
+        switch decision {
+        case .safeToExit:
+            releaseLeadership()
+            return []
+        case .unsafeToExit(let remaining):
+            return remaining
         }
-        // On timeout the leadership lock is deliberately KEPT: a replacement
-        // process must not start scheduling while a child may still be writing.
-        return remaining
     }
 
     /// Non-draining stop, for `--once` runs that already awaited their work.

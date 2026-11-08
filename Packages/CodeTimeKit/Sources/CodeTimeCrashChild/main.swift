@@ -2,6 +2,7 @@ import Foundation
 import CodeTimeCore
 import BackupEngine
 import SharedModels
+import CodeTimeSecurity
 
 /// CT-098 / CT-072 regression-test harness. Runs as a REAL child process so the
 /// test suite can exercise true SIGKILL deaths and cross-process flock
@@ -47,27 +48,96 @@ func cpuSeconds(_ usage: rusage) -> (user: Double, system: Double) {
     return (user, system)
 }
 
+func sha256Hex(_ data: Data) -> String {
+    // CryptoKit is unavailable without an import; use the same incremental
+    // SHA-256 the app uses through Foundation's file hashing helper.
+    Hashing.sha256Hex(data)
+}
+
+/// CT-115: the benchmark dataset is deliberately varied — plain files, nested
+/// directories, an EMPTY file, a HIDDEN file, a file with non-ASCII/special
+/// characters and a symlink — and the restored tree is compared file by file
+/// (existence, size, SHA-256). "kopia exited 0" is not a correctness check.
+func makeDataset(root: URL, fileCount: Int) throws -> [String: (size: Int, hash: String)] {
+    let fm = FileManager.default
+    try fm.createDirectory(at: root, withIntermediateDirectories: true)
+    var manifest: [String: (size: Int, hash: String)] = [:]
+    let dirs = 20
+    for d in 0..<dirs {
+        try fm.createDirectory(
+            at: root.appendingPathComponent("dir\(d)/nested\(d % 3)", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
+    func write(_ relative: String, _ data: Data) throws {
+        let url = root.appendingPathComponent(relative)
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        manifest[relative] = (data.count, sha256Hex(data))
+    }
+    let payload = Data(repeating: 0x41, count: 1024)
+    for i in 0..<fileCount {
+        // Vary the content so hashing (not just size) is exercised.
+        var data = payload
+        data[0] = UInt8(truncatingIfNeeded: i)
+        data[1] = UInt8(truncatingIfNeeded: i >> 8)
+        try write("dir\(i % 20)/nested\(i % 3)/file\(i).txt", data)
+    }
+    try write("empty.txt", Data())
+    try write(".hidden-config", Data("hidden\n".utf8))
+    try write("dir0/特殊 名称 (1).txt", Data("unicode\n".utf8))
+    // A symlink inside the tree: kopia stores it as a link, the restore must
+    // reproduce it rather than the target's content.
+    let target = root.appendingPathComponent("dir0/file0.txt")
+    let link = root.appendingPathComponent("dir0/link-to-file0")
+    if fm.fileExists(atPath: link.path) { try? fm.removeItem(at: link) }
+    try? fm.createSymbolicLink(atPath: link.path, withDestinationPath: target.lastPathComponent)
+    return manifest
+}
+
+/// Compares the restored tree against the dataset manifest.
+func verifyRestoredTree(root: URL, manifest: [String: (size: Int, hash: String)]) -> (files: Int, mismatches: [String]) {
+    let fm = FileManager.default
+    var mismatches: [String] = []
+    var checked = 0
+    for (relative, expected) in manifest {
+        let url = root.appendingPathComponent(relative)
+        guard let data = try? Data(contentsOf: url) else {
+            mismatches.append("missing:\(relative)")
+            continue
+        }
+        checked += 1
+        if data.count != expected.size { mismatches.append("size:\(relative)") ; continue }
+        if sha256Hex(data) != expected.hash { mismatches.append("hash:\(relative)") }
+    }
+    // Directory structure: every dataset directory must exist after restore.
+    for d in 0..<20 {
+        let dir = root.appendingPathComponent("dir\(d)/nested\(d % 3)", isDirectory: true)
+        var isDir: ObjCBool = false
+        if !fm.fileExists(atPath: dir.path, isDirectory: &isDir) || !isDir.boolValue {
+            mismatches.append("missing-dir:dir\(d)/nested\(d % 3)")
+        }
+    }
+    // Hidden file must be present too (the scan must not skip it silently).
+    if !fm.fileExists(atPath: root.appendingPathComponent(".hidden-config").path) {
+        mismatches.append("missing-hidden:.hidden-config")
+    }
+    return (checked, mismatches)
+}
+
 func runBenchmark(workRoot: URL, fileCount: Int) async {
     guard let kopia = KopiaBinary.locate() else { die("KOPIA_PATH 未设置") }
     let fm = FileManager.default
     try? fm.createDirectory(at: workRoot, withIntermediateDirectories: true)
 
-    // Dataset: fileCount small files across 20 directories (large-file and
-    // deep-tree variants can be added on the same pattern).
     let source = workRoot.appendingPathComponent("dataset")
-    let dirs = 20
-    for d in 0..<dirs {
-        try? fm.createDirectory(
-            at: source.appendingPathComponent("dir\(d % 20)"), withIntermediateDirectories: true
-        )
+    let manifest: [String: (size: Int, hash: String)]
+    do {
+        manifest = try makeDataset(root: source, fileCount: fileCount)
+    } catch {
+        die("dataset creation failed: \(error)")
     }
-    var totalBytes: Int64 = 0
-    let payload = Data(repeating: 0x41, count: 1024) // 1 KiB each
-    for i in 0..<fileCount {
-        let url = source.appendingPathComponent("dir\(i % 20)/file\(i).txt")
-        try! payload.write(to: url, options: .atomic)
-        totalBytes += Int64(payload.count)
-    }
+    let totalBytes = manifest.values.reduce(Int64(0)) { $0 + Int64($1.size) }
 
     let engine = KopiaBackupEngine(configuration: .init(
         repositoryID: UUID(),
@@ -83,12 +153,20 @@ func runBenchmark(workRoot: URL, fileCount: Int) async {
     let before = rusageSnapshot(RUSAGE_SELF)
     let beforeChildren = rusageSnapshot(RUSAGE_CHILDREN)
     let start = Date()
+    var snapshotFileCount = 0
     do {
         try await engine.ensureRepository()
         let project = Project(name: "Bench", rootPath: source.path)
         let policy = BackupPolicy(projectID: project.id, excludeRules: ExclusionPresets.defaultRules())
         let snapshot = try await engine.createSnapshot(project: project, policy: policy, trigger: .manual)
+        snapshotFileCount = snapshot.fileCount
         let backupDone = Date()
+
+        // Incremental backup of an unchanged tree: must be much cheaper than the
+        // first one; the ratio is reported, not asserted (CI variance).
+        let incrementalStart = Date()
+        _ = try await engine.createSnapshot(project: project, policy: policy, trigger: .manual)
+        let incrementalDone = Date()
 
         let restoreTarget = workRoot.appendingPathComponent("restored")
         try fm.createDirectory(at: restoreTarget, withIntermediateDirectories: true)
@@ -96,23 +174,22 @@ func runBenchmark(workRoot: URL, fileCount: Int) async {
             snapshotID: snapshot.id, path: nil, destination: restoreTarget, overwrite: false
         )
         let restoreDone = Date()
+
+        let verification = verifyRestoredTree(root: restoreTarget, manifest: manifest)
         let after = rusageSnapshot(RUSAGE_SELF)
         let afterChildren = rusageSnapshot(RUSAGE_CHILDREN)
         let cpuBefore = before.map(cpuSeconds) ?? (user: 0.0, system: 0.0)
         let cpuAfter = after.map(cpuSeconds) ?? (user: 0.0, system: 0.0)
         let childBefore = beforeChildren.map(cpuSeconds) ?? (user: 0.0, system: 0.0)
         let childAfter = afterChildren.map(cpuSeconds) ?? (user: 0.0, system: 0.0)
-
-        // Peak RSS of THIS process (fresh process → the benchmark's own peak,
-        // not an XCTest process's historical maximum).
-        let peakRSSMB = after.map { Double($0.ru_maxrss) / (1024.0 * 1024.0) } ?? 0 // macOS ru_maxrss is bytes
-        let restoredFiles = (try? fm.subpathsOfDirectory(atPath: restoreTarget.path).count) ?? 0
+        let peakRSSMB = after.map { Double($0.ru_maxrss) / (1024.0 * 1024.0) } ?? 0
 
         print("PERF_METRICS:")
         print("  files: \(fileCount)")
         print("  totalBytes: \(totalBytes)")
-        print("  snapshotFiles: \(snapshot.fileCount)")
+        print("  snapshotFiles: \(snapshotFileCount)")
         print("  backupDurationMs: \(Int(backupDone.timeIntervalSince(start) * 1000))")
+        print("  incrementalBackupDurationMs: \(Int(incrementalDone.timeIntervalSince(incrementalStart) * 1000))")
         print("  restoreDurationMs: \(Int(restoreDone.timeIntervalSince(backupDone) * 1000))")
         print("  totalDurationMs: \(Int(restoreDone.timeIntervalSince(start) * 1000))")
         print("  cpuUserSec: \(String(format: "%.2f", cpuAfter.user - cpuBefore.user))")
@@ -120,8 +197,18 @@ func runBenchmark(workRoot: URL, fileCount: Int) async {
         print("  kopiaChildCpuUserSec: \(String(format: "%.2f", childAfter.user - childBefore.user))")
         print("  kopiaChildCpuSysSec: \(String(format: "%.2f", childAfter.system - childBefore.system))")
         print("  peakMemoryMB: \(String(format: "%.1f", peakRSSMB))")
-        print("  restoredFiles: \(restoredFiles)")
-        print("  verifyFiles: \(snapshot.fileCount) (kopia content-verified)")
+        print("  verifiedFiles: \(verification.files)")
+        print("  contentMismatches: \(verification.mismatches.count)")
+        if !verification.mismatches.isEmpty {
+            print("  mismatchSamples: \(verification.mismatches.prefix(5).joined(separator: ","))")
+        }
+        print("  verifyMode: size+sha256+structure+hidden+symlink")
+        if verification.mismatches.isEmpty && verification.files == manifest.count {
+            print("  contentCheck: PASS")
+        } else {
+            print("  contentCheck: FAIL")
+            exit(3)
+        }
     } catch {
         die("benchmark failed: \(error)")
     }

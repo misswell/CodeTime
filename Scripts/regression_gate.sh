@@ -1,58 +1,89 @@
 #!/bin/bash
-# Runs the whole package test suite and enforces, driven by REGRESSION_INDEX.json:
-#   1. the test command exits 0 and reports 0 failures;
-#   2. every required CT test (CT-001 … CT-098) is registered and actually runs;
-#   3. every skip is whitelisted in the index (with an environment reason) —
+# Regression gate (CT-092 / CT-114).
+#
+# Driven by REGRESSION_INDEX.json:
+#   1. index integrity: exactly CT-001…CT-116, unique IDs and test names,
+#      required tests may NOT be environment-skippable;
+#   2. every required test exists in the sources and actually runs;
+#   3. skips are only allowed for entries explicitly marked manualAcceptance —
 #      any unregistered skip fails the gate;
-#   4. the index itself is complete (98 entries).
+#   4. failure output names the failing tests/cases/errors (CI keeps only a tail).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INDEX="$ROOT/REGRESSION_INDEX.json"
 
-# CT-092: the index must exist and register exactly CT-001 … CT-098.
-if [ ! -f "$INDEX" ]; then
-  echo "regression gate: FAIL (missing REGRESSION_INDEX.json)" >&2
-  exit 1
-fi
-python3 - "$INDEX" <<'PY' || { echo "regression gate: FAIL (invalid index)" >&2; exit 1; }
-import json, sys
-entries = json.load(open(sys.argv[1]))
+[ -f "$INDEX" ] || { echo "regression gate: FAIL (missing REGRESSION_INDEX.json)" >&2; exit 1; }
+
+# --- 1. Index integrity -------------------------------------------------------
+python3 - "$INDEX" "$ROOT" <<'PY' || { echo "regression gate: FAIL (invalid index)" >&2; exit 1; }
+import json, sys, os
+index_path, root = sys.argv[1], sys.argv[2]
+entries = json.load(open(index_path))
+expected = [f"CT-{i:03d}" for i in range(1, 117)]
 ids = [e.get("id") for e in entries]
-expected = [f"CT-{i:03d}" for i in range(1, 99)]
 if ids != expected:
-    missing = set(expected) - set(ids)
-    extra = set(ids) - set(expected)
-    print(f"index incomplete/unordered: missing={sorted(missing)} extra={sorted(extra)}", file=sys.stderr)
+    missing = sorted(set(expected) - set(ids))
+    extra = sorted(set(ids) - set(expected))
+    print(f"index incomplete/unordered: missing={missing} extra={extra}", file=sys.stderr)
     sys.exit(1)
-for e in entries:
-    for key in ("id", "test", "file", "required"):
-        if key not in e:
-            print(f"entry {e.get('id')} missing key {key}", file=sys.stderr)
+
+names = [e.get("test") for e in entries]
+if len(set(names)) != len(names):
+    print("duplicate test names in index", file=sys.stderr)
+    sys.exit(1)
+
+required = [e for e in entries if e.get("required")]
+for e in required:
+    if e.get("envSkip") or e.get("manualAcceptance"):
+        print(f"{e['id']} is required but marked skippable/manual", file=sys.stderr)
+        sys.exit(1)
+    for key in ("id", "test", "file", "purpose", "invariant"):
+        if not e.get(key):
+            print(f"required entry {e['id']} missing {key}", file=sys.stderr)
             sys.exit(1)
-    if e.get("envSkip") and not e.get("envSkipReason"):
-        print(f"entry {e['id']} allows env skip without a documented reason", file=sys.stderr)
+
+for e in entries:
+    if e.get("manualAcceptance") and not e.get("acceptanceReason"):
+        print(f"{e['id']} is manual-acceptance without a reason", file=sys.stderr)
+        sys.exit(1)
+
+tests_dir = os.path.join(root, "Packages/CodeTimeKit/Tests/CodeTimeKitTests")
+sources = ""
+for name in os.listdir(tests_dir):
+    if name.endswith(".swift"):
+        sources += open(os.path.join(tests_dir, name), encoding="utf-8").read()
+for e in entries:
+    if f"func {e['test']}(" not in sources:
+        print(f"indexed test {e['id']} {e['test']} not found in sources", file=sys.stderr)
         sys.exit(1)
 PY
 
+# --- 2. Run the suite ---------------------------------------------------------
 if [ -n "${REGRESSION_OUTPUT_FILE:-}" ]; then
-  # Test seam: validate the gate logic against a prepared transcript instead of
-  # re-running the whole suite.
   OUTPUT="$REGRESSION_OUTPUT_FILE"
 else
   OUTPUT="$(mktemp)"
   trap 'rm -f "$OUTPUT"' EXIT
+  # CT-114: the crash-child executable is a hard requirement — build it so the
+  # real SIGKILL tests (CT-098) can never silently skip for a missing binary.
+  echo "regression gate: building CodeTimeCrashChild…" >&2
+  if ! swift build --package-path "$ROOT/Packages/CodeTimeKit" --product CodeTimeCrashChild >/dev/null 2>&1; then
+    echo "regression gate: FAIL (CodeTimeCrashChild did not build)" >&2
+    exit 1
+  fi
   set +e
-  "$ROOT/Scripts/test.sh" >"$OUTPUT" 2>&1
+  CODETIME_SCALE_TESTS="${CODETIME_SCALE_TESTS:-1}" "$ROOT/Scripts/test.sh" >"$OUTPUT" 2>&1
   STATUS=$?
   set -e
   tail -40 "$OUTPUT"
   if [ "$STATUS" -ne 0 ]; then
     echo "regression gate: FAIL (test command exited $STATUS)" >&2
-    # Failure diagnostics: which suites/cases failed and why. The transcript is
-    # ephemeral, so everything actionable must be echoed here.
-    grep -E "Test Suite .* (failed|passed)" "$OUTPUT" | grep failed >&2 || true
-    grep -E "failed \(" "$OUTPUT" | head -30 >&2 || true
-    grep -E "error:" "$OUTPUT" | head -30 >&2 || true
+    echo "--- failing suites ---" >&2
+    grep -E "Test Suite .* failed" "$OUTPUT" | grep -v "All tests" >&2 || true
+    echo "--- failing cases ---" >&2
+    grep -E "failed \(" "$OUTPUT" | head -40 >&2 || true
+    echo "--- assertions/errors ---" >&2
+    grep -E "error:" "$OUTPUT" | head -40 >&2 || true
     exit 1
   fi
 fi
@@ -60,48 +91,55 @@ fi
 grep -q "with 0 failures" "$OUTPUT" \
   || { echo "regression gate: FAIL (test summary not clean)" >&2; exit 1; }
 
-# Required tests must be present. Presence = the test name appears in the
-# transcript (executed or skipped); env-skippable entries may skip, anything
-# else that skipped but did not pass fails below.
+# --- 3. Presence of required tests -------------------------------------------
 MISSING=()
-while IFS=$'\t' read -r id test required envskip; do
+while IFS=$'\t' read -r id test required; do
   [ "$required" = "True" ] || continue
-  if ! grep -q "${test}" "$OUTPUT"; then
+  if ! grep -q "$test" "$OUTPUT"; then
     MISSING+=("$id($test)")
   fi
 done < <(python3 -c "
-import json, sys
+import json
 for e in json.load(open('$INDEX')):
-    print(e['id'], e['test'], e['required'], e.get('envSkip', False), sep='\t')
+    print(e['id'], e['test'], e['required'], sep='\t')
 ")
-
 if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "regression gate: FAIL (missing required tests: ${MISSING[*]})" >&2
   exit 1
 fi
 
-# XCTSkip keeps the test name visible, so a disabled test would otherwise pass
-# the presence check. Only tests whitelisted in the index (envSkip=true, with
-# a documented reason) plus the explicit legacy single-Mac entry may skip.
+# --- 4. Skips ----------------------------------------------------------------
 ALLOWED_SKIPS="$(python3 -c "
 import json
-names = [e['test'] for e in json.load(open('$INDEX')) if e.get('envSkip')]
-names.append('testSingleMacICloudRoundTrip')
-print(' '.join(names))
+print(' '.join(e['test'] for e in json.load(open('$INDEX')) if e.get('manualAcceptance')))
+print('testSingleMacICloudRoundTrip')
 ")"
 SKIPPED="$(grep -E "Test Case .* skipped" "$OUTPUT" | grep -o "test[A-Za-z0-9_]*" | sort -u || true)"
+UNEXPECTED=()
 for test in $SKIPPED; do
   allowed=0
   for allowed_test in $ALLOWED_SKIPS; do
-    if [[ "$test" == "$allowed_test" || "$test" == "${allowed_test}"* ]]; then
+    if [ "$test" = "$allowed_test" ]; then
       allowed=1
       break
     fi
   done
   if [ "$allowed" -ne 1 ]; then
-    echo "regression gate: FAIL (unexpected skipped test: $test)" >&2
-    exit 1
+    UNEXPECTED+=("$test")
   fi
 done
+if [ "${#UNEXPECTED[@]}" -gt 0 ]; then
+  echo "regression gate: FAIL (required test skipped: ${UNEXPECTED[*]})" >&2
+  exit 1
+fi
 
-echo "regression gate: PASS (CT-001 … CT-098 present, 0 failures, only index-whitelisted skips)"
+# --- 5. Summary --------------------------------------------------------------
+EXECUTED="$(grep -oE "Executed [0-9]+ tests" "$OUTPUT" | tail -1 | grep -oE "[0-9]+" || echo 0)"
+REQUIRED_COUNT="$(python3 -c "
+import json
+print(sum(1 for e in json.load(open('$INDEX')) if e.get('required')))
+")"
+echo "regression gate: PASS"
+echo "  executed: $EXECUTED tests, 0 failures"
+echo "  skipped (manual acceptance only): ${SKIPPED:-none}"
+echo "  index: CT-001 … CT-116 ($REQUIRED_COUNT required)"

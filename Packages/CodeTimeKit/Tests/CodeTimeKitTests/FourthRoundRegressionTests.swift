@@ -80,7 +80,9 @@ final class FourthRoundRegressionTests: XCTestCase {
                 fileCount: 2,
                 uniqueObjectCount: 2,
                 totalBytes: 999, // tampered!
-                repositoryHash: Hashing.sha256Hex(try JSONEncoder().encode(files))
+                // Canonical encoding: JSONEncoder key order is not stable, so a
+                // raw encode() hash is not reproducible.
+                repositoryHash: try ManifestIntegrityHasher.hash(files: files)
             ),
             objectAlgorithm: "SHA-256"
         )
@@ -91,10 +93,23 @@ final class FourthRoundRegressionTests: XCTestCase {
             manifest.repositoryFiles.reduce(Int64(0)) { $0 + $1.size },
             "篡改的 totalBytes 必须与重新计算的值不同"
         )
-        // The repositoryHash must match when the file list is unchanged.
+        // The repositoryHash must match when the file list is unchanged, and the
+        // canonical encoding must be stable across repeated computations.
         XCTAssertEqual(
             manifest.integrity.repositoryHash,
-            Hashing.sha256Hex(try JSONEncoder().encode(manifest.repositoryFiles))
+            try ManifestIntegrityHasher.hash(files: manifest.repositoryFiles)
+        )
+        XCTAssertEqual(
+            try ManifestIntegrityHasher.hash(files: manifest.repositoryFiles),
+            try ManifestIntegrityHasher.hash(files: manifest.repositoryFiles),
+            "repositoryHash 的编码必须是规范化的（键序稳定）"
+        )
+        // A tampered file list must change the hash.
+        var tamperedFiles = manifest.repositoryFiles
+        tamperedFiles[0].size = 4
+        XCTAssertNotEqual(
+            try ManifestIntegrityHasher.hash(files: tamperedFiles),
+            manifest.integrity.repositoryHash
         )
     }
 

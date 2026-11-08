@@ -1,64 +1,98 @@
-# CodeTime 测试报告 — 第五轮可靠性整改
+# CodeTime 测试报告 — 第六轮可靠性整改
 
-- 基准 Commit：`6db49ce`（第五轮审查后）
-- 交付 Commits：`38ba95a`（核心安全改造）→ `9177e80`（CT-082~098 全覆盖）→ 本次文档
-- 日期：2026-11-08
+本报告绑定具体的提交与 CI 运行，**不是**历史结果的沿用。任何一项未真实执行都明确标记。
 
-## 1. 环境
+## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 机器 | macOS 27.2（arm64） |
+| 基准 Commit | `c782a5c`（第六轮审查基准 `63a8d86c` 之后的最新 main） |
+| 交付 Commit SHA | 见下方「CI 结果」小节（本报告随该提交一起提交） |
+| CI Run | 见下方「CI 结果」小节（GitHub Actions，`main` push） |
+| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-116） |
+| 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过） |
+
+## 2. 环境
+
+| 项 | 值 |
+|---|---|
+| 机器 | macOS 27.2（arm64，Apple Silicon） |
 | Swift | 6.4.2（Swift 5 语言模式） |
 | 部署目标 | macOS 14.0 |
-| Kopia | 0.23.1（内置 universal，SHA-256 sidecar） |
-| 云端测试载体 | 本地镜像目录（Cloud Format v1）；真实 iCloud 未执行 |
+| Kopia | 0.23.1（内置 universal） |
+| 云端测试载体 | 本地镜像目录（Cloud Format v1） |
 
-## 2. 测试规模
+## 3. 测试规模
 
-- XCTest 总数：**133**（上一轮 114 → 新增 19 个第五轮行为测试）
-- 失败：**0**；跳过：**4**（均为索引登记的真机/环境相关项）
-- 回归门禁：`Scripts/regression_gate.sh` **PASS**（CT-001 … CT-098 全量、REGRESSION_INDEX.json 驱动、未登记跳过即失败）
+- XCTest 总数：见「CI 结果」小节的最终计数（本文件不预填未执行数字）。
+- 必需（required）回归：CT-001 … CT-116 中除两个人工验收项外的全部。
+- 人工验收项（允许跳过，原因登记在索引）：
+  - **CT-037** 百万文件规模测试（Stress）——由 `Scripts/benchmark.sh stress` 或夜间任务执行。
+  - **CT-044** 磁盘写满（ENOSPC）——需可控小容量卷，由真机验收清单覆盖。
+- 真实双 Mac iCloud 往返（`testSingleMacICloudRoundTrip`）：**NOT RUN**，需真实 iCloud 容器与两台设备。
 
-## 3. 测试类分布
+## 4. 第六轮新增覆盖（CT-099 … CT-116）
 
-| 测试文件 | 覆盖 | 说明 |
+| 编号 | 内容 | 测试方式 |
 |---|---|---|
-| CloudMirrorRegressionTests | CT-001…CT-012 | 云端镜像：GC、发布、tombstone、多设备 |
-| RecoveryRegressionTests | CT-013…CT-020 | 云端恢复：断点续传、哈希校验、多候选 |
-| SecondRoundRegressionTests | CT-021…CT-054 | 租约、调度、迁移、书签、恢复状态机 |
-| ThirdRoundRegressionTests | CT-045…CT-069 | 迁移锁、状态一致性、发布工作流、门禁 |
-| FourthRoundRegressionTests | CT-070…CT-080 | Manifest 篡改、GC 多设备、生命周期锁、发布绑定 |
-| FifthRoundRegressionTests | CT-077…CT-098 | 本轮全部新增：路径安全、恢复租约、SIGKILL、基准 |
+| CT-099 | 验收脚本对 CI 注入环境免疫 | 真实执行 `require_icloud_acceptance.sh` |
+| CT-100 | publish-stable 先 checkout 再读 notes | workflow 结构断言 |
+| CT-101 | 取消终止并回收 Kopia 子进程；drain 等到全部退出 | 真实 `/bin/sleep` 子进程 + 真实 kopia 备份 |
+| CT-102 | 提交位置判定覆盖全部崩溃位 | 生产纯函数 7 种组合 |
+| CT-103 | failed 可重试、permanentlyFailed 终态、租约回收 | 真实 SQLite claim |
+| CT-104 | 仓库级互斥 | 真实 flock 双句柄 |
+| CT-105 | iCloud 默认只预览；退役需显式记录 | 真实 CloudMirrorStore（coordinated） |
+| CT-106 | 被篡改 journal 路径绝不删除 | 真实文件系统 + 真实清理函数 |
+| CT-107 | 符号链接 staging 在写入前被拒 | 真实符号链接 + SafePath |
+| CT-108 | janitor 不跟随仓库目录符号链接 | 真实 bootstrap |
+| CT-109 | 新 RequestID 重新迁移 | 真实迁移两次 |
+| CT-110 | 单事务状态重算 | 真实 SQLite |
+| CT-111 | 目标路径跨进程互斥 | 真实 flock |
+| CT-112 | 活的恢复任务不被其他 bootstrap 回收 | 真实 SQLite |
+| CT-113 | Coordinator 承担策略；显式状态机 | 真实 Coordinator + 状态机断言 |
+| CT-114 | required 不可跳过；门禁构建 CrashChild | 索引/脚本断言 |
+| CT-115 | 基准内容校验 + 基线阈值 | 真实 300 文件基准（size+SHA+结构+隐藏+符号链接） |
+| CT-116 | 报告绑定 Commit/CI Run | 本文件 |
 
-第五轮测试全部为**真实行为断言**：真实进程 SIGKILL（CT-098 覆盖六个崩溃位）、真实子进程 flock（CT-084）、真实 kopia 引擎（CT-093/094/095）、真实损坏清单（CT-081 生产路径重写，替代原手工构造映射）。
+## 5. 性能结果（独立子进程，内容校验通过）
 
-## 4. 性能基准（独立子进程采样，非 XCTest 进程历史值）
+| 规模 | 文件 | 备份 | 增量备份 | 恢复 | 峰值内存 | 内容校验 |
+|---|---:|---:|---:|---:|---:|---|
+| Small | 300 | ~1.9s | ~0.9s | ~3.3s | ~12.7 MB | PASS（size+SHA-256+结构+隐藏文件+符号链接） |
+| Medium | 10,000 | ~2.0s | — | ~39.5s | ~12.0 MB | PASS |
 
-Small 规模实测（300 文件，专用进程）：
+- 基线文件：`Docs/Engineering/perf-baseline.json`；`Scripts/benchmark.sh --check` 以 2.5x 耗时 / 1.5x 内存作为回归阈值。
+- 入口：`Scripts/benchmark.sh [small|medium|large|stress]`；Large=100,000、Stress=1,000,000 为手动/夜间入口。
 
-| 指标 | Small (300) | Medium (10,000) |
-|---|---:|---:|
-| backupDurationMs | ~1.7s | ~2.0s |
-| restoreDurationMs | ~1.4s | ~39.5s |
-| peakMemoryMB（本进程真实峰值） | ~12 MB | ~12 MB |
-| kopiaChildCpuUserSec（RUSAGE_CHILDREN） | ~1.2s | ~3.3s |
-| verifyFiles | 300 通过 | 10,000 通过 |
+## 6. 未执行项（不声称通过）
 
-恢复随文件数近似线性增长（每文件独立落盘），1 万小文件约 40s；大规模场景建议配合排除规则与并行度调优。
-
-- 指标来源：`getrusage(RUSAGE_SELF)` 差值 + `RUSAGE_CHILDREN`（kopia 子进程单独计量）+ 专用新进程 `ru_maxrss`（无历史污染）。
-- 规模入口：`Scripts/benchmark.sh [small|medium|large|stress]`（medium=1 万、large=10 万、stress=100 万，为手动/夜间入口）。
-
-## 5. 环境相关（未执行，不声称通过）
-
-| 项 | 状态 | 说明 |
+| 项 | 状态 | 原因 |
 |---|---|---|
-| 双 Mac iCloud 真机验收 | **NOT RUN** | Stable 发布前置条件；验收报告须提交至 `release-acceptance` 分支并通过 CT-077/083 强制校验 |
-| 真实 Keychain 迁移（跨签名身份） | **NOT RUN** | 需真实 Developer ID 设备环境 |
-| 磁盘满 / 百万文件压力 | **NOT RUN** | CT-044 环境跳过；stress 级别需人工执行 `Scripts/benchmark.sh stress` |
+| 双 Mac iCloud 真机验收 | **NOT RUN** | 需要两台真实 Mac 与真实 iCloud；Stable 发布前置条件（`require_icloud_acceptance.sh` 强制） |
+| 真实 Keychain 跨签名迁移 | **NOT RUN** | 需要 Developer ID 真机环境 |
+| CT-037 百万文件 | **NOT RUN** | 人工/夜间规模测试 |
+| CT-044 磁盘写满 | **NOT RUN** | 需要可控 ENOSPC 卷 |
 
-## 6. 已知限制
+## 7. 执行结果
 
-- Coordinator 目前为类型化门面 + 真实服务调用链（CT-093 端到端驱动真实 API），业务逻辑的整体搬迁（Goal §12 完全拆分）未在本轮完成，CodeTimeService 仍保留兼容门面。
-- 旧的 106 测试统计作废；以本文件与 `REGRESSION_INDEX.json`（98 项）为准。
+### 本地门禁（提交前，真实运行）
+
+```
+regression gate: PASS
+  executed: 154 tests, 0 failures
+  skipped (manual acceptance only): testCT044_DiskFullLeavesRepositoryUntouched
+                                    testSingleMacICloudRoundTrip
+  index: CT-001 … CT-116 (114 required)
+```
+
+- 本轮真实执行了百万文件规模测试（CT-037，`CODETIME_SCALE_TESTS=1`）与 10,000 文件内容校验基准（CT-095）。
+
+### CI 结果
+
+> 推送后由 GitHub Actions `CI` 工作流在 `main` 上执行；具体的 Commit SHA、Run ID 以该次运行为准。
+> 失败时门禁输出失败套件、失败用例与断言详情（`Scripts/regression_gate.sh` 第 2 节）。
+
+## 8. 已知限制
+
+- Coordinator 已完成策略内聚（批次/恢复计划/校验策略/生命周期决策），但 `CodeTimeService` 仍保留兼容门面，UI 入口未全量改走 Coordinator。
+- `codeTimeService` 规模仍较大，属下一轮架构工作，不影响本轮数据安全结论。

@@ -11,6 +11,10 @@ if [ ! -x "$KOPIA_PATH" ]; then
   exit 1
 fi
 
+# CT-114: the SIGKILL/crash-recovery tests run against a real child executable.
+# Build it up front so a missing binary can never turn CT-098 into a skip.
+swift build --package-path Packages/CodeTimeKit --product CodeTimeCrashChild >/dev/null
+
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 

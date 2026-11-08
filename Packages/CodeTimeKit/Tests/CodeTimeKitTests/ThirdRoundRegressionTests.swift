@@ -820,7 +820,7 @@ final class ThirdRoundRegressionTests: XCTestCase {
     func testCT069_GateRejectsMissingTestsAndUnexpectedSkips() throws {
         // Complete transcript: only documented skips are allowed.
         let complete = try runGate(
-            output: try gateTranscript(skipped: ["testSingleMacICloudRoundTrip", "testCT036_HundredThousandFilesPreview"])
+            output: try gateTranscript(skipped: ["testSingleMacICloudRoundTrip", "testCT037_MillionFilesBoundedByLimit"])
         )
         XCTAssertEqual(complete.status, 0, complete.output)
         XCTAssertTrue(complete.output.contains("regression gate: PASS"), complete.output)
@@ -835,7 +835,14 @@ final class ThirdRoundRegressionTests: XCTestCase {
             output: try gateTranscript(skipped: ["testCT010_LegacyBehavior"])
         )
         XCTAssertNotEqual(undocumentedSkip.status, 0, undocumentedSkip.output)
-        XCTAssertTrue(undocumentedSkip.output.contains("unexpected skipped test"), undocumentedSkip.output)
+        XCTAssertTrue(undocumentedSkip.output.contains("required test skipped"), undocumentedSkip.output)
+
+        // CT-114: a REQUIRED test (not manual acceptance) may not skip either.
+        let requiredSkip = try runGate(
+            output: try gateTranscript(skipped: ["testCT036_HundredThousandFilesPreview"])
+        )
+        XCTAssertNotEqual(requiredSkip.status, 0, requiredSkip.output)
+        XCTAssertTrue(requiredSkip.output.contains("required test skipped"), requiredSkip.output)
 
         // A failing suite still fails the gate.
         let failing = try gateTranscript().replacingOccurrences(of: "with 0 failures", with: "with 1 failure")

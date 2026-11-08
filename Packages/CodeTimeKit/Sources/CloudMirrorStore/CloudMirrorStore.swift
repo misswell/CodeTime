@@ -325,7 +325,7 @@ public actor CloudMirrorStore: CloudStore {
             fileCount: manifestFiles.count,
             uniqueObjectCount: uniqueObjects.count,
             totalBytes: manifestFiles.reduce(0) { $0 + $1.size },
-            repositoryHash: Hashing.sha256Hex(try encoder.encode(manifestFiles))
+            repositoryHash: try ManifestIntegrityHasher.hash(files: manifestFiles)
         )
         let manifest = CloudManifest(
             formatVersion: formatVersion,
@@ -450,7 +450,7 @@ public actor CloudMirrorStore: CloudStore {
         }
         // Verify aggregate integrity: repositoryHash pins the exact sorted file
         // list, totalBytes pins the total payload size.
-        let recomputedHash = Hashing.sha256Hex(try encoder.encode(manifest.repositoryFiles))
+        let recomputedHash = try ManifestIntegrityHasher.hash(files: manifest.repositoryFiles)
         guard manifest.integrity.repositoryHash == recomputedHash else {
             throw CloudStoreError.manifestCorrupt("repositoryHash 不匹配")
         }
@@ -1197,6 +1197,9 @@ public actor CloudMirrorStore: CloudStore {
     }
 
     private func loadManifestFromURL(_ url: URL) async throws -> CloudManifest {
+        guard let generationID = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else {
+            throw CloudStoreError.invalidFormat(url.lastPathComponent)
+        }
         let data: Data
         do {
             data = try await access.read(url)
@@ -1207,7 +1210,7 @@ public actor CloudMirrorStore: CloudStore {
             let plaintext = try CryptoBox.open(
                 data,
                 masterKey: try configuration.masterKeyProvider.masterKey(),
-                context: "manifest"
+                context: manifestContext(generationID: generationID)
             )
             return try decoder.decode(CloudManifest.self, from: plaintext)
         } catch {
@@ -1280,10 +1283,11 @@ public actor CloudMirrorStore: CloudStore {
         let devicesDir = baseURL.appendingPathComponent("devices", isDirectory: true)
         let allDevices: [URL]
         do {
-            allDevices = try fileManager.contentsOfDirectory(
-                at: devicesDir,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
+            // CT-105: coordinated access — the device list is iCloud state, so it
+            // must not bypass NSFileCoordinator with a raw FileManager read.
+            allDevices = try await access.list(
+                devicesDir,
+                keys: [.isDirectoryKey, .isRegularFileKey]
             )
         } catch {
             return CloudCleanupReport(

@@ -37,3 +37,12 @@ queued ──→ running ──→ succeeded
 - `scheduleRetry` owner 校验：只有租约 owner 才能 retry。
 - 旧 running Job（无租约）有 60 秒宽限期。
 - 回收旧 Job 和创建新 Job 在同一个 SQLite 事务中完成。
+
+
+## 第六轮补充
+
+- Restore（本地）：`running → completed | failed`，并新增 **JobLease + 心跳 + 目标路径跨进程锁**；
+  bootstrap 只在租约过期且 owner 进程已死（或旧版无租约记录超过 10 分钟）时回收。
+- Cloud Restore：见 `CLOUD_RESTORE_STATE_MACHINE.md`（`retryableFailed` / `permanentlyFailed` 与提交 journal）。
+- ProjectStatus：`SQLiteStore.recomputeProjectRuntimeState(projectID:)` 在**单个 `BEGIN IMMEDIATE` 事务**内读取
+  生命周期、活动备份任务、最新快照并写入状态；`ProjectStatus.derived` 是服务与存储共用的唯一规则。

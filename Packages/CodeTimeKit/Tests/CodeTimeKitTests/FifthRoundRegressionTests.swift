@@ -705,15 +705,15 @@ final class FifthRoundRegressionTests: XCTestCase {
 
     func testCT092_RegressionGateCoversAllRequiredTests() throws {
         let gate = try String(contentsOf: repoScriptURL("regression_gate.sh"), encoding: .utf8)
-        XCTAssertTrue(gate.contains("range(1, 99)"), "门禁必须按索引检查 CT-001…CT-098 全量编号")
+        XCTAssertTrue(gate.contains("range(1, 117)"), "门禁必须按索引检查 CT-001…CT-116 全量编号")
         XCTAssertTrue(gate.contains("REGRESSION_INDEX.json"), "门禁必须由 REGRESSION_INDEX.json 驱动")
         let indexURL = repoScriptURL("../REGRESSION_INDEX.json").standardizedFileURL
         let indexData = try Data(contentsOf: indexURL)
         let index = try JSONSerialization.jsonObject(with: indexData) as? [[String: Any]]
         XCTAssertNotNil(index, "REGRESSION_INDEX.json 必须是数组")
-        XCTAssertEqual(index?.count, 98, "回归索引必须登记 CT-001…CT-098")
+        XCTAssertEqual(index?.count, 116, "回归索引必须登记 CT-001…CT-116")
         let ids = Set(index?.compactMap { $0["id"] as? String } ?? [])
-        for number in 1...98 {
+        for number in 1...116 {
             let ctID = String(format: "CT-%03d", number)
             XCTAssertTrue(ids.contains(ctID), "\(ctID) missing from index")
         }
@@ -766,12 +766,16 @@ final class FifthRoundRegressionTests: XCTestCase {
         let out = try runChildChecked(["bench", work.path, "60"], timeout: 300)
         let metrics = try XCTUnwrap(perfMetrics(from: out), "子进程必须输出 PERF_METRICS")
         XCTAssertEqual(metrics["files"], "60")
+        // CT-115: the dataset also contains an empty file, a hidden file, a
+        // Unicode name and a symlink, all content-verified after restore.
+        XCTAssertEqual(metrics["contentCheck"], "PASS", out)
+        XCTAssertEqual(metrics["contentMismatches"], "0")
         XCTAssertGreaterThan(Double(metrics["cpuUserSec"] ?? "") ?? 0, 0, "CPU user 时间必须来自真实采样")
         XCTAssertGreaterThan(Double(metrics["kopiaChildCpuUserSec"] ?? "") ?? 0, 0, "必须单独采样 kopia 子进程 CPU（RUSAGE_CHILDREN）")
         let peak = Double(metrics["peakMemoryMB"] ?? "") ?? 0
         XCTAssertGreaterThan(peak, 1)
         XCTAssertLessThan(peak, 8_192, "峰值内存是本进程真实峰值，不可能是历史累计")
-        XCTAssertEqual(metrics["snapshotFiles"], "60")
+        XCTAssertGreaterThanOrEqual(Int(metrics["snapshotFiles"] ?? "") ?? 0, 60)
     }
 
     // MARK: - CT-095 Medium-scale benchmark
@@ -779,11 +783,12 @@ final class FifthRoundRegressionTests: XCTestCase {
     func testCT095_MediumScaleBenchmarkCompletes() throws {
         guard KopiaBinary.locate() != nil else { throw XCTSkip("KOPIA_PATH 未设置") }
         let work = root.appendingPathComponent("bench-ct95", isDirectory: true)
-        let out = try runChildChecked(["bench", work.path, "2000"], timeout: 600)
+        // CT-115: Medium scale = 10,000 files, content-verified by the child.
+        let out = try runChildChecked(["bench", work.path, "10000"], timeout: 900)
         let metrics = try XCTUnwrap(perfMetrics(from: out))
-        // Kopia counts directories as entries (2000 files + 20 dirs).
-        XCTAssertGreaterThanOrEqual(Int(metrics["snapshotFiles"] ?? "") ?? 0, 2000)
-        XCTAssertGreaterThanOrEqual(Int(metrics["restoredFiles"] ?? "") ?? 0, 2000)
+        XCTAssertEqual(metrics["contentCheck"], "PASS", out)
+        XCTAssertEqual(metrics["contentMismatches"], "0")
+        XCTAssertGreaterThanOrEqual(Int(metrics["snapshotFiles"] ?? "") ?? 0, 10_000)
         XCTAssertGreaterThan(Int(metrics["backupDurationMs"] ?? "") ?? 0, 0)
         XCTAssertGreaterThan(Int(metrics["restoreDurationMs"] ?? "") ?? 0, 0)
     }

@@ -1,5 +1,6 @@
 import Foundation
 import SharedModels
+import CodeTimeSecurity
 
 struct CloudFormatFile: Codable {
     var format: String
@@ -15,6 +16,19 @@ struct ManifestFile: Codable, Hashable {
     /// Stable file identity at scan time; used to detect a file changing between
     /// the scan and the upload.
     var fileIdentity: String?
+}
+
+/// CT-115/P1: `JSONEncoder` does not guarantee a stable key order between calls,
+/// so the manifest's `repositoryHash` MUST be computed from a canonical encoding.
+/// Sorting keys makes the hash reproducible across processes and Foundation
+/// versions; without it, publish and validate could disagree on an unchanged
+/// manifest and report false corruption.
+enum ManifestIntegrityHasher {
+    static func hash(files: [ManifestFile]) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return Hashing.sha256Hex(try encoder.encode(files))
+    }
 }
 
 struct ManifestIntegrity: Codable, Hashable {

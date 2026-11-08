@@ -121,6 +121,8 @@ jobs:
       - name: Fetch and verify Kopia
         run: ./Scripts/fetch_kopia.sh
       - name: Full regression gate
+        env:
+          CODETIME_SCALE_TESTS: "1"
         run: ./Scripts/regression_gate.sh
       - name: Validate entitlements
         run: ./Scripts/validate_entitlements.sh

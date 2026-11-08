@@ -2066,6 +2066,48 @@ public actor CodeTimeService {
         try encoder.encode(journal).write(to: url, options: .atomic)
     }
 
+    /// CT-102: the restore commit position. Pure — no filesystem access — so the
+    /// whole crash matrix is unit-testable.
+    enum RestoreCommitPosition: Equatable, Sendable {
+        /// Staging must be (re)created and the repository downloaded.
+        case download
+        /// Staging exists with a `prepared` journal: verify and move.
+        case resumeCommit
+        /// The repository in place IS the restored data; finish metadata only.
+        case alreadyCommitted
+        /// A non-empty repository exists that we cannot prove is ours.
+        case blockedDestination
+    }
+
+    static func restoreCommitPosition(
+        journal: RestoreCommitJournal?,
+        stagingExists: Bool,
+        repositoryExists: Bool,
+        repositoryHasMarker: Bool,
+        jobState: RestoreJobState
+    ) -> RestoreCommitPosition {
+        if stagingExists {
+            // A non-empty repository next to a live staging directory is a
+            // conflict we must not resolve by deleting either side.
+            return repositoryExists && repositoryHasMarker && journal?.phase == .replaced
+                ? .alreadyCommitted
+                : .resumeCommit
+        }
+        guard repositoryExists else {
+            // Nothing on disk: a fresh download (the caller creates staging).
+            return .download
+        }
+        guard repositoryHasMarker else {
+            // A non-repository directory occupies the slot — never overwrite it.
+            return .blockedDestination
+        }
+        // The move happened iff the journal recorded it, or the job was persisted
+        // as committing/verifying (legacy rows from before the journal existed).
+        let journalProvesMove = journal?.phase == .prepared || journal?.phase == .replaced
+        let stateProvesMove = jobState == .committing || jobState == .verifying
+        return (journalProvesMove || stateProvesMove) ? .alreadyCommitted : .blockedDestination
+    }
+
     /// Blocking cross-process lock with a timeout, used for repository-level
     /// mutual exclusion (CT-104).
     static func acquireFileLock(_ lock: RepositoryLock, timeout: TimeInterval) -> Bool {
@@ -2237,26 +2279,28 @@ public actor CodeTimeService {
             journal = nil
         }
 
-        // The repository is adopted as "already restored" only when the journal
-        // (or the persisted committing state) proves the move happened. An
-        // unrelated existing repository is never adopted silently.
-        let adoptingMovedRepository = !stagingExists
-            && repositoryExists
-            && repositoryHasMarker
-            && (journal != nil || job.state == .committing || job.state == .verifying)
-
-        if !stagingExists && !adoptingMovedRepository {
-            guard !(repositoryExists && !repositoryContents.isEmpty) else {
-                // A prepared staging directory was lost while `repo` holds data.
-                throw CodeTimeError.destinationExists(repositoryURL.path)
-            }
+        // CT-102: the crash position is decided by the JOURNAL + the on-disk
+        // truth, NEVER by re-creating staging first. See restoreCommitPosition.
+        let position = Self.restoreCommitPosition(
+            journal: journal,
+            stagingExists: stagingExists,
+            repositoryExists: repositoryExists,
+            repositoryHasMarker: repositoryHasMarker,
+            jobState: job.state
+        )
+        let adoptingMovedRepository = position == .alreadyCommitted
+        switch position {
+        case .alreadyCommitted:
+            break
+        case .download:
             try FileManager.default.createDirectory(
                 atPath: job.stagingPath,
                 withIntermediateDirectories: true
             )
             try SafePath.assertRealDirectoryNotSymlink(job.stagingPath)
-        }
-        if stagingExists, repositoryExists, !repositoryContents.isEmpty, !adoptingMovedRepository {
+        case .resumeCommit:
+            break
+        case .blockedDestination:
             throw CodeTimeError.destinationExists(repositoryURL.path)
         }
 

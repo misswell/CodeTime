@@ -42,3 +42,18 @@ Manifest 按以下规则排序（保证与发布顺序一致）：
 - Manifest 不可覆盖。
 - 清理可中断并可恢复（通过 GCJournal 持久化阶段）。
 - aborted 状态不删除任何对象（墓碑保护）。
+
+
+## 第六轮：iCloud 默认只预览（CT-105）
+
+- `CloudMirrorStore.cleanup(allowPhysicalDelete:)` 对 **coordinated（iCloud）** 存储默认 `false`：此时只计算
+  `plannedDeletes` / `plannedGenerationDeletes`，不写 tombstone、不删除任何对象，返回 `skippedReason` 说明原因。
+- 本地镜像（非 coordinated）保持原有行为。
+- 物理删除只由用户显式确认触发（设置 → 云端 → 立即清理 → 确认删除）。
+- 设备守卫使用协调访问（`CloudFileAccess.list`），不再绕过 NSFileCoordinator。
+
+## 设备退役（CT-105）
+
+- 只有显式 `retireDevice(_:reason:)` 写入 `devices/<id>/retired.json` 后，GC 才会忽略该设备。
+- 设备离线、长时间未上线、目录暂时缺失都**不会**被自动视为退役。
+- 已退役设备的目录与对象仍不会被任何 GC 流程删除（仅解除"多设备"阻断）。

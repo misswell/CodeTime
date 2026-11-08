@@ -61,17 +61,20 @@ enum AgentRunner {
                 source.setEventHandler {
                     Task {
                         // CT-101: never exit while a Kopia child may still write.
-                        let remaining = await scheduler.stopAndDrain(timeout: 30)
-                        if !remaining.isEmpty {
-                            let kinds = remaining.map(\.kind.rawValue).joined(separator: ",")
+                        await scheduler.stopAcceptingNewWork()
+                        let decision = await LifecycleCoordinator(service).prepareForExit(timeout: 30)
+                        switch decision {
+                        case .safeToExit:
+                            await scheduler.releaseLeadership()
+                            instanceLock?.release()
+                            lifecycleLock.release()
+                            exit(0)
+                        case .unsafeToExit(let remaining):
                             FileHandle.standardError.write(Data(
-                                "仍有任务未能退出（\(kinds)），保留锁并继续运行。\n".utf8
+                                "仍有任务未能退出（\(remaining.joined(separator: ","))），保留锁并继续运行。\n".utf8
                             ))
                             return
                         }
-                        instanceLock?.release()
-                        lifecycleLock.release()
-                        exit(0)
                     }
                 }
                 source.resume()
@@ -103,25 +106,24 @@ enum AgentRunner {
                 FileHandle.standardError.write(
                     Data("收到数据迁移请求：停止调度并等待进行中的任务退出…\n".utf8)
                 )
-                let remaining = await scheduler.stopAndDrain(timeout: 30)
-                if !remaining.isEmpty {
+                await scheduler.stopAcceptingNewWork()
+                // ONE decision point: drain + orphan-child termination live in
+                // LifecycleCoordinator, so the agent and the scheduler can never
+                // disagree about what "safe to exit" means.
+                let decision = await LifecycleCoordinator(service).prepareForExit(timeout: 30)
+                switch decision {
+                case .safeToExit:
+                    FileHandle.standardError.write(Data("所有任务已退出，Agent 释放锁并退出。\n".utf8))
+                    await scheduler.releaseLeadership()
+                    instanceLock?.release()
+                    lifecycleLock.release()
+                    exit(0)
+                case .unsafeToExit(let remaining):
                     FileHandle.standardError.write(Data(
-                        "迁移请求未能安全停止（仍在运行：\(remaining.map(\.kind.rawValue))），继续运行以保护数据。\n".utf8
+                        "迁移请求未能安全停止（仍在运行：\(remaining.joined(separator: ","))），继续运行以保护数据。\n".utf8
                     ))
                     continue
                 }
-                // Last resort: any child that outlived its task must be gone.
-                let childrenGone = await service.terminateOrphanChildren(grace: 5)
-                guard childrenGone else {
-                    FileHandle.standardError.write(Data(
-                        "仍有 Kopia 子进程未能确认退出，继续持有锁并等待。\n".utf8
-                    ))
-                    continue
-                }
-                FileHandle.standardError.write(Data("所有任务已退出，Agent 释放锁并退出。\n".utf8))
-                instanceLock?.release()
-                lifecycleLock.release()
-                exit(0)
             }
         } catch {
             FileHandle.standardError.write(Data("CodeTimeAgent 启动失败：\(error.localizedDescription)\n".utf8))
