@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+# CI diagnostics: full command trace when requested (CODETIME_PKG_TRACE=1).
+[ -n "${CODETIME_PKG_TRACE:-}" ] && set -x
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
@@ -104,9 +106,10 @@ COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --keepParent "$STAGE/CodeTim
 (cd "$DIST" && shasum -a 256 "$NAME.zip" > "$NAME.zip.sha256")
 
 # DMG for drag-and-drop install, verified by mount check (AgentSpace pattern).
-hdiutil create -quiet -volname "CodeTime ${VERSION} ${PRERELEASE_ID}" \
+# No -quiet here: a silent hdiutil failure is undiagnosable on CI.
+hdiutil create -volname "CodeTime ${VERSION} ${PRERELEASE_ID}" \
   -srcfolder "$STAGE/CodeTime.app" -ov -format UDZO "$DIST/$NAME.dmg"
-hdiutil verify -quiet "$DIST/$NAME.dmg"
+hdiutil verify "$DIST/$NAME.dmg"
 MOUNT_CHECK="$(mktemp -d /tmp/codetime-dmg.XXXXXX)"
 if diskutil image attach --readOnly --mountOptions nobrowse --mountPoint "$MOUNT_CHECK" "$DIST/$NAME.dmg" >/dev/null 2>&1; then
   [ -d "$MOUNT_CHECK/CodeTime.app" ] || { echo "DMG does not contain CodeTime.app" >&2; hdiutil detach "$MOUNT_CHECK" -quiet || true; exit 1; }

@@ -145,6 +145,7 @@ jobs:
       - name: Package pre-release
         env:
           TAG: ${{ needs.classify.outputs.tag }}
+          CODETIME_PKG_TRACE: "1"
         run: ./Scripts/package_beta.sh
       - name: Upload pre-release artifact
         uses: actions/upload-artifact@v4
