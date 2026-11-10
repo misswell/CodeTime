@@ -731,7 +731,14 @@ final class SixthRoundRegressionTests: XCTestCase {
     func testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild() throws {
         let indexData = try Data(contentsOf: repoRoot.appendingPathComponent("REGRESSION_INDEX.json"))
         let entries = try XCTUnwrap(JSONSerialization.jsonObject(with: indexData) as? [[String: Any]])
-        XCTAssertEqual(entries.count, 144)
+        // Ids must be contiguous CT-001…CT-<count>; deriving instead of
+        // hardcoding keeps the tripwire accurate when a CT is added.
+        let numbers = entries.compactMap { Int(($0["id"] as? String ?? "").dropFirst(3)) }
+        XCTAssertEqual(numbers.count, entries.count, "索引编号格式必须是 CT-NNN")
+        XCTAssertEqual(
+            numbers.max(), entries.count,
+            "索引必须连续登记 CT-001…CT-\(String(format: "%03d", entries.count))"
+        )
         for entry in entries {
             let id = entry["id"] as? String ?? "?"
             let required = entry["required"] as? Bool ?? false

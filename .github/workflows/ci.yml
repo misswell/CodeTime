@@ -174,7 +174,7 @@ jobs:
           path: Resources/Kopia
           key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
       - run: ./Scripts/fetch_kopia.sh
-      - name: Full suite + CT-001 … CT-137 gate
+      - name: Full suite + index-driven regression gate
         env:
           # CT-114: index-driven gate must run the real suite, including the
           # 100k-file scale preview (CT-036) and the SIGKILL crash matrix (CT-098).

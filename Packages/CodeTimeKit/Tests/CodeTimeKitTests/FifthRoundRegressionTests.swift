@@ -705,15 +705,23 @@ final class FifthRoundRegressionTests: XCTestCase {
 
     func testCT092_RegressionGateCoversAllRequiredTests() throws {
         let gate = try String(contentsOf: repoScriptURL("regression_gate.sh"), encoding: .utf8)
-        XCTAssertTrue(gate.contains("range(1, 145)"), "门禁必须按索引检查 CT-001…CT-144 全量编号")
         XCTAssertTrue(gate.contains("REGRESSION_INDEX.json"), "门禁必须由 REGRESSION_INDEX.json 驱动")
         let indexURL = repoScriptURL("../REGRESSION_INDEX.json").standardizedFileURL
         let indexData = try Data(contentsOf: indexURL)
         let index = try JSONSerialization.jsonObject(with: indexData) as? [[String: Any]]
         XCTAssertNotNil(index, "REGRESSION_INDEX.json 必须是数组")
-        XCTAssertEqual(index?.count, 144, "回归索引必须登记 CT-001…CT-144")
+        // Derive the expected range from the index: the same number used to be
+        // hardcoded here, in regression_gate.sh and in CT-114, so every new CT
+        // needed three edits and a miss turned the gate red on main.
+        let entryCount = try XCTUnwrap(index?.count)
+        let lastID = String(format: "CT-%03d", entryCount)
+        XCTAssertTrue(
+            gate.contains("range(1, \(entryCount + 1))"),
+            "门禁必须按索引检查 CT-001…\(lastID) 全量编号"
+        )
+        XCTAssertTrue(gate.contains("CT-001 … \(lastID)"), "门禁摘要必须报告最后一个编号")
         let ids = Set(index?.compactMap { $0["id"] as? String } ?? [])
-        for number in 1...144 {
+        for number in 1...entryCount {
             let ctID = String(format: "CT-%03d", number)
             XCTAssertTrue(ids.contains(ctID), "\(ctID) missing from index")
         }
