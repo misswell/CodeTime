@@ -160,6 +160,8 @@ final class AppModel: ObservableObject {
     @Published var migrationNotice: String?
     /// Last cloud diagnostic line (shown in Settings → Advanced).
     @Published var cloudDiagnosticSummary: String = ""
+    /// Shown when startup is waiting on an OS-level authorization.
+    @Published var startupHint: String?
 
     @Published private(set) var service: CodeTimeService?
 
@@ -307,7 +309,13 @@ final class AppModel: ObservableObject {
             self.lifecycleLock = lifecycleLock
             let service = try CodeTimeService()
             self.service = service
-            let report = try await service.bootstrap()
+            // Keychain access can block indefinitely when macOS is showing an
+            // authorization dialog (e.g. after the app's signature changed).
+            // Never leave the user on a blank loading screen: bound the wait and
+            // explain what to click. The bootstrap keeps running in the background.
+            let report = try await Self.awaitBootstrap(service: service, timeout: 25) {
+                self.startupHint = "macOS 正在请求钥匙串访问权限：请在弹出的系统对话框中点击「允许」（或「始终允许」）。"
+            }
             bootstrap = report
             settings = report.settings
             persistedSettings = report.settings
@@ -450,6 +458,49 @@ final class AppModel: ObservableObject {
                 await self?.refreshAll(silent: true)
             }
         }
+    }
+
+    /// Runs bootstrap with a bounded wait. The work continues in the background;
+    /// `onSlowPath` fires once if it has not finished in time.
+    private static func awaitBootstrap(
+        service: CodeTimeService,
+        timeout: TimeInterval,
+        onSlowPath: @escaping @MainActor () -> Void
+    ) async throws -> BootstrapReport {
+        final class Box: @unchecked Sendable {
+            private let lock = NSLock()
+            private var finished = false
+            private var result: Result<BootstrapReport, Error>?
+            func complete(_ result: Result<BootstrapReport, Error>) {
+                lock.lock(); self.result = result; finished = true; lock.unlock()
+            }
+            var isFinished: Bool {
+                lock.lock(); defer { lock.unlock() }; return finished
+            }
+            var value: Result<BootstrapReport, Error>? {
+                lock.lock(); defer { lock.unlock() }; return result
+            }
+        }
+        let box = Box()
+        Task.detached(priority: .userInitiated) {
+            do { box.complete(.success(try await service.bootstrap())) }
+            catch { box.complete(.failure(error)) }
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        var warned = false
+        while !box.isFinished && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if !warned, !box.isFinished {
+                await MainActor.run { onSlowPath() }
+                warned = true
+            }
+        }
+        guard let result = box.value else {
+            throw CodeTimeError.repositoryUnavailable(
+                "启动被系统授权阻塞：请在钥匙串访问对话框中点击「允许」后重新打开 CodeTime。"
+            )
+        }
+        return try result.get()
     }
 
     private func installObservers() {
