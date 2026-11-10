@@ -622,4 +622,44 @@ final class CloudSetupRegressionTests: XCTestCase {
             "不得在命令行覆盖 CODE_SIGN_ENTITLEMENTS（会污染 SwiftPM 目标）"
         )
     }
+
+    // MARK: - CT-144 doctor reports accurate, actionable blockers
+
+    func testCT144_DoctorReportsStructuredBlockers() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let doctor = repoRoot.appendingPathComponent("Scripts/doctor.sh").path
+
+        let result = runScript(doctor, ["--json"])
+        let data = try XCTUnwrap(result.out.data(using: .utf8))
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            "doctor --json 必须输出合法 JSON：\(result.out.prefix(200))"
+        )
+        XCTAssertNotNil(json["ready"] as? Bool)
+        let blocked = try XCTUnwrap(json["blocked"] as? Int)
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        XCTAssertFalse(checks.isEmpty)
+        for check in checks {
+            XCTAssertNotNil(check["status"] as? String)
+            XCTAssertNotNil(check["id"] as? String)
+            XCTAssertNotNil(check["detail"] as? String)
+        }
+        // Exit code must agree with the report: blocked>0 ⇒ non-zero.
+        XCTAssertEqual(result.status != 0, blocked > 0, "退出码必须与 blocked 计数一致")
+
+        // Every blocker must carry the next action, so the report is actionable.
+        for check in checks where (check["status"] as? String) == "BLOCKED" {
+            let next = (check["next"] as? String) ?? ""
+            XCTAssertFalse(next.isEmpty, "\(check["id"] ?? "?") 缺少下一步操作")
+        }
+
+        // The iCloud check must not rely on the non-existent MobileMeAccounts
+        // domain (verified on this machine: the CloudDocs folder is the signal).
+        let script = try String(contentsOfFile: doctor, encoding: .utf8)
+        XCTAssertTrue(script.contains("com~apple~CloudDocs"))
+        XCTAssertFalse(script.contains("defaults read MobileMeAccounts"))
+    }
 }

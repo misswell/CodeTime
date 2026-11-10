@@ -35,3 +35,12 @@ CodeTime 自动保存你代码项目的历史版本：误删文件、改错代�
 CodeTime 不会因为 iCloud 不可用而阻止使用：本地备份始终可用。修复方式：
 
 系统设置 → Apple 账户 → iCloud → 打开 iCloud Drive；或在设置 → 备份位置点「重新检测」。
+
+
+## 遇到问题先自检
+
+```bash
+Scripts/doctor.sh
+```
+
+它会指出缺什么、下一步做什么（开发者协议、描述文件、公证密码、iCloud Drive、屏幕锁定等）。

@@ -1428,5 +1428,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "BetaICloud 配置带 Release entitlements；打包脚本不再命令行覆盖 CODE_SIGN_ENTITLEMENTS"
+  },
+  {
+    "id": "CT-144",
+    "test": "testCT144_DoctorReportsStructuredBlockers",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "发布前置自检报告结构化且可操作",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "doctor --json 输出合法 JSON；每个 BLOCKED 都带下一步；退出码与阻塞数一致"
   }
 ]

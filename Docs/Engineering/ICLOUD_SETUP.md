@@ -148,3 +148,23 @@ Scripts/icloud_acceptance.sh report --a A.json --b B.json \
   校验未通过、文件数不一致、缺少 B 证据时**拒绝输出**，因此无法伪造 PASS 报告。
 - `verify_release.sh` 现在会调用 `Scripts/smoke_launch.sh`（有界启动检查）：签名正确但**启动即崩溃**的包会被拦截；
   本地无 GUI 会话可用 `CODETIME_SKIP_LAUNCH_SMOKE=1` 跳过。
+
+
+## 8. 发布前置自检（CT-144）
+
+任何时刻都可以运行：
+
+```bash
+Scripts/doctor.sh          # 人类可读清单
+Scripts/doctor.sh --json   # 结构化结果（ready / blocked / checks[]）
+```
+
+它只读取本机状态，不修改任何东西：Developer ID 证书、App Store Connect 协议状态（PLA）、
+本机是否安装了含 iCloud 容器与 App Group 的描述文件、仓库 secrets 是否齐全（只读名称）、
+iCloud Drive 是否可用（`~/Library/Mobile Documents/com~apple~CloudDocs` 存在即视为已登录且已开启）、
+屏幕是否锁定（锁定会阻塞 Keychain 授权框）。
+
+`ready=false` 时每条阻塞都带「下一步」；全部 PASS 后再打 tag 或手动触发 Release。
+
+> 实测说明（2026-11-11）：本机 `MobileMeAccounts` 偏好域并不存在，不能用来判断登录状态；
+> CloudDocs 目录才是可靠信号（本机该目录存在，iCloud Drive 可用）。
