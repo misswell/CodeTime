@@ -1388,5 +1388,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "发布时记录项目路径，恢复候选去重排序后展示，且后续发布不丢失"
+  },
+  {
+    "id": "CT-140",
+    "test": "testCT140_ICloudBetaBuildIsOptInAndRequiresProfile",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "iCloud 验收构建必须显式开启且要求身份+描述文件",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "默认 Beta 不声明 iCloud；验收构建缺身份/描述文件时明确失败"
   }
 ]

@@ -46,6 +46,29 @@ else
   echo "==> no Developer ID identity; ad-hoc build（未公证）"
 fi
 
+# CT-140: a beta package that can actually exercise iCloud. The Beta config ships
+# EMPTY entitlements on purpose (ad-hoc builds must not claim iCloud), so real
+# two-Mac acceptance needs an explicitly opted-in build that signs the Beta
+# configuration with the Release (iCloud) entitlements and a Developer ID profile.
+if [ "${CODETIME_BETA_ICLOUD:-0}" = "1" ]; then
+  if [ -z "$DEVID" ]; then
+    echo "CODETIME_BETA_ICLOUD=1 需要 Developer ID 身份；当前构建没有，终止。" >&2
+    exit 1
+  fi
+  if [ -z "${PROVISIONING_PROFILE_SPECIFIER:-}" ]; then
+    echo "CODETIME_BETA_ICLOUD=1 需要 PROVISIONING_PROFILE_SPECIFIER（含 iCloud 容器的 Developer ID 描述文件）；终止。" >&2
+    echo "  先运行 Scripts/setup_apple_provisioning.sh 并把描述文件安装到本机。" >&2
+    exit 1
+  fi
+  SIGN_OVERRIDE+=(
+    CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements
+    PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER"
+    ENABLE_HARDENED_RUNTIME=YES
+  )
+  SIGNED_NOTE="$SIGNED_NOTE · iCloud 已启用（验收构建）"
+  echo "==> iCloud beta：使用 Release entitlements + 描述文件 $PROVISIONING_PROFILE_SPECIFIER"
+fi
+
 xcodegen generate
 rm -rf "$DIST" .build/Beta
 xcodebuild \

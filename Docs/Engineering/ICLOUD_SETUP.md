@@ -86,6 +86,21 @@ requiresUserAction（账户/权限/凭据/配置）
    App ID `com.codetime.app`，勾选 iCloud 容器与 App Group，下载后
    `base64 -i <file> | gh secret set APPLE_PROVISIONING_PROFILE --repo misswell/CodeTime`。
 
+### 5.2 iCloud 验收构建（CT-140）
+
+Beta 配置的 entitlements 是**空的**（ad-hoc 包不允许声称 iCloud）。要做真实双 Mac 验收，必须显式构建
+带 iCloud 权限的验收包：
+
+```bash
+# 先安装描述文件到本机（setup 脚本会打印名称）
+PROVISIONING_PROFILE_SPECIFIER="CodeTime Developer ID" \
+CODETIME_BETA_ICLOUD=1 Scripts/package_beta.sh
+```
+
+要求：Developer ID 身份 + 含 iCloud 容器的描述文件；缺任一项脚本**明确失败**，不会静默退回 ad-hoc。
+CI 侧可在手动触发 Release workflow 时勾选 `icloud_beta`（同样要求 `APPLE_PROVISIONING_PROFILE`）。
+验收包与正式包使用同一容器，数据隔离沿用「每设备独立 deviceID/仓库目录」，两台 Mac 用同一 Apple 账户即可互相发现。
+
 > **当前环境阻塞（2026-11-11 实测）**：App Store Connect API 返回
 > `PLA Update available … Account Holder, Guofeng Liu, must agree to the latest Program License Agreement`。
 > 描述文件与证书接口全部不可用，`xcodebuild -allowProvisioningUpdates` 同样建不出 profile。

@@ -450,4 +450,48 @@ final class CloudSetupRegressionTests: XCTestCase {
             ["Alpha", "Beta"]
         )
     }
+
+    // MARK: - CT-140 iCloud beta build is opt-in and honestly gated
+
+    func testCT140_ICloudBetaBuildIsOptInAndRequiresProfile() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = try String(
+            contentsOf: repoRoot.appendingPathComponent("Scripts/package_beta.sh"),
+            encoding: .utf8
+        )
+        // Opt-in only, and it refuses to continue without identity + profile.
+        XCTAssertTrue(script.contains("CODETIME_BETA_ICLOUD"))
+        XCTAssertTrue(script.contains("PROVISIONING_PROFILE_SPECIFIER"))
+        XCTAssertTrue(script.contains("CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements"))
+        XCTAssertTrue(
+            script.contains("CODETIME_BETA_ICLOUD=1 需要 Developer ID 身份"),
+            "缺少身份时必须明确失败，而不是静默退回 ad-hoc"
+        )
+
+        // The workflow exposes the switch so a two-Mac acceptance run can be
+        // triggered without editing the pipeline.
+        let workflow = try String(
+            contentsOf: repoRoot.appendingPathComponent(".github/workflows/release.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workflow.contains("icloud_beta"))
+        XCTAssertTrue(workflow.contains("APPLE_PROVISIONING_PROFILE"))
+
+        // Default beta entitlements stay EMPTY: an unpackaged/ad-hoc beta must
+        // never advertise iCloud it cannot use.
+        let betaEnt = try String(
+            contentsOf: repoRoot.appendingPathComponent("Apps/CodeTime/CodeTime-Beta.entitlements"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(betaEnt.contains("icloud"))
+        // And the Release entitlements remain the single iCloud source.
+        let releaseEnt = try String(
+            contentsOf: repoRoot.appendingPathComponent("Apps/CodeTime/CodeTime.entitlements"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(releaseEnt.contains("iCloud.com.codetime.app"))
+    }
 }

@@ -29,6 +29,11 @@ on:
         type: boolean
         required: false
         default: true
+      icloud_beta:
+        description: "Beta with real iCloud entitlements (needs APPLE_PROVISIONING_PROFILE; for two-Mac acceptance)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -166,10 +171,30 @@ jobs:
             $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$KEYCHAIN" | head -5
+      - name: Install provisioning profile (iCloud beta only)
+        if: ${{ inputs.icloud_beta }}
+        env:
+          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PROFILE_BASE64:-}" ]; then
+            echo "icloud_beta 需要 APPLE_PROVISIONING_PROFILE secret" >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo -n "$PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/codetime.provisionprofile"
+          DECODED="$(security cms -D -i "$RUNNER_TEMP/codetime.provisionprofile")"
+          NAME="$(printf '%s' "$DECODED" | plutil -extract Name raw -)"
+          UUID="$(printf '%s' "$DECODED" | plutil -extract UUID raw -)"
+          cp "$RUNNER_TEMP/codetime.provisionprofile" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "PROVISIONING_PROFILE_SPECIFIER=$NAME" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/codetime.provisionprofile"
       - name: Package pre-release
         env:
           TAG: ${{ needs.classify.outputs.tag }}
           CODETIME_PKG_TRACE: "1"
+          CODETIME_BETA_ICLOUD: ${{ inputs.icloud_beta && '1' || '0' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.NOTARY_PASSWORD }}
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || secrets.DEVELOPMENT_TEAM }}

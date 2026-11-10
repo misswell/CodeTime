@@ -19,7 +19,7 @@ python3 - "$INDEX" "$ROOT" <<'PY' || { echo "regression gate: FAIL (invalid inde
 import json, sys, os
 index_path, root = sys.argv[1], sys.argv[2]
 entries = json.load(open(index_path))
-expected = [f"CT-{i:03d}" for i in range(1, 140)]
+expected = [f"CT-{i:03d}" for i in range(1, 141)]
 ids = [e.get("id") for e in entries]
 if ids != expected:
     missing = sorted(set(expected) - set(ids))
@@ -151,4 +151,4 @@ print(sum(1 for e in json.load(open('$INDEX')) if e.get('required')))
 echo "regression gate: PASS"
 echo "  executed: $EXECUTED tests, 0 failures"
 echo "  skipped (manual acceptance only): ${SKIPPED:-none}"
-echo "  index: CT-001 … CT-139 ($REQUIRED_COUNT required)"
+echo "  index: CT-001 … CT-140 ($REQUIRED_COUNT required)"
