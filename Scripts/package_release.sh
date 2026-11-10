@@ -54,6 +54,22 @@ xcodegen generate
 rm -rf "$DIST" .build/CodeTime.xcarchive .build/DerivedData
 mkdir -p "$DIST"
 
+# A Developer ID build with iCloud entitlements REQUIRES a Developer ID
+# provisioning profile. Without it xcodebuild aborts with "requires a
+# provisioning profile with the iCloud feature"; fail earlier and clearer.
+if grep -q "com.apple.developer.icloud-services" Apps/CodeTime/CodeTime.entitlements \
+   && [ -z "${PROVISIONING_PROFILE_SPECIFIER:-}" ]; then
+  echo "CodeTime.entitlements 含 iCloud 能力，必须提供 Developer ID 描述文件。" >&2
+  echo "  Developer ID 描述文件需要在 developer.apple.com 手动创建（含 iCloud 容器）。" >&2
+  echo "  然后设置 PROVISIONING_PROFILE_SPECIFIER（描述文件名称）后重试。" >&2
+  exit 1
+fi
+
+PROFILE_ARGS=()
+if [ -n "${PROVISIONING_PROFILE_SPECIFIER:-}" ]; then
+  PROFILE_ARGS=(PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER")
+fi
+
 xcodebuild \
   -project CodeTime.xcodeproj \
   -scheme CodeTime \
@@ -64,6 +80,7 @@ xcodebuild \
   DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
   CODE_SIGN_STYLE=Manual \
   CODE_SIGN_IDENTITY="Developer ID Application" \
+  "${PROFILE_ARGS[@]:+${PROFILE_ARGS[@]}}" \
   archive
 
 [ -d "$APP" ] || { echo "缺少构建产物: $APP" >&2; exit 1; }

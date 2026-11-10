@@ -142,10 +142,37 @@ jobs:
           key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
       - run: ./Scripts/fetch_kopia.sh
       - run: brew install xcodegen
+      - name: Import Developer ID certificate (if configured)
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12_BASE64:-}" ]; then
+            echo "no signing certificate configured; beta falls back to ad-hoc"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/codetime-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo -n "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | head -5
       - name: Package pre-release
         env:
           TAG: ${{ needs.classify.outputs.tag }}
           CODETIME_PKG_TRACE: "1"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.NOTARY_PASSWORD }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || secrets.DEVELOPMENT_TEAM }}
         run: ./Scripts/package_beta.sh
       - name: Upload pre-release artifact
         uses: actions/upload-artifact@v4
@@ -195,19 +222,73 @@ jobs:
       - run: brew install xcodegen
       - name: Require signing and notarization secrets
         env:
-          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || secrets.DEVELOPMENT_TEAM }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.NOTARY_PASSWORD }}
         run: |
           set -euo pipefail
-          : "${DEVELOPMENT_TEAM:?stable release requires DEVELOPMENT_TEAM secret}"
+          : "${CERT_P12:?stable release requires APPLE_CERTIFICATE_P12 secret}"
+          : "${CERT_PASSWORD:?stable release requires APPLE_CERTIFICATE_PASSWORD secret}"
+          : "${DEVELOPMENT_TEAM:?stable release requires APPLE_TEAM_ID secret}"
           : "${APPLE_ID:?stable release requires APPLE_ID secret}"
-          : "${NOTARY_PASSWORD:?stable release requires NOTARY_PASSWORD secret}"
+          : "${NOTARY_PASSWORD:?stable release requires APPLE_APP_SPECIFIC_PASSWORD secret}"
+      - name: Import Developer ID certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          EXPECTED_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID }}
+        run: |
+          set -euo pipefail
+          # A fresh runner has NO signing identity: without this import
+          # package_release.sh can never find Developer ID and the release fails.
+          KEYCHAIN="$RUNNER_TEMP/codetime-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          echo -n "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN" | head -5
+          rm -f "$RUNNER_TEMP/cert.p12"
+          if [ -n "${EXPECTED_IDENTITY:-}" ]; then
+            security find-identity -v -p codesigning "$KEYCHAIN" | grep -F "$EXPECTED_IDENTITY" \
+              || { echo "导入的证书与 APPLE_DEVELOPER_ID 不一致" >&2; exit 1; }
+          fi
+      - name: Install Developer ID provisioning profile
+        env:
+          PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          # iCloud entitlements + Developer ID require a profile; without it the
+          # archive step cannot succeed, so fail here with an actionable message.
+          if [ -z "${PROFILE_BASE64:-}" ]; then
+            echo "缺少 APPLE_PROVISIONING_PROFILE secret：Developer ID + iCloud 必须有描述文件。" >&2
+            echo "在 developer.apple.com 创建 Developer ID 描述文件（含 iCloud 容器与 App Group），" >&2
+            echo "下载后 base64 编码写入该 secret。" >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo -n "$PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/codetime.provisionprofile"
+          DECODED="$(security cms -D -i "$RUNNER_TEMP/codetime.provisionprofile")"
+          NAME="$(printf '%s' "$DECODED" | plutil -extract Name raw -)"
+          UUID="$(printf '%s' "$DECODED" | plutil -extract UUID raw -)"
+          cp "$RUNNER_TEMP/codetime.provisionprofile" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "PROVISIONING_PROFILE_SPECIFIER=$NAME" >> "$GITHUB_ENV"
+          echo "installed provisioning profile: $NAME ($UUID)"
+          rm -f "$RUNNER_TEMP/codetime.provisionprofile"
       - name: Package, notarize and staple
         env:
-          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID || secrets.DEVELOPMENT_TEAM }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.NOTARY_PASSWORD }}
           TAG: ${{ needs.classify.outputs.tag }}
           CODETIME_RELEASE_CHANNEL: stable
         run: ./Scripts/package_release.sh

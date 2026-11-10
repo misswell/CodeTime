@@ -79,12 +79,19 @@ targets:
           ONLY_ACTIVE_ARCH: NO
           ARCHS: "arm64 x86_64"
         Release:
-          CODE_SIGN_STYLE: Automatic
-          DEVELOPMENT_TEAM: U8U443D7ZL
+          # Developer ID is a MANUAL identity: Automatic signing + an explicit
+          # Developer ID identity is rejected by xcodebuild ("conflicting
+          # provisioning settings"). Developer ID needs no provisioning profile.
+          CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Developer ID Application"
+          # The team is a fallback for local builds; CI passes DEVELOPMENT_TEAM /
+          # TEAM_ID from secrets and imports the certificate first.
+          DEVELOPMENT_TEAM: U8U443D7ZL
+          PROVISIONING_PROFILE_SPECIFIER: ""
           CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime.entitlements
           ENABLE_HARDENED_RUNTIME: YES
           ONLY_ACTIVE_ARCH: NO
+          ARCHS: "arm64 x86_64"
     postBuildScripts:
       - name: Bundle Agent and Sign Nested Binaries
         basedOnDependencyAnalysis: false

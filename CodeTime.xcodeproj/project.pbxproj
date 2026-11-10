@@ -264,6 +264,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					48B2DFB1766B05487B1BAA05 = {
+						ProvisioningStyle = Manual;
+					};
 				};
 			};
 			buildConfigurationList = 712B4D589E2463B8C97E5E7B /* Build configuration list for PBXProject "CodeTime" */;
@@ -493,10 +496,11 @@
 		DF4CD403162AC366427C9562 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "arm64 x86_64";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Apps/CodeTime/CodeTime.entitlements;
 				CODE_SIGN_IDENTITY = "Developer ID Application";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = U8U443D7ZL;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -505,6 +509,7 @@
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.codetime.app;
 				PRODUCT_NAME = CodeTime;
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 			};
 			name = Release;
