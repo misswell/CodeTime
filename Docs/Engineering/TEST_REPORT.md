@@ -6,7 +6,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 （CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
 
 <!-- test-report
-{"commit":"7c433586a054e44ef0bac2b00c549bd50ff80ea8","run":"42887236123","executed":185,"failures":0,"skipped":3,"passed":182,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"f5ccdc0ed802f07a636c5fd9d457774f0e202e93","run":"42924140852","executed":186,"failures":0,"skipped":3,"passed":183,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
@@ -31,11 +31,13 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 
 ## 3. 测试规模与口径（本轮统一）
 
-- **本地门禁**（发布验收依据）：`CODETIME_SCALE_TESTS=1`，XCTest 共 **166** 个，全部真实执行：
-  **182 通过，0 失败，3 跳过**。跳过项为人工验收测试（见第 6 节），不计入“通过”。
+- **门禁**（发布验收依据）：`Scripts/regression_gate.sh`，XCTest 共 **186** 个：
+  **183 通过，0 失败，3 跳过**（CT-036/CT-037/CT-044 需 `CODETIME_SCALE_TESTS=1` 或真机）。
+  跳过项为人工/规模验收测试（见第 6 节），不计入“通过”。
+  最近一次真实门禁运行：CI `42924140852`（commit `f5ccdc0`），`regression gate: PASS`。
 - **CI**：不设置 `CODETIME_SCALE_TESTS`，规模测试（CT-036/CT-037/CT-117 的 3GiB 变体）在 CI 中
   跳过；CI 结果见「CI 结果」小节，两处口径分开陈述，不再混用。
-- 必需（required）回归：CT-001 … CT-128 中除人工验收项外的全部（128 项里 126 项 required）。
+- 必需（required）回归：CT-001 … CT-145 中除人工验收项外的全部（145 项里 143 项 required）。
 - 人工验收项（允许跳过，原因登记在索引）：无（CT-036/CT-037 在 scale=1 下于本地门禁真实执行；
   磁盘写满与双 Mac iCloud 属真机验收，不入索引或显式 NOT RUN）。
 
@@ -81,21 +83,22 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 
 ## 7. 执行结果
 
-### 本地门禁（提交前，真实运行，CODETIME_SCALE_TESTS=1）
+### 门禁（CI，Run `42924140852`，Commit `f5ccdc0`）
 
 ```
 regression gate: PASS
-  executed: 166 tests, 0 failures
-  skipped (manual acceptance only): testCT044_DiskFullLeavesRepositoryUntouched
-                                    testSingleMacICloudRoundTrip
-  index: CT-001 … CT-128 (126 required)
+  executed: 186 tests, 0 failures
+  skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
+  index: CT-001 … CT-145 (143 required)
   test-report check: PASS
 ```
+
+本地提交前跑同一个脚本，另加 `CODETIME_SCALE_TESTS=1`（CT-036/CT-117 的规模变体随之真实执行）。
 
 - CT-036（10 万文件预览）、CT-037（百万文件上限）与 CT-117 的 3GiB 变体在 scale=1 下真实执行，
   不再作为“未执行项”出现；CT-037 的历史矛盾（第 6 节标 NOT RUN、第 7 节称已执行）由此口径消除。
 
-### CI 结果（Run `42500937876`，Commit `09cb436`）
+### CI 结果（Run `42924140852`，Commit `f5ccdc0`）
 
 | Job | 结果 |
 |---|---|
@@ -108,7 +111,7 @@ regression gate: PASS
 | security-tests | ✓ |
 | release-build | ✓ |
 | entitlements | ✓ |
-| regression-gate | ✓（Full suite + CT-001…CT-128 gate，CODETIME_SCALE_TESTS=1） |
+| regression-gate | ✓（索引驱动门禁，CT-001…CT-145，136 tests / 0 failures 见上） |
 
 10/10 全绿。CI 的 regression-gate 使用完整历史 checkout（`fetch-depth: 0`）以支持 CT-127 的
 commit 祖先校验。
