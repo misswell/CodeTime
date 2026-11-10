@@ -6,7 +6,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 （CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
 
 <!-- test-report
-{"commit":"a6446cc77c5c861073173201f33ddf461288409d","run":"42861463028","executed":181,"failures":0,"skipped":3,"passed":178,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"7c433586a054e44ef0bac2b00c549bd50ff80ea8","run":"42887236123","executed":181,"failures":0,"skipped":3,"passed":178,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
@@ -14,8 +14,8 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 | 项 | 值 |
 |---|---|
 | 基准 Commit | `ece7fff`（第七轮审查基准，main 最新） |
-| 交付 Commit SHA | `a6446cc`（iCloud 零配置改造最终提交） |
-| CI Run | `42861463028`（GitHub Actions `CI`，`main` push，10/10 全绿） |
+| 交付 Commit SHA | `7c43358`（iCloud 零配置改造 + 验收构建路径最终提交） |
+| CI Run | `42887236123`（GitHub Actions `CI`，`main` push，10/10 全绿） |
 | 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-140） |
 | 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过、含报告一致性检查） |
 
