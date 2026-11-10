@@ -1418,5 +1418,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "verify_release.sh 使用 smoke_launch.sh 做有界启动检查"
+  },
+  {
+    "id": "CT-143",
+    "test": "testCT143_ICloudBetaUsesDedicatedConfiguration",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "iCloud 验收构建使用专用配置，避免命令行污染 SwiftPM 目标",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "BetaICloud 配置带 Release entitlements；打包脚本不再命令行覆盖 CODE_SIGN_ENTITLEMENTS"
   }
 ]

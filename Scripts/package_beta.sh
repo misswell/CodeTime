@@ -60,13 +60,19 @@ if [ "${CODETIME_BETA_ICLOUD:-0}" = "1" ]; then
     echo "  先运行 Scripts/setup_apple_provisioning.sh 并把描述文件安装到本机。" >&2
     exit 1
   fi
+  # The entitlement switch lives in the BetaICloud configuration: passing
+  # CODE_SIGN_ENTITLEMENTS on the command line would also apply to the SwiftPM
+  # package targets and break the build.
   SIGN_OVERRIDE+=(
-    CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements
     PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER"
-    ENABLE_HARDENED_RUNTIME=YES
   )
   SIGNED_NOTE="$SIGNED_NOTE · iCloud 已启用（验收构建）"
   echo "==> iCloud beta：使用 Release entitlements + 描述文件 $PROVISIONING_PROFILE_SPECIFIER"
+fi
+
+CONFIGURATION="Beta"
+if [ "${CODETIME_BETA_ICLOUD:-0}" = "1" ]; then
+  CONFIGURATION="BetaICloud"
 fi
 
 xcodegen generate
@@ -74,13 +80,13 @@ rm -rf "$DIST" .build/Beta
 xcodebuild \
   -project CodeTime.xcodeproj \
   -scheme CodeTime \
-  -configuration Beta \
+  -configuration "$CONFIGURATION" \
   -derivedDataPath .build/Beta \
   ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
   "${SIGN_OVERRIDE[@]:+${SIGN_OVERRIDE[@]}}" \
   build
 
-APP=".build/Beta/Build/Products/Beta/CodeTime.app"
+APP=".build/Beta/Build/Products/$CONFIGURATION/CodeTime.app"
 [ -d "$APP" ] || { echo "missing built app: $APP" >&2; exit 1; }
 PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [ "$PLIST_VERSION" = "$VERSION" ] || {

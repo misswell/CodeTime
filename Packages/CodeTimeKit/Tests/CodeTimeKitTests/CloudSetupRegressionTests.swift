@@ -465,7 +465,11 @@ final class CloudSetupRegressionTests: XCTestCase {
         // Opt-in only, and it refuses to continue without identity + profile.
         XCTAssertTrue(script.contains("CODETIME_BETA_ICLOUD"))
         XCTAssertTrue(script.contains("PROVISIONING_PROFILE_SPECIFIER"))
-        XCTAssertTrue(script.contains("CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements"))
+        // CT-143: the entitlement switch lives in the BetaICloud configuration;
+        // the script must select it and must NOT pass CODE_SIGN_ENTITLEMENTS on
+        // the command line (that would leak into the SwiftPM package targets).
+        XCTAssertTrue(script.contains("CONFIGURATION=\"BetaICloud\"") || script.contains("Configuration=\"BetaICloud\""))
+        XCTAssertFalse(script.contains("CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements"))
         XCTAssertTrue(
             script.contains("CODETIME_BETA_ICLOUD=1 需要 Developer ID 身份"),
             "缺少身份时必须明确失败，而不是静默退回 ad-hoc"
@@ -584,5 +588,38 @@ final class CloudSetupRegressionTests: XCTestCase {
         )
         XCTAssertTrue(verify.contains("smoke_launch.sh"))
         XCTAssertTrue(verify.contains("CODETIME_SKIP_LAUNCH_SMOKE"))
+    }
+
+    // MARK: - CT-143 iCloud beta uses a config, not CLI entitlement overrides
+
+    func testCT143_ICloudBetaUsesDedicatedConfiguration() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        // A dedicated configuration exists and carries the Release entitlements.
+        let project = try String(
+            contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8
+        )
+        XCTAssertTrue(project.contains("BetaICloud:"), "缺少 BetaICloud 配置")
+        let betaICloudBlock = project.components(separatedBy: "BetaICloud:").last ?? ""
+        XCTAssertTrue(
+            betaICloudBlock.contains("CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime.entitlements"),
+            "BetaICloud 必须使用 Release entitlements"
+        )
+        XCTAssertTrue(betaICloudBlock.contains("ENABLE_HARDENED_RUNTIME: YES"))
+
+        // The packaging script selects the configuration and never passes
+        // CODE_SIGN_ENTITLEMENTS on the command line (that leaks into the SwiftPM
+        // package targets and breaks them with a bogus relative path).
+        let script = try String(
+            contentsOf: repoRoot.appendingPathComponent("Scripts/package_beta.sh"), encoding: .utf8
+        )
+        XCTAssertTrue(script.contains("CONFIGURATION=\"BetaICloud\""))
+        XCTAssertFalse(
+            script.contains("CODE_SIGN_ENTITLEMENTS=Apps/CodeTime/CodeTime.entitlements"),
+            "不得在命令行覆盖 CODE_SIGN_ENTITLEMENTS（会污染 SwiftPM 目标）"
+        )
     }
 }

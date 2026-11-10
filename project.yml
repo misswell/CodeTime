@@ -3,6 +3,11 @@ configs:
   Debug: debug
   Release: release
   Beta: release
+  # CT-143: a Beta build that carries the Release (iCloud) entitlements, for
+  # two-Mac acceptance. It needs its own configuration because passing
+  # CODE_SIGN_ENTITLEMENTS on the xcodebuild command line leaks into the
+  # SwiftPM package targets (relative paths break there).
+  BetaICloud: release
 
 options:
   bundleIdPrefix: com.codetime
@@ -76,6 +81,14 @@ targets:
           CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime-Beta.entitlements
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
           ENABLE_HARDENED_RUNTIME: NO
+          ONLY_ACTIVE_ARCH: NO
+          ARCHS: "arm64 x86_64"
+        BetaICloud:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          DEVELOPMENT_TEAM: U8U443D7ZL
+          CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime.entitlements
+          ENABLE_HARDENED_RUNTIME: YES
           ONLY_ACTIVE_ARCH: NO
           ARCHS: "arm64 x86_64"
         Release:

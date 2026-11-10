@@ -97,6 +97,10 @@ PROVISIONING_PROFILE_SPECIFIER="CodeTime Developer ID" \
 CODETIME_BETA_ICLOUD=1 Scripts/package_beta.sh
 ```
 
+实现说明（CT-143）：`project.yml` 新增 `BetaICloud` 配置承载 Release entitlements +
+Hardened Runtime。**不要**用命令行 `CODE_SIGN_ENTITLEMENTS=...` 打开 iCloud——该设置会传播到
+SwiftPM 包目标并按错误相对路径解析，导致构建失败（实测）。
+
 要求：Developer ID 身份 + 含 iCloud 容器的描述文件；缺任一项脚本**明确失败**，不会静默退回 ad-hoc。
 CI 侧可在手动触发 Release workflow 时勾选 `icloud_beta`（同样要求 `APPLE_PROVISIONING_PROFILE`）。
 验收包与正式包使用同一容器，数据隔离沿用「每设备独立 deviceID/仓库目录」，两台 Mac 用同一 Apple 账户即可互相发现。
