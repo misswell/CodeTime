@@ -731,7 +731,7 @@ final class SixthRoundRegressionTests: XCTestCase {
     func testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild() throws {
         let indexData = try Data(contentsOf: repoRoot.appendingPathComponent("REGRESSION_INDEX.json"))
         let entries = try XCTUnwrap(JSONSerialization.jsonObject(with: indexData) as? [[String: Any]])
-        XCTAssertEqual(entries.count, 140)
+        XCTAssertEqual(entries.count, 142)
         for entry in entries {
             let id = entry["id"] as? String ?? "?"
             let required = entry["required"] as? Bool ?? false

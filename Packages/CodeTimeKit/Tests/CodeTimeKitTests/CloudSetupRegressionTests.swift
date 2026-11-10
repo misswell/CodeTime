@@ -494,4 +494,95 @@ final class CloudSetupRegressionTests: XCTestCase {
         )
         XCTAssertTrue(releaseEnt.contains("iCloud.com.codetime.app"))
     }
+
+    // MARK: - CT-141 two-Mac acceptance evidence is real and unfakeable
+
+    private func runScript(_ path: String, _ args: [String]) -> (status: Int32, out: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [path] + args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try? process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    func testCT141_AcceptanceHarnessDetectsMismatchAndRefusesFakeReport() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = repoRoot.appendingPathComponent("Scripts/icloud_acceptance.sh").path
+
+        // Fixture with plain files (no exclusion rules match).
+        let source = root.appendingPathComponent("fixture", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("src"), withIntermediateDirectories: true
+        )
+        try "alpha\n".write(to: source.appendingPathComponent("main.swift"), atomically: true, encoding: .utf8)
+        try "beta\n".write(to: source.appendingPathComponent("src/util.txt"), atomically: true, encoding: .utf8)
+
+        let a = root.appendingPathComponent("A.json")
+        let prepare = runScript(script, ["prepare", "--project", source.path, "--out", a.path])
+        XCTAssertEqual(prepare.status, 0, prepare.out)
+
+        // A byte-identical copy verifies.
+        let restored = root.appendingPathComponent("restored", isDirectory: true)
+        try FileManager.default.copyItem(at: source, to: restored)
+        let b = root.appendingPathComponent("B.json")
+        let ok = runScript(script, ["verify", "--evidence", a.path, "--restored", restored.path, "--out", b.path])
+        XCTAssertEqual(ok.status, 0, ok.out)
+        XCTAssertTrue(ok.out.contains("RESULT: PASS"))
+
+        // A tampered restore fails and is reported with the file name.
+        try "tampered\n".write(
+            to: restored.appendingPathComponent("main.swift"), atomically: true, encoding: .utf8
+        )
+        let bad = root.appendingPathComponent("B-bad.json")
+        let failRun = runScript(script, ["verify", "--evidence", a.path, "--restored", restored.path, "--out", bad.path])
+        XCTAssertNotEqual(failRun.status, 0, "篡改必须导致校验失败")
+        XCTAssertTrue(failRun.out.contains("mismatched"))
+
+        // The report refuses to be produced from a failed verification.
+        let report = root.appendingPathComponent("report.md")
+        let refused = runScript(script, [
+            "report", "--a", a.path, "--b", bad.path,
+            "--tag", "v1.0.0", "--commit", String(repeating: "a", count: 40),
+            "--candidate-sha", String(repeating: "b", count: 64),
+            "--candidate-name", "CodeTime-1.0.0-macos-universal.zip",
+            "--run", "123456", "--operator", "tester",
+            "--out", report.path,
+        ])
+        XCTAssertNotEqual(refused.status, 0, "校验未通过时不得生成验收报告")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: report.path))
+    }
+
+    // MARK: - CT-142 distributed app must launch
+
+    func testCT142_LaunchSmokeDetectsCrashAndHangFreeSuccess() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let smoke = repoRoot.appendingPathComponent("Scripts/smoke_launch.sh").path
+
+        // A process that stays alive passes.
+        let alive = runScript(smoke, ["/bin/sleep", "1", "--", "5"])
+        XCTAssertEqual(alive.status, 0, alive.out)
+
+        // A process that exits immediately fails.
+        let crashed = runScript(smoke, ["/usr/bin/false", "1"])
+        XCTAssertNotEqual(crashed.status, 0, "启动即退出必须被判定为失败")
+
+        // verify_release.sh must use this check (and honour the skip flag).
+        let verify = try String(
+            contentsOf: repoRoot.appendingPathComponent("Scripts/verify_release.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(verify.contains("smoke_launch.sh"))
+        XCTAssertTrue(verify.contains("CODETIME_SKIP_LAUNCH_SMOKE"))
+    }
 }

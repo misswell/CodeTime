@@ -1398,5 +1398,25 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "默认 Beta 不声明 iCloud；验收构建缺身份/描述文件时明确失败"
+  },
+  {
+    "id": "CT-141",
+    "test": "testCT141_AcceptanceHarnessDetectsMismatchAndRefusesFakeReport",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "双 Mac 验收证据脚本不可伪造",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "逐文件 SHA-256 比对；篡改必失败；校验未通过时拒绝生成验收报告"
+  },
+  {
+    "id": "CT-142",
+    "test": "testCT142_LaunchSmokeDetectsCrashAndHangFreeSuccess",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "分发包含启动即崩溃必须被拦截",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "verify_release.sh 使用 smoke_launch.sh 做有界启动检查"
   }
 ]

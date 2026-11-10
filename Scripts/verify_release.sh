@@ -44,4 +44,13 @@ ARCHS="$(/usr/bin/lipo -archs "$KOPIA" 2>/dev/null || true)"
 [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || fail "embedded Kopia is not universal: $ARCHS"
 note "embedded Kopia runs and is universal"
 
+# CT-142: the distributed bundle must actually launch (a signed-but-crashing
+# binary would pass every other check). Bounded: we start it, confirm it stays
+# alive, then terminate it. Skippable for headless local runs.
+if [ "${CODETIME_SKIP_LAUNCH_SMOKE:-0}" != "1" ]; then
+  "$ROOT/Scripts/smoke_launch.sh" "$APP/Contents/MacOS/CodeTime" 3 \
+    || fail "launch smoke test failed (the distributed app does not stay running)"
+  note "app launches and stays running"
+fi
+
 echo "release verification: PASS"

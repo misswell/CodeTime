@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-140）
+# 回归测试矩阵（CT-001 … CT-142）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -144,10 +144,12 @@
 | CT-138 | `testCT138_StressTestIsOptInSeparatelyFromScale` | 百万文件压力测试与常规门禁分离（避免 CI job 超时） | 是 | 否 |
 | CT-139 | `testCT139_RecoveryCandidateListsProjectsBeforeDownload` | 恢复页在下载前展示设备/时间/项目 | 是 | 否 |
 | CT-140 | `testCT140_ICloudBetaBuildIsOptInAndRequiresProfile` | iCloud 验收构建必须显式开启且要求身份+描述文件 | 是 | 否 |
+| CT-141 | `testCT141_AcceptanceHarnessDetectsMismatchAndRefusesFakeReport` | 双 Mac 验收证据脚本不可伪造 | 是 | 否 |
+| CT-142 | `testCT142_LaunchSmokeDetectsCrashAndHangFreeSuccess` | 分发包含启动即崩溃必须被拦截 | 是 | 否 |
 
 ## 门禁规则（CT-114 / CT-138）
 
-- 索引必须恰好登记 CT-001…CT-140，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-142，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。

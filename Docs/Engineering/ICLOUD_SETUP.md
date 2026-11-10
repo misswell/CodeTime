@@ -113,3 +113,34 @@ CI 侧可在手动触发 Release workflow 时勾选 `icloud_beta`（同样要求
 - `codesign -d --entitlements :-` 中含 sandbox、iCloud services、容器 `iCloud.com.codetime.app`、ubiquity 容器、App Group、keychain group；
 - 嵌入的 `embedded.provisionprofile` 授权同一容器与 App Group；
 - Beta entitlements 仍不得声明 iCloud（避免无签名构建看起来“支持同步”）。
+
+
+## 7. 双 Mac 验收证据（CT-141 / CT-142）
+
+验收本身必须在两台真实 Mac 上用**签名包**完成；脚本只负责让证据可复现、不可伪造：
+
+```bash
+# Mac A（源）
+Scripts/icloud_acceptance.sh prepare --project ~/AcceptanceFixture --out A.json
+#   → 逐文件 SHA-256、host/model/macOS
+#   然后用 App：添加项目 → 备份 → 确认「已上传到 iCloud」
+
+# Mac B（恢复）
+#   用 App：从云端恢复 → 输入恢复密钥 → 恢复项目
+Scripts/icloud_acceptance.sh verify --evidence A.json --restored ~/AcceptanceFixture --out B.json
+#   → 逐文件比对；任何差异 exit 1，并列出 mismatched/missing
+
+# 生成验收报告（B.verified 必须为 true，否则拒绝生成）
+Scripts/icloud_acceptance.sh report --a A.json --b B.json \
+  --tag v1.0.0 --commit <git sha> --candidate-sha <zip sha256> \
+  --candidate-name CodeTime-1.0.0-macos-universal.zip \
+  --run <workflow-run-id> --operator "<name>" \
+  --out Docs/releases/v1.0.0-icloud-acceptance.md
+```
+
+要点：
+- fixture 只用**不会被排除规则命中**的文件（`main.swift`、`README.md`、`src/*.txt`）；`node_modules/.git/logs` 等本就不会被恢复，不应作为对比对象。
+- `report` 只从真实证据生成，字段（fileCount / checkedFiles / host / model）全部来自 JSON；
+  校验未通过、文件数不一致、缺少 B 证据时**拒绝输出**，因此无法伪造 PASS 报告。
+- `verify_release.sh` 现在会调用 `Scripts/smoke_launch.sh`（有界启动检查）：签名正确但**启动即崩溃**的包会被拦截；
+  本地无 GUI 会话可用 `CODETIME_SKIP_LAUNCH_SMOKE=1` 跳过。
