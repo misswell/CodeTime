@@ -109,7 +109,27 @@ else
   add PASS session "屏幕已解锁（Keychain 授权可交互）" ""
 fi
 
-# 7. Second Mac (cannot be probed locally) ----------------------------------
+# 7. Saved window frame (CT-145) --------------------------------------------
+# AppKit restores the last window frame. A frame saved on a now-disconnected
+# external display puts the window — and the Keychain sheet it spawns —
+# off-screen, which is indistinguishable from "the app never starts".
+FRAME="$(defaults read com.codetime.app "NSWindow Frame main-AppWindow-1" 2>/dev/null || true)"
+if [ -n "$FRAME" ]; then
+  WX="$(printf '%s' "$FRAME" | awk '{printf "%d", $1+0}')"
+  # Largest logical width across attached displays ("UI Looks like: 1920 x 1080").
+  MAIN_W="$(system_profiler SPDisplaysDataType 2>/dev/null \
+    | awk -F': ' '/UI Looks like/ {split($2,a," "); if (a[1]+0>m) m=a[1]+0} END {printf "%d", m+0}')"
+  if [ "${MAIN_W:-0}" -gt 0 ] && { [ "$WX" -lt 0 ] || [ "$WX" -ge "$MAIN_W" ]; }; then
+    add WARN window "CodeTime 窗口保存位置可能在屏幕外（x=${WX}，最宽屏幕 ${MAIN_W} pt）：启动会等到看门狗超时，钥匙串授权框也看不见" \
+      "运行 Scripts/fix_window.sh 把窗口移回主屏（或删除偏好中的 NSWindow Frame main-AppWindow-1）"
+  else
+    add PASS window "CodeTime 窗口位置在屏幕可见范围内" ""
+  fi
+else
+  add PASS window "没有保存的窗口位置（首次启动会居中显示）" ""
+fi
+
+# 8. Second Mac (cannot be probed locally) ----------------------------------
 add MANUAL second-mac "第二台 Mac 无法自动探测" "在两台 Mac 上安装同一个签名包后运行 Scripts/icloud_acceptance.sh"
 
 BLOCKED_COUNT=0

@@ -16,7 +16,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 | 基准 Commit | `ece7fff`（第七轮审查基准，main 最新） |
 | 交付 Commit SHA | `7c43358`（iCloud 零配置改造 + 验收构建路径最终提交） |
 | CI Run | `42887236123`（GitHub Actions `CI`，`main` push，10/10 全绿） |
-| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-144） |
+| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-145；CT-145 为窗口越界诊断，尚未进入下方统计块对应的那次门禁运行） |
 | 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过、含报告一致性检查） |
 
 ## 2. 环境

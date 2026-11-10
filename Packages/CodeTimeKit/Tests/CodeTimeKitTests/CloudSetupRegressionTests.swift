@@ -662,4 +662,46 @@ final class CloudSetupRegressionTests: XCTestCase {
         XCTAssertTrue(script.contains("com~apple~CloudDocs"))
         XCTAssertFalse(script.contains("defaults read MobileMeAccounts"))
     }
+
+    /// CT-145: a saved window frame from a disconnected external display renders
+    /// both the window and its Keychain sheet off-screen — the app then looks
+    /// like it "never starts". That was the real cause of "无法下一步": the saved
+    /// frame was `-1532 …` on a 1920pt-wide main display. doctor must report that
+    /// condition, and there must be a command that fixes it.
+    func testCT145_DiagnosesOffScreenAppWindow() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let doctor = repoRoot.appendingPathComponent("Scripts/doctor.sh").path
+
+        let result = runScript(doctor, ["--json"])
+        let data = try XCTUnwrap(result.out.data(using: .utf8))
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let checks = try XCTUnwrap(json["checks"] as? [[String: Any]])
+        let window = try XCTUnwrap(
+            checks.first { ($0["id"] as? String) == "window" },
+            "doctor 必须报告窗口位置检查项"
+        )
+        let status = try XCTUnwrap(window["status"] as? String)
+        XCTAssertTrue(["PASS", "WARN"].contains(status), "窗口检查不应阻塞发布：\(status)")
+        if status == "WARN" {
+            let next = (window["next"] as? String) ?? ""
+            XCTAssertFalse(next.isEmpty, "窗口越界时必须给出修复命令")
+        }
+
+        // The check must read the frame AppKit actually persists, and the fix
+        // command must exist and be executable.
+        let script = try String(contentsOfFile: doctor, encoding: .utf8)
+        XCTAssertTrue(script.contains("NSWindow Frame main-AppWindow-1"))
+        XCTAssertTrue(script.contains("SPDisplaysDataType"), "需要真实屏幕尺寸才能判断越界")
+
+        let fix = repoRoot.appendingPathComponent("Scripts/fix_window.sh").path
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: fix), "缺少可执行的 fix_window.sh")
+        let fixScript = try String(contentsOfFile: fix, encoding: .utf8)
+        XCTAssertTrue(fixScript.contains("System Events"))
+        XCTAssertTrue(fixScript.contains("SecurityAgent"), "授权框与窗口是不同进程，必须分别移动")
+    }
 }

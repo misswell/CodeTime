@@ -1438,5 +1438,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "doctor --json 输出合法 JSON；每个 BLOCKED 都带下一步；退出码与阻塞数一致"
+  },
+  {
+    "id": "CT-145",
+    "test": "testCT145_DiagnosesOffScreenAppWindow",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "窗口保存位置在屏幕外时必须可诊断并给出修复命令",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "doctor 报告 window 检查项（不阻塞）；Scripts/fix_window.sh 可执行且分别移动窗口与 SecurityAgent 授权框"
   }
 ]
