@@ -158,8 +158,43 @@ final class AppModel: ObservableObject {
     @Published var snapshotLoadError: String?
     @Published var searchNotice: String?
     @Published var migrationNotice: String?
+    /// Last cloud diagnostic line (shown in Settings → Advanced).
+    @Published var cloudDiagnosticSummary: String = ""
 
     @Published private(set) var service: CodeTimeService?
+
+    // MARK: iCloud setup (CT-129/130/131)
+
+    /// Live environment probe result. The UI NEVER infers iCloud capability from
+    /// settings alone — this is the single source of truth.
+    @Published private(set) var cloudSetup: CloudSetupStatus = .checking
+    /// First-run backup progress (onboarding step 4).
+    @Published var firstBackup: FirstBackupProgress = .idle
+
+    struct FirstBackupProgress: Equatable {
+        enum Phase: String, Equatable {
+            case idle
+            case initializing
+            case snapshot
+            case uploading
+            case verifying
+            case done
+            case localDoneCloudFailed
+        }
+        var phase: Phase = .idle
+        var detail: String = ""
+        var projectCount: Int = 0
+        var completedProjects: Int = 0
+        var fileCount: Int = 0
+
+        static let idle = FirstBackupProgress()
+        var isRunning: Bool {
+            [.initializing, .snapshot, .uploading, .verifying].contains(phase)
+        }
+        var isFinished: Bool {
+            phase == .done || phase == .localDoneCloudFailed
+        }
+    }
     private var lifecycleLock: LifecycleLock?
     private var scheduler: BackupScheduler?
     private var started = false
@@ -504,25 +539,82 @@ final class AppModel: ObservableObject {
 
     // MARK: - Projects
 
+    /// Adds one or more directories (goal §3.2: batch selection).
     func addProject() async {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.prompt = "添加项目"
-        panel.message = "选择需要自动备份的代码目录"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let project = try await service?.addProject(url: url)
-            await refreshAll(silent: true)
-            if let project {
-                selectedProjectID = project.id
-                await loadWorkspace(projectID: project.id, switchSection: false)
-                showToast("已添加 \(project.name)", style: .success)
+        panel.message = "选择需要自动备份的代码目录（可多选）"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        await addProjects(urls: panel.urls)
+    }
+
+    /// Shared by the picker and the onboarding suggestion list. One invalid
+    /// directory never aborts the rest, and the sum is reported honestly.
+    func addProjects(urls: [URL]) async {
+        guard let service, !urls.isEmpty else { return }
+        var added: [Project] = []
+        var failures: [String] = []
+        for url in urls {
+            do {
+                let project = try await service.addProject(url: url)
+                added.append(project)
+            } catch {
+                failures.append("\(url.lastPathComponent)：\(error.localizedDescription)")
             }
-        } catch {
-            showToast(error.localizedDescription, style: .error)
         }
+        await refreshAll(silent: true)
+        if let last = added.last {
+            selectedProjectID = last.id
+            await loadWorkspace(projectID: last.id, switchSection: false)
+        }
+        if added.isEmpty {
+            showToast(failures.first ?? "没有添加任何项目", style: .error)
+        } else if failures.isEmpty {
+            showToast(added.count == 1 ? "已添加 \(added[0].name)" : "已添加 \(added.count) 个项目", style: .success)
+        } else {
+            showToast("已添加 \(added.count) 个，\(failures.count) 个失败：\(failures[0])", style: .warning)
+        }
+    }
+
+    /// Candidate project directories to SUGGEST in onboarding. Bounded depth and
+    /// only well-known developer folders — never a whole-disk scan.
+    func suggestedProjectDirectories() -> [URL] {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let candidates = ["Developer", "Code", "Projects", "Documents", "Desktop", "src", "work"]
+        var result: [URL] = []
+        for name in candidates {
+            let url = home.appendingPathComponent(name, isDirectory: true)
+            guard fm.fileExists(atPath: url.path) else { continue }
+            result.append(contentsOf: gitRepositories(in: url, maxDepth: 2))
+        }
+        // Stable, de-duplicated, bounded list.
+        var seen = Set<String>()
+        return result.filter { seen.insert($0.standardizedFileURL.path).inserted }.prefix(12).map { $0 }
+    }
+
+    private func gitRepositories(in root: URL, maxDepth: Int) -> [URL] {
+        let fm = FileManager.default
+        var found: [URL] = []
+        func walk(_ url: URL, depth: Int) {
+            guard depth <= maxDepth, found.count < 40 else { return }
+            if fm.fileExists(atPath: url.appendingPathComponent(".git").path) {
+                found.append(url)
+                return // a repo's subdirectories are part of it
+            }
+            guard let children = try? fm.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+            ) else { return }
+            for child in children {
+                guard (try? child.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+                walk(child, depth: depth + 1)
+            }
+        }
+        walk(root, depth: 0)
+        return found
     }
 
     func editProject(_ project: Project) {
@@ -586,6 +678,142 @@ final class AppModel: ObservableObject {
         )
     }
 
+    // MARK: - iCloud setup
+
+    /// True when the CURRENT binary carries the iCloud entitlement. Beta/Debug
+    /// builds return false, so their UI must disable iCloud instead of pretending.
+    var buildSupportsICloud: Bool {
+        CloudSetupService.processHasICloudEntitlement()
+    }
+
+    /// Current storage target derived from settings (never cleared implicitly).
+    var backupDestination: BackupDestination {
+        BackupDestination.derived(
+            iCloudEnabled: settings.iCloudEnabled,
+            localMirrorPath: settings.localMirrorPath,
+            localMirrorAccessState: settings.localMirrorAccessState
+        )
+    }
+
+    /// Re-runs the full environment probe. Safe to call at any time.
+    func refreshCloudSetup() async {
+        guard let service else { return }
+        if !buildSupportsICloud {
+            cloudSetup = .unsupported
+            return
+        }
+        cloudSetup = .checking
+        cloudSetup = await service.cloudSetupStatus()
+        cloudDiagnosticSummary = cloudSetup.detail
+    }
+
+    /// One-tap enable. Verifies the target BEFORE persisting anything; on failure
+    /// the existing configuration and every existing backup stay untouched.
+    @discardableResult
+    func enableICloudBackup() async -> Bool {
+        guard let service else { return false }
+        do {
+            _ = try await service.configureStorage(.iCloud)
+            settings = try await service.currentSettings()
+            cloudSetup = await service.cloudSetupStatus()
+            showToast("已启用 iCloud 备份", style: .success)
+            await refreshAll(silent: true)
+            return true
+        } catch {
+            // Keep the previous storage target; only surface the reason.
+            cloudSetup = await service.cloudSetupStatus()
+            showToast(error.localizedDescription, style: .warning)
+            return false
+        }
+    }
+
+    /// Turns off iCloud mirroring; local snapshots, cloud objects and the local
+    /// mirror path are all preserved.
+    func disableICloudBackup() async {
+        guard let service else { return }
+        do {
+            try await service.disableICloudBackup()
+            settings = try await service.currentSettings()
+            await refreshAll(silent: true)
+        } catch {
+            showToast(error.localizedDescription, style: .error)
+        }
+    }
+
+    /// Opens the exact System Settings pane for iCloud Drive.
+    func openICloudSystemSettings() {
+        let urls = [
+            "x-apple.systempreferences:com.apple.systempreferences.AppleIDSettings",
+            "x-apple.systempreferences:com.apple.preferences.AppleIDPrefPane",
+        ]
+        for raw in urls {
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) { return }
+        }
+        showToast("请打开 系统设置 → Apple 账户 → iCloud", style: .info)
+    }
+
+    /// CT-131: the first REAL backup. Each phase reflects actual service state;
+    /// "已上传到 iCloud" is only reached when the manifest is published and
+    /// confirmed (outcome.snapshot.cloudState == .synced).
+    func runFirstBackup() async {
+        guard let service else { return }
+        let targets = projects.filter(\.enabled)
+        firstBackup = FirstBackupProgress(
+            phase: .initializing,
+            detail: "正在初始化本地备份仓库…",
+            projectCount: targets.count,
+            completedProjects: 0,
+            fileCount: 0
+        )
+        var files = 0
+        var cloudFailure: String?
+        for (index, project) in targets.enumerated() {
+            firstBackup.phase = .snapshot
+            firstBackup.detail = "正在备份 \(project.name)…"
+            do {
+                let outcome = try await service.createSnapshot(projectID: project.id, trigger: .manual)
+                files += outcome.snapshot.fileCount
+                firstBackup.fileCount = files
+                firstBackup.completedProjects = index + 1
+                if let cloudError = outcome.cloudError {
+                    cloudFailure = cloudError
+                }
+            } catch {
+                // A failed project must not lose the ones that succeeded.
+                cloudFailure = cloudFailure ?? error.localizedDescription
+            }
+        }
+        await refreshAll(silent: true)
+
+        let anySynced = projects.contains { $0.lastCloudState == .synced }
+        if settings.iCloudEnabled {
+            if anySynced && cloudFailure == nil {
+                firstBackup.phase = .verifying
+                firstBackup.detail = "正在确认云端版本…"
+                firstBackup.phase = .done
+                firstBackup.detail = "首次备份已完成，并已上传到 iCloud。"
+            } else {
+                firstBackup.phase = .localDoneCloudFailed
+                firstBackup.detail = "本地备份已完成；iCloud 同步失败：\(cloudFailure ?? "请稍后重试")"
+            }
+        } else {
+            firstBackup.phase = .done
+            firstBackup.detail = "首次本地备份已完成。可在设置中随时启用 iCloud。"
+        }
+    }
+
+    /// Retries the cloud publish for every project that has an unsynced snapshot.
+    func retryCloudSyncNow() async {
+        guard let service else { return }
+        do {
+            try await service.retryPendingCloudPublishes()
+            await refreshAll(silent: true)
+            showToast("已重新安排云端同步", style: .info)
+        } catch {
+            showToast(error.localizedDescription, style: .error)
+        }
+    }
+
     // MARK: - Backup
 
     func backupNow(projectID: UUID, trigger: BackupTrigger = .manual) async {
@@ -604,7 +832,14 @@ final class AppModel: ObservableObject {
                 showToast("备份完成 · \(outcome.snapshot.fileCount) 个文件", style: .success)
             }
         } catch {
-            showToast(error.localizedDescription, style: .error)
+            if let code = error as? CodeTimeError, case .backupAlreadyRunning = code {
+                // A scheduled (or other-process) backup is running: not an error,
+                // and its completion will refresh the UI.
+                showToast("正在备份中，完成后会自动更新", style: .info)
+                await refreshAll(silent: true)
+            } else {
+                showToast(error.localizedDescription, style: .error)
+            }
         }
     }
 

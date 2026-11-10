@@ -47,6 +47,8 @@ struct DashboardView: View {
 
                 HealthBanner()
 
+                BackupSafetyOverview()
+
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
                     MetricCard(
                         title: "保护中的项目",
@@ -195,6 +197,78 @@ struct StorageSummaryCard: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+        }
+    }
+}
+
+/// CT-135: the honest one-glance summary. Local backup, iCloud upload and cloud
+/// verification are separate rows — a green local row never implies cloud safety.
+private struct BackupSafetyOverview: View {
+    @EnvironmentObject var model: AppModel
+
+    private var localLine: (text: String, ok: Bool) {
+        let enabled = model.projects.filter(\.enabled)
+        guard !enabled.isEmpty else { return ("尚未添加项目", false) }
+        if let latest = enabled.compactMap(\.lastBackupAt).max() {
+            return ("正常 · 最近 \(CodeTimeFormat.relative(latest))", true)
+        }
+        return ("等待首次备份", false)
+    }
+
+    private var cloudLine: (text: String, ok: Bool) {
+        guard model.settings.iCloudEnabled else {
+            return ("未启用（本地备份不受影响）", false)
+        }
+        if !model.cloudSetup.isReady {
+            return ("\(model.cloudSetup.title) · \(model.cloudSetup.detail)", false)
+        }
+        let total = model.projects.filter(\.enabled).count
+        let synced = model.projects.filter { $0.enabled && $0.lastCloudState == .synced }.count
+        if total > 0 && synced == total { return ("已上传 · \(synced)/\(total) 个项目", true) }
+        if synced == 0 { return ("等待上传 · 0/\(total) 个项目", false) }
+        return ("部分同步 · \(synced)/\(total) 个项目", false)
+    }
+
+    private var pendingProjects: [Project] {
+        model.projects.filter { $0.enabled && $0.lastCloudState != .synced }
+    }
+
+    var body: some View {
+        CTCard(padding: 16) {
+            HStack(alignment: .top, spacing: 24) {
+                row(symbol: "internaldrive", title: "本地备份", line: localLine)
+                Divider().frame(height: 34)
+                row(symbol: "icloud", title: "iCloud", line: cloudLine)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 6) {
+                    if !pendingProjects.isEmpty && model.cloudSetup.isReady {
+                        Text("\(pendingProjects.count) 个项目待同步")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("立即重试") {
+                            Task { await model.retryCloudSyncNow() }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(symbol: String, title: String, line: (text: String, ok: Bool)) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(line.ok ? CT.success : .secondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill((line.ok ? CT.success : Color.secondary).opacity(0.12)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(line.text)
+                    .font(.callout)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             }
         }
     }

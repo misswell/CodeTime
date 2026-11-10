@@ -1,1282 +1,1372 @@
 [
- {
-  "id": "CT-001",
-  "test": "testCT001_UnreadableManifestAbortsCleanup",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-002",
-  "test": "testCT002_InterruptedGarbageCollectionResumes",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-003",
-  "test": "testCT003_ManifestDeletionWaitsForGrace",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-004",
-  "test": "testCT004_SameSizeDifferentContentFailsVerification",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-005",
-  "test": "testCT005_UnconfirmedUploadProducesNoGeneration",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-006",
-  "test": "testCT006_MetadataFailureIsNotTreatedAsUploaded",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-007",
-  "test": "testCT007_UnreadableCloudFileFailsClosed",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-008",
-  "test": "testCT008_ConcurrentPublisherOfSameObjectKeepsOneVerifiedCopy",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-009",
-  "test": "testCT009_FailedManifestPublishLeavesOldGenerationIntact",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-010",
-  "test": "testCT010_InvalidHashCacheIsRecomputed",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-011",
-  "test": "testCT011_TwoDevicesPublishIndependentGenerations",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-012",
-  "test": "testCT012_NewGenerationDuringCleanupIsPreserved",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
-  "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
-  "required": true,
-  "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-013",
-  "test": "testCT013_InterruptedRestoreResumesVerifiedObjects",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-014",
-  "test": "testCT014_RestoreCopyFailureLeavesRepositoryUntouched",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-015",
-  "test": "testCT015_RestoreFailsOnObjectHashMismatch",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-016",
-  "test": "testCT016_MultiDeviceCandidatesReportKeyMismatch",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-017",
-  "test": "testCT017_MismatchedFirstCandidateDoesNotAbortRecovery",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-018",
-  "test": "testCT018_RestoreReportRequiresRepositoryAndSnapshotChecks",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-019",
-  "test": "testCT019_CloudRestoreJobSurvivesRestart",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-020",
-  "test": "testCT020_DuplicateRestoreIsSafe",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
-  "purpose": "云端恢复回归（CT-013…CT-020）",
-  "required": true,
-  "invariant": "云端恢复回归（CT-013…CT-020）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-021",
-  "test": "testCT021_DeletedProjectIsNotResurrectedByRuntimeUpdate",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-022",
-  "test": "testCT022_PauseIsNotOverwrittenByRuntimeUpdate",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-023",
-  "test": "testCT023_LeaseBlocksSecondExecutor",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-024",
-  "test": "testCT024_SettingsPropagationUsesRevision",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-025",
-  "test": "testCT025_PauseClosesSchedulingGate",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-026",
-  "test": "testCT026_TwoAgentsElectSingleLeader",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-027",
-  "test": "testCT027_CrashLeavesInterruptedJobsRetryable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-028",
-  "test": "testCT028_PIDReuseIsNotTreatedAsAliveOwner",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-029",
-  "test": "testCT029_BetaToReleaseMigrationIsLosslessAndNonDestructive",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-030",
-  "test": "testCT030_ExternalProjectAllowedButRecursiveRootsRejected",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-031",
-  "test": "testCT031_ExternalMirrorBookmarkSurvivesEncoding",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-032",
-  "test": "testCT032_StaleBookmarkFailsExplicitly",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-033",
-  "test": "testCT033_ProjectBookmarkIsSharedWithAgentConnection",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-034",
-  "test": "testCT034_FreshSandboxBootstrap",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第一/二轮可靠性回归",
-  "required": true,
-  "invariant": "第一/二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-035",
-  "test": "testCT035_MissingRepositoryIsNotAutoCreated",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-036",
-  "test": "testCT036_HundredThousandFilesPreview",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "环境相关回归（允许真机跳过）",
-  "required": true,
-  "invariant": "环境相关回归（允许真机跳过）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-037",
-  "test": "testCT037_MillionFilesBoundedByLimit",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "环境相关回归（允许真机跳过）",
-  "required": false,
-  "invariant": "环境相关回归（允许真机跳过）",
-  "manualAcceptance": true,
-  "acceptanceReason": "百万文件规模测试（Stress），由 Scripts/benchmark.sh stress 或夜间任务执行；不在 CI 常规门禁内"
- },
- {
-  "id": "CT-038",
-  "test": "testCT038_LargeFileHashStreamsInChunks",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-039",
-  "test": "testCT039_SearchTruncationIsExplicit",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-040",
-  "test": "testCT040_LargeFilePreviewDegradesExplicitly",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-041",
-  "test": "testCT041_RetryBackoffAndClassification",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-042",
-  "test": "testCT042_LogRotationIsBounded",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-043",
-  "test": "testCT043_CacheAndActivityTablesArePruned",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "第二轮可靠性回归",
-  "required": true,
-  "invariant": "第二轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-044",
-  "test": "testCT044_DiskFullLeavesRepositoryUntouched",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
-  "purpose": "环境相关回归（允许真机跳过）",
-  "required": false,
-  "invariant": "环境相关回归（允许真机跳过）",
-  "manualAcceptance": true,
-  "acceptanceReason": "需要可控小容量卷注入 ENOSPC，由真机验收清单覆盖"
- },
- {
-  "id": "CT-045",
-  "test": "testCT045_InitializedReleaseCanRequestMigration",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-046",
-  "test": "testCT046_EmptyTargetDirectoriesDoNotBlockMigration",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-047",
-  "test": "testCT047_HiddenRepositoryFilesAreMigrated",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-048",
-  "test": "testCT048_InterruptedMigrationLeavesTargetRetryable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-049",
-  "test": "testCT049_PartialRestoreFileIsReplaced",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-050",
-  "test": "testCT050_CommittingRestoreIsResumable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-051",
-  "test": "testCT051_SelectedDeviceIsBoundToRecovery",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-052",
-  "test": "testCT052_MissingObjectMakesCandidateNonRestorable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-053",
-  "test": "testCT053_FailedVerificationDoesNotRemainVerified",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-054",
-  "test": "testCT054_AbortedTombstoneDoesNotDeleteObjects",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-055",
-  "test": "testCT055_TwoConnectionsCompeteForOneLease",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-056",
-  "test": "testCT056_LocalRepositoryIsRediscoveredWithoutDatabase",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-057",
-  "test": "testCT057_ICloudMirrorPathIsRejected",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-058",
-  "test": "testCT058_AcceptanceGateAcceptsCompletePassReport",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-059",
-  "test": "testCT059_SelectPrefersRegisteredRepositoryAmongDiscovered",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-060",
-  "test": "testCT060_MigrationBlocksWhileBetaAgentLockIsHeld",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-061",
-  "test": "testCT061_PendingMigrationRequestLifecycle",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-062",
-  "test": "testCT062_KeychainRepairFromCloudRestoresAccess",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-063",
-  "test": "testCT063_LeaseClaimAndOwnerChecksAreAtomic",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-064",
-  "test": "testCT064_VerifyCloudClearsStaleVerifiedOnUnreadableNewest",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-065",
-  "test": "testCT065_ProjectStatusFollowsNewestSnapshot",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-066",
-  "test": "testCT066_GCPublishDoNotHoldRepositoryLock",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-067",
-  "test": "testCT067_InterruptedMigrationStagingIsReclaimed",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-068",
-  "test": "testCT068_ManualDispatchPublishesRelease",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-069",
-  "test": "testCT069_GateRejectsMissingTestsAndUnexpectedSkips",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
-  "purpose": "第三轮可靠性回归",
-  "required": true,
-  "invariant": "第三轮可靠性回归",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-070",
-  "test": "testCT070_ManifestAggregateFieldTamperingIsDetected",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "Manifest 完整性：篡改字段必须被真实校验函数拒绝",
-  "required": true,
-  "invariant": "Manifest 完整性：篡改字段必须被真实校验函数拒绝",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-071",
-  "test": "testCT071_GCSkippedWhenOtherDevicesExist",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "GC：多设备/中断/不可读清单不得误删",
-  "required": true,
-  "invariant": "GC：多设备/中断/不可读清单不得误删",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-072",
-  "test": "testCT072_LifecycleLocksAreOutsideReplaceableRoot",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "LifecycleLock 跨进程共享/独占语义",
-  "required": true,
-  "invariant": "LifecycleLock 跨进程共享/独占语义",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-073",
-  "test": "testCT073_OldUploadCompletionDoesNotOverrideNewSnapshotStatus",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "项目状态按最新快照推导",
-  "required": true,
-  "invariant": "项目状态按最新快照推导",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-074",
-  "test": "testCT074_RestoreJobWrongRepositoryIDThrows",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "恢复身份四重绑定校验",
-  "required": true,
-  "invariant": "恢复身份四重绑定校验",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-075",
-  "test": "testCT075_SimulatedCrashDuringMigrationIsRecoverable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "迁移崩溃恢复（journal/staging）",
-  "required": true,
-  "invariant": "迁移崩溃恢复（journal/staging）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-076",
-  "test": "testCT076_WorkflowUsesTargetCommitForRelease",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "发布 Tag/Commit 一致性",
-  "required": true,
-  "invariant": "发布 Tag/Commit 一致性",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-077",
-  "test": "testCT077_CandidateArtifactSHA256Verification",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Candidate Artifact SHA-256 强制校验",
-  "required": true,
-  "invariant": "Candidate Artifact SHA-256 强制校验",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-078",
-  "test": "testCT078_AcceptanceGateRejectsSubstringTag",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "验收报告精确匹配",
-  "required": true,
-  "invariant": "验收报告精确匹配",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-079",
-  "test": "testCT079_ManualReleaseTagMustExistAndPointAtBuildCommit",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "手动发布 Tag 必须存在且指向构建 commit",
-  "required": true,
-  "invariant": "手动发布 Tag 必须存在且指向构建 commit",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-080",
-  "test": "testCT080_ClaimBackupJobRejectsNonBackupType",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
-  "purpose": "任务租约类型约束",
-  "required": true,
-  "invariant": "任务租约类型约束",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-081",
-  "test": "testCT081_UnreadableStatesClassifiedByProductionListing",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "云端状态分类（生产 listGenerationEntries）",
-  "required": true,
-  "invariant": "云端状态分类（生产 listGenerationEntries）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-082",
-  "test": "testCT082_CandidatePackagingDoesNotRequireAcceptanceReport",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Candidate 构建不依赖验收报告",
-  "required": true,
-  "invariant": "Candidate 构建不依赖验收报告",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-083",
-  "test": "testCT083_AcceptanceReportMustBindImmutableArtifact",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "验收报告绑定不可变 Artifact",
-  "required": true,
-  "invariant": "验收报告绑定不可变 Artifact",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-084",
-  "test": "testCT084_SharedLocksCoexistExclusiveBlocksAndDeathReleases",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "UI 生命周期完整持有 shared lock（跨进程语义）",
-  "required": true,
-  "invariant": "UI 生命周期完整持有 shared lock（跨进程语义）",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-085",
-  "test": "testCT085_MigrationWaitsForAgentExitAndRefusesStuckAgent",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Agent 收到迁移请求能够安全停止",
-  "required": true,
-  "invariant": "Agent 收到迁移请求能够安全停止",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-086",
-  "test": "testCT086_SafePathRejectsTraversalSymlinkAndPrefixSiblings",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Restore 路径穿越和符号链接防护",
-  "required": true,
-  "invariant": "Restore 路径穿越和符号链接防护",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-087",
-  "test": "testCT087_CloudRestoreLeaseIsCrossProcessExclusive",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Restore Job 跨进程独占租约",
-  "required": true,
-  "invariant": "Restore Job 跨进程独占租约",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-088",
-  "test": "testCT088_GCFailsClosedWhenDeviceDirectoryUnreadable",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "GC 目录读取失败时 Fail Closed",
-  "required": true,
-  "invariant": "GC 目录读取失败时 Fail Closed",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-089",
-  "test": "testCT089_DeviceRegistryRecordedAndMultiDeviceGCStaysBlocked",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "多设备离线禁止不安全删除 + 设备注册",
-  "required": true,
-  "invariant": "多设备离线禁止不安全删除 + 设备注册",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-090",
-  "test": "testCT090_MigrationIsIdempotentAndResidualRequestNeverReplacesAgain",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Migration 重复执行和请求残留保护",
-  "required": true,
-  "invariant": "Migration 重复执行和请求残留保护",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-091",
-  "test": "testCT091_StatusRecomputeFollowsNewestSnapshotNotLateUpload",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "项目状态按最新 Snapshot 原子重算",
-  "required": true,
-  "invariant": "项目状态按最新 Snapshot 原子重算",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-092",
-  "test": "testCT092_RegressionGateCoversAllRequiredTests",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Regression Gate 覆盖全部必需 CT",
-  "required": true,
-  "invariant": "Regression Gate 覆盖全部必需 CT",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-093",
-  "test": "testCT093_CoordinatorsDriveRealServiceAPIs",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Coordinator 实际驱动真实服务 API",
-  "required": true,
-  "invariant": "Coordinator 实际驱动真实服务 API",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-094",
-  "test": "testCT094_BenchmarkRunsInIsolatedChildWithRealMetrics",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "CPU/内存/并发指标来自独立子进程真实采样",
-  "required": true,
-  "invariant": "CPU/内存/并发指标来自独立子进程真实采样",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-095",
-  "test": "testCT095_MediumScaleBenchmarkCompletes",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "大规模文件性能与稳定性",
-  "required": true,
-  "invariant": "大规模文件性能与稳定性",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-096",
-  "test": "testCT096_RepositoryUsageFailsClosedAndCountsHiddenFiles",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "repositoryUsage 扫描错误 fail-closed + 隐藏文件计数",
-  "required": true,
-  "invariant": "repositoryUsage 扫描错误 fail-closed + 隐藏文件计数",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-097",
-  "test": "testCT097_UploadJobLeaseRequiresHeartbeatAndStaleOwnerCannotFinish",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Upload Job Lease Heartbeat 与旧 owner 防护",
-  "required": true,
-  "invariant": "Upload Job Lease Heartbeat 与旧 owner 防护",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-098",
-  "test": "testCT098_MigrationSurvivesRealSIGKILLAtEveryPhase",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
-  "purpose": "Migration 真实子进程 SIGKILL 崩溃恢复",
-  "required": true,
-  "invariant": "Migration 真实子进程 SIGKILL 崩溃恢复",
-  "manualAcceptance": false,
-  "acceptanceReason": ""
- },
- {
-  "id": "CT-099",
-  "test": "testCT099_AcceptanceGateIsInsulatedFromCIEnvironment",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "CT-083 测试继承 GITHUB_SHA 导致 CI 失败",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "门禁脚本执行器必须隔离 CI 注入环境"
- },
- {
-  "id": "CT-100",
-  "test": "testCT100_PublishStableChecksOutReleaseNotes",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Stable Publish 缺少 Checkout，Release Notes 无法读取",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "publish-stable 必须先 checkout 再读 notes"
- },
- {
-  "id": "CT-101",
-  "test": "testCT101_CancellingWorkTerminatesAndReapsChild",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Agent 退出时没有等待 Kopia 子进程结束",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "取消必须终止并回收子进程；drain 等到全部退出"
- },
- {
-  "id": "CT-102",
-  "test": "testCT102_CommitPositionCoversEveryCrashPoint",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Cloud Restore move 后崩溃无法恢复提交",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "Journal 优先的提交位置判定覆盖全部崩溃位"
- },
- {
-  "id": "CT-103",
-  "test": "testCT103_FailedIsRetryableAndPermanentlyFailedIsNot",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Cloud Restore failed 状态与 Lease 语义矛盾",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "failed 可重试、permanentlyFailed 终态、全出口释放租约"
- },
- {
-  "id": "CT-104",
-  "test": "testCT104_RepositoryLockIsExclusiveAcrossHandles",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Cloud Restore 缺少 Repository 级互斥",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "同一仓库的第二个恢复持有者必须被拒绝"
- },
- {
-  "id": "CT-105",
-  "test": "testCT105_CoordinatedStoreNeverDeletesWithoutExplicitConsent",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "iCloud Device Registry 不能证明设备列表完整",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "iCloud 默认只生成清理预览；退役需显式记录"
- },
- {
-  "id": "CT-106",
-  "test": "testCT106_TamperedMigrationJournalNeverDeletesArbitraryPaths",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Migration Journal stagingPath 缺少删除前安全校验",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "被篡改路径绝不删除，派生路径才可清理"
- },
- {
-  "id": "CT-107",
-  "test": "testCT107_SymlinkStagingIsRejectedBeforeAnyWrite",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Restore staging 允许仓库内部符号链接",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "下载前拒绝符号链接 staging"
- },
- {
-  "id": "CT-108",
-  "test": "testCT108_JanitorSkipsSymlinkedRepositoryDirectory",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Restore Janitor 未验证 Repository 根目录符号链接",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "janitor 不得跟随仓库目录符号链接"
- },
- {
-  "id": "CT-109",
-  "test": "testCT109_NewMigrationRequestFromSameSourceRunsAgain",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Migration 完成记录只比较 sourceRoot",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "新 RequestID 重新迁移；完成记录绑定 target"
- },
- {
-  "id": "CT-110",
-  "test": "testCT110_StoreLevelRecomputeIsAtomicAndFollowsNewestSnapshot",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "项目状态重算不是原子事务",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "单事务重算，最新快照决定状态"
- },
- {
-  "id": "CT-111",
-  "test": "testCT111_LocalRestoreTargetLockRejectsConcurrentWriter",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "本地 Restore 缺少任务租约和目标路径互斥",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "目标路径锁跨进程互斥"
- },
- {
-  "id": "CT-112",
-  "test": "testCT112_LiveRestoreJobIsNotReclaimedByAnotherBootstrap",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Bootstrap 可能误判其他进程的运行中 Restore",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "仅 owner 已死才回收"
- },
- {
-  "id": "CT-113",
-  "test": "testCT113_RestoreCoordinatorDecidesResumePlanFromState",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Coordinator 仍然只是 Service 转发层",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "Coordinator 承担恢复计划/批次策略；显式状态机"
- },
- {
-  "id": "CT-114",
-  "test": "testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "Regression Gate 允许关键测试跳过",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "required 不可跳过；门禁构建 CrashChild"
- },
- {
-  "id": "CT-115",
-  "test": "testCT115_BenchmarkVerifiesContentAndHasBaseline",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "性能基准缺少实际内容校验和回归阈值",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "内容 SHA/结构校验 + 基准阈值"
- },
- {
-  "id": "CT-116",
-  "test": "testCT116_TestReportBindsCommitRunAndGateResult",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
-  "purpose": "TEST_REPORT 未同步最新 CI 结果",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "报告绑定 Commit/CI Run/门禁结果"
- },
- {
-  "id": "CT-117",
-  "test": "testCT117_OversizedFileProtectionCopySurvivesItsOwnPrune",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "P1：超预算保护副本被自身 prune 删除",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "单个副本超过预算时必须保留并上报超额；createCopy 返回前副本必须真实存在且通过完整校验"
- },
- {
-  "id": "CT-118",
-  "test": "testCT118_OversizedDirectoryProtectionKeptWithOverBudgetStatus",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "超额目录保护与状态上报",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "超预算目录副本保留、status.overBudget 为真、符号链接计入树摘要"
- },
- {
-  "id": "CT-119",
-  "test": "testCT119_SourceMutatedDuringCopyAbortsInsteadOfFakeProtection",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "复制期间源变化不得伪装保护成功",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "副本与源不一致立即失败；源持续变化重试一次后中止覆盖恢复；失败不留有效清单"
- },
- {
-  "id": "CT-120",
-  "test": "testCT120_TamperedProtectionCopyFailsVerificationAndListing",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "保护副本损坏检测",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "篡改副本校验失败并在磁盘标记 invalid；listManifests 不再列出；auditProject 发现损坏"
- },
- {
-  "id": "CT-121",
-  "test": "testCT121_PruneNeverDeletesNewestOrActiveCopies",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "清理策略必须保护最新与活动副本",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "最新有效副本始终保留；活动副本超预算也不得清理"
- },
- {
-  "id": "CT-122",
-  "test": "testCT122_ActiveRestoreCopyProtectedFromPrune",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "清理与恢复并发",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "被活动恢复任务引用的副本在解除引用前不得删除"
- },
- {
-  "id": "CT-123",
-  "test": "testCT123_DuplicateObjectsVerifiedOncePerUniqueHash",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "云端重复对象重复哈希",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "verifyGeneration 每个唯一对象只哈希一次并统计文件/唯一对象/字节；restore 复用对象校验结果"
- },
- {
-  "id": "CT-124",
-  "test": "testCT124_ClonedDatabaseOnNewMacMintsNewDeviceIdentity",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "macOS 迁移助理复制设备数据库",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "硬件锚点不一致时换发新设备身份；同机多进程共享身份；旧记录无锚点时采用"
- },
- {
-  "id": "CT-125",
-  "test": "testCT125_TwoMacsPublishingConcurrentlyKeepIndependentGenerations",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "双 Mac 并发发布（双设备模拟）",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "两个设备身份并发发布互不破坏，各自提交可独立校验"
- },
- {
-  "id": "CT-126",
-  "test": "testCT126_GCOnOneMacNeverDeletesOtherMacsCommittedObjects",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "双 Mac GC 与发布竞争（双设备模拟）",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "一台设备执行 GC 不得删除另一台设备已提交引用的对象"
- },
- {
-  "id": "CT-127",
-  "test": "testCT127_TestReportBindingMismatchFailsConsistencyCheck",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "测试报告绑定错误 Commit",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "check_test_report.py 拒绝非 HEAD 祖先的 commit 绑定并使发布门禁失败"
- },
- {
-  "id": "CT-128",
-  "test": "testCT128_SkippedTestsCountedAsPassedFailTheCheck",
-  "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
-  "purpose": "跳过项计入通过的报告",
-  "required": true,
-  "manualAcceptance": false,
-  "acceptanceReason": "",
-  "invariant": "passed != executed-failures-skipped 或三份文档统计不一致时门禁失败"
- }
+  {
+    "id": "CT-001",
+    "test": "testCT001_UnreadableManifestAbortsCleanup",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-002",
+    "test": "testCT002_InterruptedGarbageCollectionResumes",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-003",
+    "test": "testCT003_ManifestDeletionWaitsForGrace",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-004",
+    "test": "testCT004_SameSizeDifferentContentFailsVerification",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-005",
+    "test": "testCT005_UnconfirmedUploadProducesNoGeneration",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-006",
+    "test": "testCT006_MetadataFailureIsNotTreatedAsUploaded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-007",
+    "test": "testCT007_UnreadableCloudFileFailsClosed",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-008",
+    "test": "testCT008_ConcurrentPublisherOfSameObjectKeepsOneVerifiedCopy",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-009",
+    "test": "testCT009_FailedManifestPublishLeavesOldGenerationIntact",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-010",
+    "test": "testCT010_InvalidHashCacheIsRecomputed",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-011",
+    "test": "testCT011_TwoDevicesPublishIndependentGenerations",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-012",
+    "test": "testCT012_NewGenerationDuringCleanupIsPreserved",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudMirrorRegressionTests.swift",
+    "purpose": "云端镜像可靠性回归（CT-001…CT-012）",
+    "required": true,
+    "invariant": "云端镜像可靠性回归（CT-001…CT-012）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-013",
+    "test": "testCT013_InterruptedRestoreResumesVerifiedObjects",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-014",
+    "test": "testCT014_RestoreCopyFailureLeavesRepositoryUntouched",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-015",
+    "test": "testCT015_RestoreFailsOnObjectHashMismatch",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-016",
+    "test": "testCT016_MultiDeviceCandidatesReportKeyMismatch",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-017",
+    "test": "testCT017_MismatchedFirstCandidateDoesNotAbortRecovery",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-018",
+    "test": "testCT018_RestoreReportRequiresRepositoryAndSnapshotChecks",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-019",
+    "test": "testCT019_CloudRestoreJobSurvivesRestart",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-020",
+    "test": "testCT020_DuplicateRestoreIsSafe",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RecoveryRegressionTests.swift",
+    "purpose": "云端恢复回归（CT-013…CT-020）",
+    "required": true,
+    "invariant": "云端恢复回归（CT-013…CT-020）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-021",
+    "test": "testCT021_DeletedProjectIsNotResurrectedByRuntimeUpdate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-022",
+    "test": "testCT022_PauseIsNotOverwrittenByRuntimeUpdate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-023",
+    "test": "testCT023_LeaseBlocksSecondExecutor",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-024",
+    "test": "testCT024_SettingsPropagationUsesRevision",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-025",
+    "test": "testCT025_PauseClosesSchedulingGate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-026",
+    "test": "testCT026_TwoAgentsElectSingleLeader",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-027",
+    "test": "testCT027_CrashLeavesInterruptedJobsRetryable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-028",
+    "test": "testCT028_PIDReuseIsNotTreatedAsAliveOwner",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-029",
+    "test": "testCT029_BetaToReleaseMigrationIsLosslessAndNonDestructive",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-030",
+    "test": "testCT030_ExternalProjectAllowedButRecursiveRootsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-031",
+    "test": "testCT031_ExternalMirrorBookmarkSurvivesEncoding",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-032",
+    "test": "testCT032_StaleBookmarkFailsExplicitly",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-033",
+    "test": "testCT033_ProjectBookmarkIsSharedWithAgentConnection",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-034",
+    "test": "testCT034_FreshSandboxBootstrap",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第一/二轮可靠性回归",
+    "required": true,
+    "invariant": "第一/二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-035",
+    "test": "testCT035_MissingRepositoryIsNotAutoCreated",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-036",
+    "test": "testCT036_HundredThousandFilesPreview",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "环境相关回归（允许真机跳过）",
+    "required": true,
+    "invariant": "环境相关回归（允许真机跳过）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-037",
+    "test": "testCT037_MillionFilesBoundedByLimit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "环境相关回归（允许真机跳过）",
+    "required": false,
+    "invariant": "环境相关回归（允许真机跳过）",
+    "manualAcceptance": true,
+    "acceptanceReason": "百万文件规模测试（Stress），由 Scripts/benchmark.sh stress 或夜间任务执行；不在 CI 常规门禁内"
+  },
+  {
+    "id": "CT-038",
+    "test": "testCT038_LargeFileHashStreamsInChunks",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-039",
+    "test": "testCT039_SearchTruncationIsExplicit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-040",
+    "test": "testCT040_LargeFilePreviewDegradesExplicitly",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-041",
+    "test": "testCT041_RetryBackoffAndClassification",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ConcurrencyPersistenceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-042",
+    "test": "testCT042_LogRotationIsBounded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-043",
+    "test": "testCT043_CacheAndActivityTablesArePruned",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "第二轮可靠性回归",
+    "required": true,
+    "invariant": "第二轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-044",
+    "test": "testCT044_DiskFullLeavesRepositoryUntouched",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift",
+    "purpose": "环境相关回归（允许真机跳过）",
+    "required": false,
+    "invariant": "环境相关回归（允许真机跳过）",
+    "manualAcceptance": true,
+    "acceptanceReason": "需要可控小容量卷注入 ENOSPC，由真机验收清单覆盖"
+  },
+  {
+    "id": "CT-045",
+    "test": "testCT045_InitializedReleaseCanRequestMigration",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-046",
+    "test": "testCT046_EmptyTargetDirectoriesDoNotBlockMigration",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-047",
+    "test": "testCT047_HiddenRepositoryFilesAreMigrated",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-048",
+    "test": "testCT048_InterruptedMigrationLeavesTargetRetryable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-049",
+    "test": "testCT049_PartialRestoreFileIsReplaced",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-050",
+    "test": "testCT050_CommittingRestoreIsResumable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-051",
+    "test": "testCT051_SelectedDeviceIsBoundToRecovery",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-052",
+    "test": "testCT052_MissingObjectMakesCandidateNonRestorable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-053",
+    "test": "testCT053_FailedVerificationDoesNotRemainVerified",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-054",
+    "test": "testCT054_AbortedTombstoneDoesNotDeleteObjects",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-055",
+    "test": "testCT055_TwoConnectionsCompeteForOneLease",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-056",
+    "test": "testCT056_LocalRepositoryIsRediscoveredWithoutDatabase",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-057",
+    "test": "testCT057_ICloudMirrorPathIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SecondRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-058",
+    "test": "testCT058_AcceptanceGateAcceptsCompletePassReport",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-059",
+    "test": "testCT059_SelectPrefersRegisteredRepositoryAmongDiscovered",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-060",
+    "test": "testCT060_MigrationBlocksWhileBetaAgentLockIsHeld",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-061",
+    "test": "testCT061_PendingMigrationRequestLifecycle",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-062",
+    "test": "testCT062_KeychainRepairFromCloudRestoresAccess",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-063",
+    "test": "testCT063_LeaseClaimAndOwnerChecksAreAtomic",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-064",
+    "test": "testCT064_VerifyCloudClearsStaleVerifiedOnUnreadableNewest",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-065",
+    "test": "testCT065_ProjectStatusFollowsNewestSnapshot",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-066",
+    "test": "testCT066_GCPublishDoNotHoldRepositoryLock",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-067",
+    "test": "testCT067_InterruptedMigrationStagingIsReclaimed",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-068",
+    "test": "testCT068_ManualDispatchPublishesRelease",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-069",
+    "test": "testCT069_GateRejectsMissingTestsAndUnexpectedSkips",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ThirdRoundRegressionTests.swift",
+    "purpose": "第三轮可靠性回归",
+    "required": true,
+    "invariant": "第三轮可靠性回归",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-070",
+    "test": "testCT070_ManifestAggregateFieldTamperingIsDetected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "Manifest 完整性：篡改字段必须被真实校验函数拒绝",
+    "required": true,
+    "invariant": "Manifest 完整性：篡改字段必须被真实校验函数拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-071",
+    "test": "testCT071_GCSkippedWhenOtherDevicesExist",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "GC：多设备/中断/不可读清单不得误删",
+    "required": true,
+    "invariant": "GC：多设备/中断/不可读清单不得误删",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-072",
+    "test": "testCT072_LifecycleLocksAreOutsideReplaceableRoot",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "LifecycleLock 跨进程共享/独占语义",
+    "required": true,
+    "invariant": "LifecycleLock 跨进程共享/独占语义",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-073",
+    "test": "testCT073_OldUploadCompletionDoesNotOverrideNewSnapshotStatus",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "项目状态按最新快照推导",
+    "required": true,
+    "invariant": "项目状态按最新快照推导",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-074",
+    "test": "testCT074_RestoreJobWrongRepositoryIDThrows",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "恢复身份四重绑定校验",
+    "required": true,
+    "invariant": "恢复身份四重绑定校验",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-075",
+    "test": "testCT075_SimulatedCrashDuringMigrationIsRecoverable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "迁移崩溃恢复（journal/staging）",
+    "required": true,
+    "invariant": "迁移崩溃恢复（journal/staging）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-076",
+    "test": "testCT076_WorkflowUsesTargetCommitForRelease",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "发布 Tag/Commit 一致性",
+    "required": true,
+    "invariant": "发布 Tag/Commit 一致性",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-077",
+    "test": "testCT077_CandidateArtifactSHA256Verification",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Candidate Artifact SHA-256 强制校验",
+    "required": true,
+    "invariant": "Candidate Artifact SHA-256 强制校验",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-078",
+    "test": "testCT078_AcceptanceGateRejectsSubstringTag",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "验收报告精确匹配",
+    "required": true,
+    "invariant": "验收报告精确匹配",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-079",
+    "test": "testCT079_ManualReleaseTagMustExistAndPointAtBuildCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "手动发布 Tag 必须存在且指向构建 commit",
+    "required": true,
+    "invariant": "手动发布 Tag 必须存在且指向构建 commit",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-080",
+    "test": "testCT080_ClaimBackupJobRejectsNonBackupType",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FourthRoundRegressionTests.swift",
+    "purpose": "任务租约类型约束",
+    "required": true,
+    "invariant": "任务租约类型约束",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-081",
+    "test": "testCT081_UnreadableStatesClassifiedByProductionListing",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "云端状态分类（生产 listGenerationEntries）",
+    "required": true,
+    "invariant": "云端状态分类（生产 listGenerationEntries）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-082",
+    "test": "testCT082_CandidatePackagingDoesNotRequireAcceptanceReport",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Candidate 构建不依赖验收报告",
+    "required": true,
+    "invariant": "Candidate 构建不依赖验收报告",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-083",
+    "test": "testCT083_AcceptanceReportMustBindImmutableArtifact",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "验收报告绑定不可变 Artifact",
+    "required": true,
+    "invariant": "验收报告绑定不可变 Artifact",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-084",
+    "test": "testCT084_SharedLocksCoexistExclusiveBlocksAndDeathReleases",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "UI 生命周期完整持有 shared lock（跨进程语义）",
+    "required": true,
+    "invariant": "UI 生命周期完整持有 shared lock（跨进程语义）",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-085",
+    "test": "testCT085_MigrationWaitsForAgentExitAndRefusesStuckAgent",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Agent 收到迁移请求能够安全停止",
+    "required": true,
+    "invariant": "Agent 收到迁移请求能够安全停止",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-086",
+    "test": "testCT086_SafePathRejectsTraversalSymlinkAndPrefixSiblings",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Restore 路径穿越和符号链接防护",
+    "required": true,
+    "invariant": "Restore 路径穿越和符号链接防护",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-087",
+    "test": "testCT087_CloudRestoreLeaseIsCrossProcessExclusive",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Restore Job 跨进程独占租约",
+    "required": true,
+    "invariant": "Restore Job 跨进程独占租约",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-088",
+    "test": "testCT088_GCFailsClosedWhenDeviceDirectoryUnreadable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "GC 目录读取失败时 Fail Closed",
+    "required": true,
+    "invariant": "GC 目录读取失败时 Fail Closed",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-089",
+    "test": "testCT089_DeviceRegistryRecordedAndMultiDeviceGCStaysBlocked",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "多设备离线禁止不安全删除 + 设备注册",
+    "required": true,
+    "invariant": "多设备离线禁止不安全删除 + 设备注册",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-090",
+    "test": "testCT090_MigrationIsIdempotentAndResidualRequestNeverReplacesAgain",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Migration 重复执行和请求残留保护",
+    "required": true,
+    "invariant": "Migration 重复执行和请求残留保护",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-091",
+    "test": "testCT091_StatusRecomputeFollowsNewestSnapshotNotLateUpload",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "项目状态按最新 Snapshot 原子重算",
+    "required": true,
+    "invariant": "项目状态按最新 Snapshot 原子重算",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-092",
+    "test": "testCT092_RegressionGateCoversAllRequiredTests",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Regression Gate 覆盖全部必需 CT",
+    "required": true,
+    "invariant": "Regression Gate 覆盖全部必需 CT",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-093",
+    "test": "testCT093_CoordinatorsDriveRealServiceAPIs",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Coordinator 实际驱动真实服务 API",
+    "required": true,
+    "invariant": "Coordinator 实际驱动真实服务 API",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-094",
+    "test": "testCT094_BenchmarkRunsInIsolatedChildWithRealMetrics",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "CPU/内存/并发指标来自独立子进程真实采样",
+    "required": true,
+    "invariant": "CPU/内存/并发指标来自独立子进程真实采样",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-095",
+    "test": "testCT095_MediumScaleBenchmarkCompletes",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "大规模文件性能与稳定性",
+    "required": true,
+    "invariant": "大规模文件性能与稳定性",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-096",
+    "test": "testCT096_RepositoryUsageFailsClosedAndCountsHiddenFiles",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "repositoryUsage 扫描错误 fail-closed + 隐藏文件计数",
+    "required": true,
+    "invariant": "repositoryUsage 扫描错误 fail-closed + 隐藏文件计数",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-097",
+    "test": "testCT097_UploadJobLeaseRequiresHeartbeatAndStaleOwnerCannotFinish",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Upload Job Lease Heartbeat 与旧 owner 防护",
+    "required": true,
+    "invariant": "Upload Job Lease Heartbeat 与旧 owner 防护",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-098",
+    "test": "testCT098_MigrationSurvivesRealSIGKILLAtEveryPhase",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/FifthRoundRegressionTests.swift",
+    "purpose": "Migration 真实子进程 SIGKILL 崩溃恢复",
+    "required": true,
+    "invariant": "Migration 真实子进程 SIGKILL 崩溃恢复",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-099",
+    "test": "testCT099_AcceptanceGateIsInsulatedFromCIEnvironment",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "CT-083 测试继承 GITHUB_SHA 导致 CI 失败",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "门禁脚本执行器必须隔离 CI 注入环境"
+  },
+  {
+    "id": "CT-100",
+    "test": "testCT100_PublishStableChecksOutReleaseNotes",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Stable Publish 缺少 Checkout，Release Notes 无法读取",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "publish-stable 必须先 checkout 再读 notes"
+  },
+  {
+    "id": "CT-101",
+    "test": "testCT101_CancellingWorkTerminatesAndReapsChild",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Agent 退出时没有等待 Kopia 子进程结束",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "取消必须终止并回收子进程；drain 等到全部退出"
+  },
+  {
+    "id": "CT-102",
+    "test": "testCT102_CommitPositionCoversEveryCrashPoint",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Cloud Restore move 后崩溃无法恢复提交",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "Journal 优先的提交位置判定覆盖全部崩溃位"
+  },
+  {
+    "id": "CT-103",
+    "test": "testCT103_FailedIsRetryableAndPermanentlyFailedIsNot",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Cloud Restore failed 状态与 Lease 语义矛盾",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "failed 可重试、permanentlyFailed 终态、全出口释放租约"
+  },
+  {
+    "id": "CT-104",
+    "test": "testCT104_RepositoryLockIsExclusiveAcrossHandles",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Cloud Restore 缺少 Repository 级互斥",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "同一仓库的第二个恢复持有者必须被拒绝"
+  },
+  {
+    "id": "CT-105",
+    "test": "testCT105_CoordinatedStoreNeverDeletesWithoutExplicitConsent",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "iCloud Device Registry 不能证明设备列表完整",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "iCloud 默认只生成清理预览；退役需显式记录"
+  },
+  {
+    "id": "CT-106",
+    "test": "testCT106_TamperedMigrationJournalNeverDeletesArbitraryPaths",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Migration Journal stagingPath 缺少删除前安全校验",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "被篡改路径绝不删除，派生路径才可清理"
+  },
+  {
+    "id": "CT-107",
+    "test": "testCT107_SymlinkStagingIsRejectedBeforeAnyWrite",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Restore staging 允许仓库内部符号链接",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "下载前拒绝符号链接 staging"
+  },
+  {
+    "id": "CT-108",
+    "test": "testCT108_JanitorSkipsSymlinkedRepositoryDirectory",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Restore Janitor 未验证 Repository 根目录符号链接",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "janitor 不得跟随仓库目录符号链接"
+  },
+  {
+    "id": "CT-109",
+    "test": "testCT109_NewMigrationRequestFromSameSourceRunsAgain",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Migration 完成记录只比较 sourceRoot",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "新 RequestID 重新迁移；完成记录绑定 target"
+  },
+  {
+    "id": "CT-110",
+    "test": "testCT110_StoreLevelRecomputeIsAtomicAndFollowsNewestSnapshot",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "项目状态重算不是原子事务",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "单事务重算，最新快照决定状态"
+  },
+  {
+    "id": "CT-111",
+    "test": "testCT111_LocalRestoreTargetLockRejectsConcurrentWriter",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "本地 Restore 缺少任务租约和目标路径互斥",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "目标路径锁跨进程互斥"
+  },
+  {
+    "id": "CT-112",
+    "test": "testCT112_LiveRestoreJobIsNotReclaimedByAnotherBootstrap",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Bootstrap 可能误判其他进程的运行中 Restore",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "仅 owner 已死才回收"
+  },
+  {
+    "id": "CT-113",
+    "test": "testCT113_RestoreCoordinatorDecidesResumePlanFromState",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Coordinator 仍然只是 Service 转发层",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "Coordinator 承担恢复计划/批次策略；显式状态机"
+  },
+  {
+    "id": "CT-114",
+    "test": "testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "Regression Gate 允许关键测试跳过",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "required 不可跳过；门禁构建 CrashChild"
+  },
+  {
+    "id": "CT-115",
+    "test": "testCT115_BenchmarkVerifiesContentAndHasBaseline",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "性能基准缺少实际内容校验和回归阈值",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "内容 SHA/结构校验 + 基准阈值"
+  },
+  {
+    "id": "CT-116",
+    "test": "testCT116_TestReportBindsCommitRunAndGateResult",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SixthRoundRegressionTests.swift",
+    "purpose": "TEST_REPORT 未同步最新 CI 结果",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "报告绑定 Commit/CI Run/门禁结果"
+  },
+  {
+    "id": "CT-117",
+    "test": "testCT117_OversizedFileProtectionCopySurvivesItsOwnPrune",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "P1：超预算保护副本被自身 prune 删除",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "单个副本超过预算时必须保留并上报超额；createCopy 返回前副本必须真实存在且通过完整校验"
+  },
+  {
+    "id": "CT-118",
+    "test": "testCT118_OversizedDirectoryProtectionKeptWithOverBudgetStatus",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "超额目录保护与状态上报",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "超预算目录副本保留、status.overBudget 为真、符号链接计入树摘要"
+  },
+  {
+    "id": "CT-119",
+    "test": "testCT119_SourceMutatedDuringCopyAbortsInsteadOfFakeProtection",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "复制期间源变化不得伪装保护成功",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "副本与源不一致立即失败；源持续变化重试一次后中止覆盖恢复；失败不留有效清单"
+  },
+  {
+    "id": "CT-120",
+    "test": "testCT120_TamperedProtectionCopyFailsVerificationAndListing",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "保护副本损坏检测",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "篡改副本校验失败并在磁盘标记 invalid；listManifests 不再列出；auditProject 发现损坏"
+  },
+  {
+    "id": "CT-121",
+    "test": "testCT121_PruneNeverDeletesNewestOrActiveCopies",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "清理策略必须保护最新与活动副本",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "最新有效副本始终保留；活动副本超预算也不得清理"
+  },
+  {
+    "id": "CT-122",
+    "test": "testCT122_ActiveRestoreCopyProtectedFromPrune",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "清理与恢复并发",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "被活动恢复任务引用的副本在解除引用前不得删除"
+  },
+  {
+    "id": "CT-123",
+    "test": "testCT123_DuplicateObjectsVerifiedOncePerUniqueHash",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "云端重复对象重复哈希",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "verifyGeneration 每个唯一对象只哈希一次并统计文件/唯一对象/字节；restore 复用对象校验结果"
+  },
+  {
+    "id": "CT-124",
+    "test": "testCT124_ClonedDatabaseOnNewMacMintsNewDeviceIdentity",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "macOS 迁移助理复制设备数据库",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "硬件锚点不一致时换发新设备身份；同机多进程共享身份；旧记录无锚点时采用"
+  },
+  {
+    "id": "CT-125",
+    "test": "testCT125_TwoMacsPublishingConcurrentlyKeepIndependentGenerations",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "双 Mac 并发发布（双设备模拟）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "两个设备身份并发发布互不破坏，各自提交可独立校验"
+  },
+  {
+    "id": "CT-126",
+    "test": "testCT126_GCOnOneMacNeverDeletesOtherMacsCommittedObjects",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "双 Mac GC 与发布竞争（双设备模拟）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "一台设备执行 GC 不得删除另一台设备已提交引用的对象"
+  },
+  {
+    "id": "CT-127",
+    "test": "testCT127_TestReportBindingMismatchFailsConsistencyCheck",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "测试报告绑定错误 Commit",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "check_test_report.py 拒绝非 HEAD 祖先的 commit 绑定并使发布门禁失败"
+  },
+  {
+    "id": "CT-128",
+    "test": "testCT128_SkippedTestsCountedAsPassedFailTheCheck",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SeventhRoundRegressionTests.swift",
+    "purpose": "跳过项计入通过的报告",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "passed != executed-failures-skipped 或三份文档统计不一致时门禁失败"
+  },
+  {
+    "id": "CT-129",
+    "test": "testCT129_BuildCapabilityDecidesICloudAvailability",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "构建能力检测：无 iCloud 权限的构建必须明确报不支持",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "Beta/Debug 不得声称具备 iCloud 能力"
+  },
+  {
+    "id": "CT-130",
+    "test": "testCT130_EnvironmentMatrixIsExplicit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "iCloud 环境矩阵（未登录/Drive 关闭/容器缺失/不可写/就绪）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "每种失败给出可操作原因，不混为「未配置」"
+  },
+  {
+    "id": "CT-131",
+    "test": "testCT131_EnablingICloudOnUnsupportedBuildDoesNotMutateSettings",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "启用 iCloud 失败时不得修改存储配置",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "失败保留原目标、镜像路径与书签，不删数据"
+  },
+  {
+    "id": "CT-132",
+    "test": "testCT132_CloudStateMachineForbidsFalseSuccess",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "云端状态机禁止虚假成功",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "uploading 不能直接到 verified；只有发布确认后才是已上传"
+  },
+  {
+    "id": "CT-133",
+    "test": "testCT133_ProjectSyncDisplaySeparatesLocalUploadAndFailure",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "项目同步展示区分本地/上传/云端失败",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "本地成功不得显示为已同步 iCloud"
+  },
+  {
+    "id": "CT-134",
+    "test": "testCT134_FirstBackupPublishesBeforeReportingSynced",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "首次备份端到端：先发布再显示已同步",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "synced 只能来自真实发布确认；云端失败保留本地快照"
+  },
+  {
+    "id": "CT-135",
+    "test": "testCT135_RetryPendingPublishesIsIdempotentAndKeepsSyncedProjectsAlone",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "立即同步幂等且不重传已同步项目",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "重复重试不产生多余版本"
+  },
+  {
+    "id": "CT-136",
+    "test": "testCT136_RecoveryAutoDetectsContainerStorageRoot",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "换机恢复自动发现容器目录",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "无需手动选择 iCloud 文件夹"
+  },
+  {
+    "id": "CT-137",
+    "test": "testCT137_ReleaseValidationChecksTheSignedProduct",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "发布校验检查签名产物与描述文件",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "签名后的 entitlements 与 profile 必须包含容器/App Group"
+  }
 ]

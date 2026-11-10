@@ -12,6 +12,10 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
     public var lastBackupAt: Date?
     public var lastSnapshotID: String?
     public var lastError: String?
+    /// CT-131: the newest snapshot's cloud state, so the UI can distinguish
+    /// "local backup done" from "uploaded" from "cloud failed" without guessing.
+    /// Optional → existing databases keep decoding.
+    public var lastCloudState: CloudSyncState?
     public var status: ProjectStatus
     public var accessState: SecurityAccessState
     public var lifecycle: ProjectLifecycle
@@ -30,6 +34,7 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
         lastBackupAt: Date? = nil,
         lastSnapshotID: String? = nil,
         lastError: String? = nil,
+        lastCloudState: CloudSyncState? = nil,
         status: ProjectStatus = .idle,
         accessState: SecurityAccessState = .unknown,
         lifecycle: ProjectLifecycle = .active,
@@ -46,6 +51,7 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
         self.lastBackupAt = lastBackupAt
         self.lastSnapshotID = lastSnapshotID
         self.lastError = lastError
+        self.lastCloudState = lastCloudState
         self.status = status
         self.accessState = accessState
         self.lifecycle = lifecycle
@@ -55,7 +61,7 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, rootPath, bookmark, enabled, groupName, createdAt
-        case lastBackupAt, lastSnapshotID, lastError, status
+        case lastBackupAt, lastSnapshotID, lastError, lastCloudState, status
         case accessState, lifecycle, configRevision, notes
     }
 
@@ -71,6 +77,7 @@ public struct Project: Codable, Identifiable, Hashable, Sendable {
         lastBackupAt = try c.decodeIfPresent(Date.self, forKey: .lastBackupAt)
         lastSnapshotID = try c.decodeIfPresent(String.self, forKey: .lastSnapshotID)
         lastError = try c.decodeIfPresent(String.self, forKey: .lastError)
+        lastCloudState = try c.decodeIfPresent(CloudSyncState.self, forKey: .lastCloudState)
         status = try c.decodeIfPresent(ProjectStatus.self, forKey: .status) ?? .idle
         accessState = try c.decodeIfPresent(SecurityAccessState.self, forKey: .accessState)
             ?? (bookmark == nil ? .notRequired : .unknown)
@@ -223,4 +230,67 @@ public struct RepositoryRecord: Codable, Identifiable, Hashable, Sendable {
     /// A repository with no recorded state is treated as ready only if it predates the
     /// state machine; the service re-derives the real state on bootstrap.
     public var effectiveState: RepositoryState { metadata?.state ?? .ready }
+}
+
+/// CT-131: the user-facing sync state. Derived (never persisted) so the local
+/// backup, the iCloud upload and the cloud verification can never be conflated
+/// behind one green "success".
+public struct ProjectSyncDisplay: Sendable, Equatable {
+    public enum Kind: String, Sendable {
+        case backingUp
+        case localOnly
+        case uploading
+        case synced
+        case cloudFailed
+        case awaitingRetry
+        case verifying
+        case failed
+        case paused
+        case unavailable
+        case idle
+    }
+
+    public var kind: Kind
+    public var title: String
+    /// True only when the newest snapshot is confirmed published to the cloud.
+    public var isCloudConfirmed: Bool
+
+    public static func derived(status: ProjectStatus, cloudState: CloudSyncState?) -> ProjectSyncDisplay {
+        switch status {
+        case .backingUp:
+            return .init(kind: .backingUp, title: "正在备份", isCloudConfirmed: false)
+        case .publishing:
+            return .init(kind: .uploading, title: "本地备份完成，正在同步 iCloud", isCloudConfirmed: false)
+        case .synced:
+            return .init(kind: .synced, title: "已同步到 iCloud", isCloudConfirmed: true)
+        case .localOnly:
+            switch cloudState {
+            case .pending, .uploading:
+                return .init(kind: .awaitingRetry, title: "云端同步等待重试", isCloudConfirmed: false)
+            case .failed:
+                return .init(kind: .cloudFailed, title: "本地备份安全，云端同步失败", isCloudConfirmed: false)
+            default:
+                return .init(kind: .localOnly, title: "本地备份完成（仅本机）", isCloudConfirmed: false)
+            }
+        case .warning:
+            switch cloudState {
+            case .failed:
+                return .init(kind: .cloudFailed, title: "本地备份安全，云端同步失败", isCloudConfirmed: false)
+            case .pending, .uploading:
+                return .init(kind: .awaitingRetry, title: "云端同步等待重试", isCloudConfirmed: false)
+            default:
+                return .init(kind: .localOnly, title: "本地备份完成，部分文件读取失败", isCloudConfirmed: false)
+            }
+        case .verifying:
+            return .init(kind: .verifying, title: "正在校验云端备份", isCloudConfirmed: true)
+        case .failed:
+            return .init(kind: .failed, title: "备份失败", isCloudConfirmed: false)
+        case .disabled:
+            return .init(kind: .paused, title: "已暂停", isCloudConfirmed: false)
+        case .missing:
+            return .init(kind: .unavailable, title: "目录不可访问", isCloudConfirmed: false)
+        case .idle:
+            return .init(kind: .idle, title: "等待首次备份", isCloudConfirmed: false)
+        }
+    }
 }

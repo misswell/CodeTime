@@ -10,12 +10,17 @@ public enum CodeTimeError: LocalizedError, Sendable, Equatable {
     case pathOutsideProject(String)
     case destinationExists(String)
     case cloudNotConfigured
+    /// iCloud was enabled but the build/account/drive/container is not usable.
+    case cloudSetupUnavailable(state: String, detail: String)
     case cloudPublishIncomplete(String)
     case integrityFailure(String)
     case recoveryKeyUnavailable
     case unauthorized(String)
     case cancelled
     case unsupported(String)
+    /// A concurrent backup already owns this project (scheduler or another
+    /// process). Informational, not a failure.
+    case backupAlreadyRunning
 
     // MARK: - Repository lifecycle
 
@@ -104,6 +109,10 @@ public enum CodeTimeError: LocalizedError, Sendable, Equatable {
             return "文件访问授权失效：\(detail)"
         case .cancelled:
             return "任务已取消"
+        case .cloudSetupUnavailable(_, let detail):
+            return detail
+        case .backupAlreadyRunning:
+            return "已有备份正在进行，完成后再试"
         case .unsupported(let detail):
             return "当前环境不支持：\(detail)"
 
@@ -239,8 +248,8 @@ public enum CodeTimeError: LocalizedError, Sendable, Equatable {
              .restoreKeyMismatch, .noRecoveryCandidate, .restoreVerificationFailed,
              .securityScopeUnavailable, .bookmarkFailed, .unauthorized,
              .migrationConflict, .pathOverlap, .pathOutsideProject,
-             .kopiaNotFound, .unsupported, .cancelled, .projectDeleted,
-             .gcJournalCorrupted, .destinationExists:
+             .kopiaNotFound, .unsupported, .cancelled, .projectDeleted, .backupAlreadyRunning,
+             .gcJournalCorrupted, .destinationExists, .cloudSetupUnavailable:
             return true
         default:
             return false

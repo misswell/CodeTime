@@ -622,6 +622,9 @@ public actor SQLiteStore {
                     cloudState: latest.cloudState,
                     snapshotStatus: latest.status
                 )
+                // CT-131: persist the newest snapshot's cloud state so the UI can
+                // distinguish local/uploading/synced/cloud-failed without guessing.
+                project.lastCloudState = latest.cloudState
             } else {
                 return project.status
             }

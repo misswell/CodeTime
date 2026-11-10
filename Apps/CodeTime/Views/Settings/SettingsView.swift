@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import SharedModels
+import CodeTimeCore
 import Diagnostics
 
 struct SettingsView: View {
@@ -192,132 +193,143 @@ private struct GeneralSettingsView: View {
 private struct CloudSettingsView: View {
     /// CT-105: gates the destructive cloud-cleanup confirmation.
     @State private var showCleanupConfirmation = false
+    /// CT-134: advanced options are collapsed for ordinary users.
+    @State private var showAdvanced = false
+    @State private var isWorking = false
 
     @EnvironmentObject var model: AppModel
 
-    private var cloudCheck: (passed: Bool, detail: String)? {
-        model.diagnostics.checks.first { $0.name == "iCloud 容器" || $0.name == "本地镜像" }
-            .map { ($0.passed, $0.detail) }
+    private var iconState: (symbol: String, color: Color) {
+        switch model.cloudSetup.state {
+        case .ready: return ("checkmark.circle.fill", CT.success)
+        case .checking: return ("arrow.triangle.2.circlepath", .secondary)
+        case .unsupportedBuild: return ("exclamationmark.triangle.fill", .secondary)
+        default: return ("exclamationmark.triangle.fill", CT.warning)
+        }
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                SettingsCard(title: "iCloud Drive", subtitle: "使用原生 iCloud Documents 容器同步 CodeTime Cloud Format v1。") {
-                    Toggle("启用 iCloud 备份镜像", isOn: Binding(
-                        get: { model.settings.iCloudEnabled },
-                        set: { value in
-                            model.settings.iCloudEnabled = value
-                            if value { model.settings.localMirrorPath = nil }
-                            model.settingsChanged()
-                        }
-                    ))
-                    if let cloudCheck {
-                        HStack(spacing: 7) {
-                            Image(systemName: cloudCheck.passed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(cloudCheck.passed ? CT.success : CT.warning)
-                            Text(cloudCheck.detail)
+                // MARK: 备份位置（普通用户只需要这一块）
+                SettingsCard(
+                    title: "备份位置",
+                    subtitle: "CodeTime 自动管理目录、加密与同步，无需手动选择文件夹。"
+                ) {
+                    HStack(spacing: 10) {
+                        Image(systemName: iconState.symbol)
+                            .foregroundStyle(iconState.color)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.backupDestination.displayName)
+                                .font(.callout.weight(.semibold))
+                            Text(model.settings.iCloudEnabled
+                                 ? (model.cloudSetup.isReady
+                                    ? "位置：iCloud Drive / CodeTime · 同步：自动"
+                                    : model.cloudSetup.detail)
+                                 : "加密备份保存在这台 Mac 上")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
-                    Text("云端目录：iCloud Drive/CodeTime。不可变对象先上传，加密版本清单最后发布。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                SettingsCard(title: "本地镜像", subtitle: "没有 iCloud 容器时仍可完整验证云端格式与恢复流程。") {
-                    HStack {
-                        Image(systemName: "folder")
-                            .foregroundStyle(.secondary)
-                        Text(model.settings.localMirrorPath ?? "未选择")
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
                         Spacer()
-                        Button("选择…") { chooseMirror() }
-                            .controlSize(.small)
-                        if model.settings.localMirrorPath != nil {
-                            Button("清除") {
-                                Task { await model.setLocalMirror(nil) }
+                    }
+
+                    if !model.settings.iCloudEnabled {
+                        HStack(spacing: 8) {
+                            Button("启用 iCloud 备份") {
+                                Task {
+                                    isWorking = true
+                                    _ = await model.enableICloudBackup()
+                                    isWorking = false
+                                }
                             }
-                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isWorking || !model.cloudSetup.isReady)
+                            Button("重新检测") {
+                                Task { await model.refreshCloudSetup() }
+                            }
+                            .buttonStyle(.bordered)
+                            if model.cloudSetup.requiresSystemSettings {
+                                Button("打开系统设置") { model.openICloudSystemSettings() }
+                                    .buttonStyle(.bordered)
+                            }
+                            Spacer()
                         }
+                        if !model.cloudSetup.isReady {
+                            Text(model.cloudSetup.title + "：" + model.cloudSetup.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Button("立即同步") {
+                                Task { await model.retryCloudSyncNow() }
+                            }
+                            .buttonStyle(.bordered)
+                            Button("重新检测") {
+                                Task { await model.refreshCloudSetup() }
+                            }
+                            .buttonStyle(.bordered)
+                            if !model.cloudSetup.isReady, model.cloudSetup.requiresSystemSettings {
+                                Button("打开系统设置") { model.openICloudSystemSettings() }
+                                    .buttonStyle(.bordered)
+                            }
+                            Spacer()
+                            Button("停止使用 iCloud") {
+                                Task {
+                                    isWorking = true
+                                    await model.disableICloudBackup()
+                                    isWorking = false
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isWorking)
+                        }
+                        Text("上传确认并发布版本清单后才会显示「已上传到 iCloud」。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
-                    HStack(spacing: 7) {
-                        Image(systemName: model.settings.localMirrorAccessState == .granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(model.settings.localMirrorAccessState == .granted ? CT.success : CT.warning)
-                        Text(model.settings.localMirrorAccessState.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text("选择本地镜像会关闭 iCloud，用于开发与灾难恢复演练。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
-                SettingsCard(title: "云端容量与保留", subtitle: "云端对象不可变；清理采用引用检查 + 宽限期，且至少保留两代。") {
+                // MARK: 本机备份
+                SettingsCard(title: "本机备份", subtitle: "本地仓库始终保留完整副本，云端失败不影响本地数据。") {
                     HStack(spacing: 24) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(CodeTimeFormat.bytes(model.cloudSummary?.byteSize ?? 0))
+                            Text(CodeTimeFormat.bytes(model.repositoryBytes ?? 0))
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
-                            Text("\(model.cloudSummary?.objectCount ?? 0) 个不可变对象")
+                            Text("本机仓库占用")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(model.cloudSummary?.generationCount ?? 0)")
+                            Text("\(model.projects.count)")
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
-                            Text("已发布版本")
+                            Text("受保护项目")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
+                        Button("从云端恢复…") { model.showCloudRecovery = true }
+                            .buttonStyle(.bordered)
                     }
-                    Divider()
-                    HStack {
-                        Stepper(value: binding(\.cloudGracePeriodDays), in: 1...365) {
-                            Text("清理宽限期：\(model.settings.cloudGracePeriodDays) 天")
-                                .font(.callout)
-                                .frame(width: 160, alignment: .trailing)
+                }
+
+                // MARK: 高级设置
+                SettingsCard(title: "高级设置", subtitle: "本地镜像、保留策略、校验与诊断。") {
+                    DisclosureGroup(isExpanded: $showAdvanced) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Divider()
+                            mirrorSection
+                            Divider()
+                            retentionSection
+                            Divider()
+                            diagnosticsSection
                         }
-                    }
-                    HStack {
-                        Stepper(value: binding(\.minimumCloudGenerations), in: 2...20) {
-                            Text("至少保留：\(model.settings.minimumCloudGenerations) 代")
-                                .font(.callout)
-                                .frame(width: 160, alignment: .trailing)
-                        }
-                    }
-                    HStack(spacing: 10) {
-                        Button("校验云端版本") {
-                            Task { await model.verifyCloud() }
-                        }
-                        .buttonStyle(.bordered)
-                        Button("立即清理") {
-                            // CT-105: the dialog offers a safe preview or an
-                            // explicitly confirmed physical deletion.
-                            showCleanupConfirmation = true
-                        }
-                        .buttonStyle(.bordered)
-                        .confirmationDialog(
-                            "确认物理删除云端旧对象？",
-                            isPresented: $showCleanupConfirmation,
-                            titleVisibility: .visible
-                        ) {
-                            Button("仅预览（安全）", role: .cancel) {}
-                            Button("确认删除", role: .destructive) {
-                                Task { await model.cleanupCloud(allowPhysicalDelete: true) }
-                            }
-                        } message: {
-                            Text("iCloud 无法证明其他设备已经看到这些旧版本。删除不可恢复，仅在确认所有设备都不再需要历史版本时执行。")
-                        }
-                        Spacer()
-                        Button("从云端恢复…") {
-                            model.showCloudRecovery = true
-                        }
-                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 6)
+                    } label: {
+                        Text("展开高级选项")
+                            .font(.callout)
                     }
                 }
             }
@@ -325,6 +337,118 @@ private struct CloudSettingsView: View {
             .padding(.bottom, 10)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
+        }
+        .onAppear {
+            Task { await model.refreshCloudSetup() }
+        }
+    }
+
+    // MARK: Advanced sections
+
+    private var mirrorSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("本地镜像")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("用于开发与灾难恢复演练；选择本地镜像会停止向 iCloud 发布，但不会删除任何已有备份。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Image(systemName: "folder").foregroundStyle(.secondary)
+                Text(model.settings.localMirrorPath ?? "未选择")
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button("选择…") { chooseMirror() }
+                    .controlSize(.small)
+                if model.settings.localMirrorPath != nil {
+                    Button("清除") {
+                        Task { await model.setLocalMirror(nil) }
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private var retentionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("云端容量与保留")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(CodeTimeFormat.bytes(model.cloudSummary?.byteSize ?? 0))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text("\(model.cloudSummary?.objectCount ?? 0) 个不可变对象")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(model.cloudSummary?.generationCount ?? 0)")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text("已发布版本")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            Stepper(value: binding(\.cloudGracePeriodDays), in: 1...365) {
+                Text("清理宽限期：\(model.settings.cloudGracePeriodDays) 天")
+                    .font(.callout)
+                    .frame(width: 160, alignment: .trailing)
+            }
+            Stepper(value: binding(\.minimumCloudGenerations), in: 2...20) {
+                Text("至少保留：\(model.settings.minimumCloudGenerations) 代")
+                    .font(.callout)
+                    .frame(width: 160, alignment: .trailing)
+            }
+            HStack(spacing: 10) {
+                Button("校验云端版本") { Task { await model.verifyCloud() } }
+                    .buttonStyle(.bordered)
+                Button("立即清理") { showCleanupConfirmation = true }
+                    .buttonStyle(.bordered)
+                    .confirmationDialog(
+                        "确认物理删除云端旧对象？",
+                        isPresented: $showCleanupConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("仅预览（安全）", role: .cancel) {}
+                        Button("确认删除", role: .destructive) {
+                            Task { await model.cleanupCloud(allowPhysicalDelete: true) }
+                        }
+                    } message: {
+                        Text("iCloud 无法证明其他设备已经看到这些旧版本。删除不可恢复，仅在确认所有设备都不再需要历史版本时执行。")
+                    }
+                Spacer()
+            }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("iCloud 诊断")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LabeledContent("构建能力") {
+                Text(model.buildSupportsICloud ? "支持 iCloud" : "不支持（Beta/Debug 构建）")
+                    .font(.caption)
+            }
+            LabeledContent("容器") {
+                Text(CloudSetupService.containerIdentifier)
+                    .font(.system(size: 11, design: .monospaced))
+            }
+            LabeledContent("检测结果") {
+                Text(model.cloudSetup.title).font(.caption)
+            }
+            if !model.cloudDiagnosticSummary.isEmpty {
+                Text(model.cloudDiagnosticSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 

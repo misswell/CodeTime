@@ -1,12 +1,24 @@
 import SwiftUI
 import AppKit
 import SharedModels
+import CodeTimeCore
 
+/// CT-133: the zero-configuration first-run wizard.
+///
+/// 保护你的代码项目 → 选择存储位置（自动检测 iCloud）→ 选择项目 → 保存恢复密钥
+/// → 首次备份（真实执行，本地与云端状态分开）。
 struct OnboardingView: View {
     @EnvironmentObject var model: AppModel
-    @State private var step = 0
+
+    private enum Step: Int, CaseIterable {
+        case storage, projects, recoveryKey, firstBackup
+    }
+
+    @State private var step: Step = .storage
     @State private var acknowledged = false
-    @State private var iCloudEnabled = false
+    @State private var isWorking = false
+    @State private var storageError: String?
+    @State private var refreshTick = 0
 
     private var key: String { model.recoveryKeyText }
 
@@ -20,82 +32,375 @@ struct OnboardingView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(LinearGradient(colors: [CT.accent, CT.mint], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("CodeTime")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                        Text("macOS 原生代码时间机器")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    HStack(spacing: 6) {
-                        ForEach(0..<3) { index in
-                            Capsule()
-                                .fill(index == step ? CT.accent : Color.secondary.opacity(0.2))
-                                .frame(width: index == step ? 22 : 7, height: 7)
-                                .animation(.spring(response: 0.3), value: step)
-                        }
-                    }
-                }
-                .padding(22)
-
+                header
                 Divider()
-
                 Group {
                     switch step {
-                    case 0: recoveryStep
-                    case 1: projectStep
-                    default: cloudStep
+                    case .storage: storageStep
+                    case .projects: projectsStep
+                    case .recoveryKey: recoveryStep
+                    case .firstBackup: firstBackupStep
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
                 Divider()
-
-                HStack {
-                    if step > 0 {
-                        Button("上一步") { step -= 1 }
-                    }
-                    Spacer()
-                    Button(step == 0 ? "已保存，继续" : (step == 1 ? "继续" : "开始使用")) {
-                        advance()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(step == 0 && !key.isEmpty && !acknowledged)
-                }
-                .padding(20)
+                footer
             }
-            .frame(width: 720, height: 640)
+            .frame(width: 760, height: 700)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
             .shadow(color: .black.opacity(0.18), radius: 30, y: 14)
         }
         .onAppear {
-            iCloudEnabled = model.settings.iCloudEnabled
             if key.isEmpty {
                 Task { await ensureKey() }
             }
+            Task { await model.refreshCloudSetup() }
         }
     }
+
+    // MARK: Header / footer
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(LinearGradient(colors: [CT.accent, CT.mint], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("CodeTime")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                Text("macOS 原生代码时间机器")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 6) {
+                ForEach(Step.allCases, id: \.rawValue) { item in
+                    Capsule()
+                        .fill(item == step ? CT.accent : Color.secondary.opacity(0.2))
+                        .frame(width: item == step ? 22 : 7, height: 7)
+                        .animation(.spring(response: 0.3), value: step)
+                }
+            }
+        }
+        .padding(22)
+    }
+
+    private var footer: some View {
+        HStack {
+            if step.rawValue > 0, !isWorking {
+                Button("上一步") { step = Step(rawValue: step.rawValue - 1) ?? .storage }
+            }
+            Spacer()
+            if isWorking {
+                ProgressView().controlSize(.small)
+            }
+            Button(primaryTitle) {
+                Task { await advance() }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(primaryDisabled)
+        }
+        .padding(20)
+    }
+
+    private var primaryTitle: String {
+        switch step {
+        case .storage: return "继续"
+        case .projects: return "继续"
+        case .recoveryKey: return "继续"
+        case .firstBackup: return model.firstBackup.isFinished ? "进入 CodeTime" : "首次备份进行中…"
+        }
+    }
+
+    private var primaryDisabled: Bool {
+        if isWorking { return true }
+        switch step {
+        case .storage:
+            return model.cloudSetup.isChecking
+        case .projects:
+            return model.projects.isEmpty
+        case .recoveryKey:
+            return !key.isEmpty && !acknowledged
+        case .firstBackup:
+            return !model.firstBackup.isFinished
+        }
+    }
+
+    // MARK: Step 1 — storage
+
+    private var storageStep: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("保护你的代码项目")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                    Text("CodeTime 自动保存项目历史版本，即使误删文件、改错代码或更换 Mac，也能找回之前的版本。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if model.cloudSetup.isChecking {
+                    CTCard(padding: 16) {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small)
+                            Text("正在检测 iCloud…")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    iCloudCard
+                }
+
+                CTCard(padding: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "internaldrive")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(CT.accent)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(CT.accent.opacity(0.12)))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("仅使用本机备份")
+                                    .font(.callout.weight(.semibold))
+                                Text("加密备份保存在这台 Mac 上，之后可以随时切换到云端。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("使用本机") {
+                                Task { await chooseLocalOnly() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isWorking)
+                        }
+                    }
+                }
+
+                if let storageError {
+                    Text(storageError)
+                        .font(.caption)
+                        .foregroundStyle(CT.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 16) {
+                    OnboardingFeature(symbol: "camera", title: "自动快照", detail: "按计划创建，不依赖 Git 提交")
+                    OnboardingFeature(symbol: "clock.arrow.circlepath", title: "时间机器", detail: "浏览任意时间点的文件内容")
+                    OnboardingFeature(symbol: "icloud", title: "云端灾难恢复", detail: "换机后凭恢复密钥重建仓库")
+                }
+            }
+            .padding(28)
+        }
+    }
+
+    @ViewBuilder
+    private var iCloudCard: some View {
+        let status = model.cloudSetup
+        CTCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "icloud.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(status.isReady ? CT.accent : .secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill((status.isReady ? CT.accent : Color.secondary).opacity(0.12)))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("iCloud 云端备份")
+                                .font(.callout.weight(.semibold))
+                            Text("推荐")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(CT.accent.opacity(0.14)))
+                                .foregroundStyle(CT.accent)
+                        }
+                        Text(status.isReady ? (status.storageRoot?.path ?? "iCloud Drive / CodeTime") : status.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    if status.isReady {
+                        Button("启用 iCloud 备份") {
+                            Task { await chooseICloud() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isWorking)
+                    }
+                }
+
+                if !status.isReady {
+                    Text(status.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
+                        Button("重新检测") {
+                            Task { await model.refreshCloudSetup() }
+                        }
+                        .controlSize(.small)
+                        if status.requiresSystemSettings {
+                            Button("打开系统设置") { model.openICloudSystemSettings() }
+                                .controlSize(.small)
+                        }
+                        Text("系统设置 → Apple 账户 → iCloud → iCloud Drive")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    Text("备份位置与目录会自动创建，加密后才同步；无需手动选择文件夹。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: Step 2 — projects
+
+    @State private var suggested: [URL] = []
+    @State private var selectedSuggestions: Set<String> = []
+
+    private var projectsStep: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("选择要保护的代码项目")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                    Text("只读取你选择的目录，不会修改 Git 工作区，也不会要求提交代码。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !suggested.isEmpty {
+                    CTCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("在这台 Mac 上发现的项目")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(suggested, id: \.self) { url in
+                                let selected = selectedSuggestions.contains(url.path)
+                                let added = model.projects.contains { $0.rootPath == url.path }
+                                Button {
+                                    if selected { selectedSuggestions.remove(url.path) }
+                                    else { selectedSuggestions.insert(url.path) }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: added ? "checkmark.circle.fill"
+                                              : (selected ? "checkmark.square.fill" : "square"))
+                                            .foregroundStyle(added ? CT.success : (selected ? CT.accent : .secondary))
+                                        Text(url.lastPathComponent)
+                                            .font(.callout)
+                                        Text(url.path)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Spacer()
+                                        if added {
+                                            Text("已添加").font(.caption2).foregroundStyle(CT.success)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(added)
+                            }
+                            if !selectedSuggestions.isEmpty {
+                                Button("添加选中的 \(selectedSuggestions.count) 个项目") {
+                                    let urls = suggested.filter { selectedSuggestions.contains($0.path) }
+                                    Task {
+                                        await model.addProjects(urls: urls)
+                                        selectedSuggestions.removeAll()
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+
+                CTCard(padding: 16) {
+                    VStack(spacing: 10) {
+                        if model.projects.isEmpty {
+                            Image(systemName: "folder.badge.plus")
+                                .font(.system(size: 30, weight: .light))
+                                .foregroundStyle(.secondary)
+                            Text("还没有添加项目")
+                                .font(.callout.weight(.medium))
+                        }
+                        Button("选择文件夹…（可多选）") {
+                            Task { await model.addProject() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, model.projects.isEmpty ? 22 : 6)
+                }
+
+                if !model.projects.isEmpty {
+                    CTCard(padding: 0) {
+                        VStack(spacing: 0) {
+                            ForEach(model.projects) { project in
+                                HStack(spacing: 10) {
+                                    Image(systemName: "folder.fill").foregroundStyle(CT.accent)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(project.name).font(.callout.weight(.semibold))
+                                        Text(project.rootPath)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(CT.success)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                if project.id != model.projects.last?.id { Divider() }
+                            }
+                        }
+                    }
+                }
+
+                Text("默认排除 node_modules、构建产物、缓存、日志与 .env 等敏感文件；可在项目设置中查看与调整排除规则。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(28)
+        }
+        .onAppear {
+            if suggested.isEmpty {
+                suggested = model.suggestedProjectDirectories()
+            }
+        }
+    }
+
+    // MARK: Step 3 — recovery key
 
     private var recoveryStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("先保存恢复密钥")
+                    Text("保存备份恢复密钥")
                         .font(.system(size: 26, weight: .bold, design: .rounded))
-                    Text("CodeTime 会用 Kopia 加密本机仓库，并把不可变对象同步到 iCloud。恢复密钥是打开云端清单、取回仓库密码的唯一人工凭据。")
+                    Text("恢复密钥用于在新的 Mac 上恢复加密备份。建议保存到密码管理器；它不会自动上传到 iCloud。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -122,144 +427,176 @@ struct OnboardingView: View {
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.045)))
-                        Text("请写到密码管理器或打印离线保存。丢失它且本机 Keychain 损坏时，备份内容将无法解密。")
+                        Text("丢失它且本机 Keychain 凭据不可用时，云端备份将无法解密。")
                             .font(.caption)
                             .foregroundStyle(CT.warning)
                     }
                 }
 
-                Toggle("我已将恢复密钥保存到安全的位置", isOn: $acknowledged)
-                    .toggleStyle(.checkbox)
-                    .font(.callout)
+                Button {
+                    acknowledged.toggle()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: acknowledged ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(acknowledged ? CT.accent : Color.secondary)
+                        Text("我已将恢复密钥保存到安全的位置")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(acknowledged ? CT.accent.opacity(0.10) : Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(acknowledged ? CT.accent.opacity(0.55) : Color.primary.opacity(0.10))
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
-                HStack(spacing: 16) {
-                    OnboardingFeature(symbol: "camera", title: "自动快照", detail: "按计划创建，不依赖 Git 提交")
-                    OnboardingFeature(symbol: "clock.arrow.circlepath", title: "时间机器", detail: "浏览任意时间点的文件内容")
-                    OnboardingFeature(symbol: "icloud", title: "云端灾难恢复", detail: "换机后凭恢复密钥重建仓库")
+                if !acknowledged {
+                    Text("勾选确认后才能继续（按钮在窗口右下角）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(28)
         }
     }
 
-    private var projectStep: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("选择要保护的代码目录")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                Text("CodeTime 只读取你选择的目录；不会修改 Git 工作区，也不会要求提交代码。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+    // MARK: Step 4 — first backup
 
-                if model.projects.isEmpty {
-                    CTCard {
-                        VStack(spacing: 12) {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 32, weight: .light))
-                                .foregroundStyle(.secondary)
-                            Text("还没有添加项目")
-                                .font(.callout.weight(.medium))
-                            Button("选择目录…") {
-                                Task { await model.addProject() }
-                            }
-                            .buttonStyle(.borderedProminent)
+    private var firstBackupStep: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("首次备份")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                    Text(model.settings.iCloudEnabled
+                         ? "先创建本地加密快照，再上传到 iCloud。只有上传确认并发布版本清单后才算云端完成。"
+                         : "创建本地加密快照。之后可在设置中随时启用 iCloud 备份。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                CTCard(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        progressRow(
+                            "本地加密备份",
+                            done: model.firstBackup.phase == .done || model.firstBackup.phase == .localDoneCloudFailed,
+                            active: model.firstBackup.phase == .initializing || model.firstBackup.phase == .snapshot
+                        )
+                        if model.settings.iCloudEnabled {
+                            progressRow(
+                                "上传到 iCloud 并发布版本",
+                                done: model.firstBackup.phase == .done,
+                                active: model.firstBackup.phase == .uploading || model.firstBackup.phase == .verifying
+                            )
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 26)
-                    }
-                } else {
-                    CTCard {
-                        VStack(spacing: 0) {
-                            ForEach(model.projects) { project in
-                                HStack(spacing: 10) {
-                                    Image(systemName: "folder.fill")
-                                        .foregroundStyle(CT.accent)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(project.name)
-                                            .font(.callout.weight(.semibold))
-                                        Text(project.rootPath)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(CT.success)
-                                }
-                                .padding(.vertical, 8)
-                                if project.id != model.projects.last?.id { Divider() }
-                            }
+                        if !model.firstBackup.detail.isEmpty {
+                            Text(model.firstBackup.detail)
+                                .font(.caption)
+                                .foregroundStyle(model.firstBackup.phase == .localDoneCloudFailed ? CT.warning : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Button("继续添加…") {
-                        Task { await model.addProject() }
+                }
+
+                if model.firstBackup.phase == .localDoneCloudFailed {
+                    Button("重新同步 iCloud") {
+                        Task { await model.retryCloudSyncNow() }
                     }
                     .buttonStyle(.bordered)
                 }
 
-                Text("默认排除 node_modules、构建产物、日志与 .env 等敏感文件；可随时在项目设置中调整。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !model.firstBackup.isRunning && model.firstBackup.phase == .idle {
+                    Button("开始首次备份") {
+                        Task { await model.runFirstBackup() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
             .padding(28)
         }
+        .onAppear {
+            if model.firstBackup.phase == .idle {
+                Task { await model.runFirstBackup() }
+            }
+        }
     }
 
-    private var cloudStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("云端镜像（可选）")
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-            Text("启用 iCloud 后，CodeTime 会把加密仓库封装成不可变对象并同步到 iCloud Drive/CodeTime。也可以稍后在设置中配置本地镜像。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            CTCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("启用 iCloud 备份镜像", isOn: $iCloudEnabled)
-                    if iCloudEnabled {
-                        Text("发布顺序：数据对象全部上传 → 校验上传状态 → 最后写入加密版本清单。中断时旧版本保持有效。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("当前为纯本地模式。本地仓库保留完整数据副本，恢复速度更快。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+    private func progressRow(_ title: String, done: Bool, active: Bool) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                if done {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(CT.success)
+                } else if active {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "circle").foregroundStyle(.tertiary)
                 }
             }
-
-            HStack(spacing: 16) {
-                OnboardingFeature(symbol: "lock.shield", title: "加密清单", detail: "AES-256-GCM + HKDF 独立密钥")
-                OnboardingFeature(symbol: "arrow.uturn.backward.circle", title: "宽限期清理", detail: "至少保留两代可恢复版本")
-                OnboardingFeature(symbol: "laptopcomputer.and.iphone", title: "设备隔离", detail: "每台 Mac 独立仓库，互不覆盖")
-            }
-
+            .frame(width: 18)
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(done ? .primary : .secondary)
             Spacer()
-        }
-        .padding(28)
-        .onAppear {
-            if iCloudEnabled != model.settings.iCloudEnabled {
-                iCloudEnabled = model.settings.iCloudEnabled
-            }
         }
     }
 
-    private func advance() {
-        if step == 0 {
-            step = 1
-        } else if step == 1 {
-            step = 2
+    // MARK: Actions
+
+    private func chooseICloud() async {
+        isWorking = true
+        storageError = nil
+        defer { isWorking = false }
+        let ok = await model.enableICloudBackup()
+        if ok {
+            step = .projects
         } else {
-            model.settings.iCloudEnabled = iCloudEnabled
-            model.settingsChanged()
-            Task { await model.completeOnboarding() }
+            storageError = "iCloud 未启用：\(model.cloudSetup.detail)"
+        }
+    }
+
+    private func chooseLocalOnly() async {
+        isWorking = true
+        storageError = nil
+        defer { isWorking = false }
+        if model.settings.iCloudEnabled {
+            await model.disableICloudBackup()
+        }
+        step = .projects
+    }
+
+    private func advance() async {
+        switch step {
+        case .storage:
+            // "继续" without an explicit choice prefers iCloud when it is ready.
+            if model.cloudSetup.isReady && !model.settings.iCloudEnabled {
+                await chooseICloud()
+            } else {
+                step = .projects
+            }
+        case .projects:
+            guard !model.projects.isEmpty else { return }
+            step = .recoveryKey
+        case .recoveryKey:
+            guard acknowledged || key.isEmpty else { return }
+            step = .firstBackup
+        case .firstBackup:
+            guard model.firstBackup.isFinished else { return }
+            await model.completeOnboarding()
         }
     }
 
     private func ensureKey() async {
-        // Key is normally populated during bootstrap; this covers a reopened onboarding.
         await model.refreshRecoveryKeyText()
     }
 }
@@ -334,6 +671,9 @@ struct CloudRecoverySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
     @State private var storageRoot: URL?
+    @State private var isDetecting = false
+    @State private var detectMessage = ""
+    @State private var didAutoDetect = false
     @State private var isScanning = false
     @State private var hasScanned = false
     @State private var selectedCandidateID: UUID?
@@ -374,25 +714,37 @@ struct CloudRecoverySheet: View {
 
             CTCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("云端 CodeTime 目录")
+                    Text("iCloud 备份位置")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    HStack {
-                        Image(systemName: "icloud")
-                            .foregroundStyle(CT.accent)
-                        Text(storageRoot?.path ?? "请选择 iCloud Drive 中的 CodeTime 文件夹")
+                    HStack(spacing: 8) {
+                        if isDetecting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: storageRoot == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(storageRoot == nil ? CT.warning : CT.success)
+                        }
+                        Text(storageRoot?.path
+                             ?? (detectMessage.isEmpty ? "正在查找 iCloud 备份…" : detectMessage))
                             .font(.system(size: 11.5, design: .monospaced))
                             .foregroundStyle(storageRoot == nil ? .secondary : .primary)
                             .lineLimit(2)
                             .truncationMode(.middle)
                         Spacer()
-                        Button("选择…") { chooseStorageRoot() }
+                        Button("重新检测") { Task { await autoDetectStorage() } }
                             .controlSize(.small)
                             .disabled(isRestoring)
                     }
-                    Text("该目录应包含 format.json 与 devices 文件夹。")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 8) {
+                        Text("CodeTime 会自动使用 iCloud Drive / CodeTime，无需手动选择文件夹。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Button("选择其他目录…") { chooseStorageRoot() }
+                            .controlSize(.small)
+                            .buttonStyle(.link)
+                            .disabled(isRestoring)
+                    }
                 }
             }
 
@@ -460,6 +812,11 @@ struct CloudRecoverySheet: View {
         }
         .padding(22)
         .frame(width: 640)
+        .onAppear {
+            guard !didAutoDetect else { return }
+            didAutoDetect = true
+            Task { await autoDetectStorage() }
+        }
     }
 
     @ViewBuilder
@@ -608,6 +965,20 @@ struct CloudRecoverySheet: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+        }
+    }
+
+    /// CT-136: find the CodeTime folder in iCloud automatically. Only when the
+    /// build/account/container cannot be used do we ask the user for a folder.
+    private func autoDetectStorage() async {
+        isDetecting = true
+        defer { isDetecting = false }
+        let status = await CloudSetupService.detect()
+        if status.isReady, let root = status.storageRoot {
+            storageRoot = root
+            detectMessage = "已找到 iCloud 备份位置"
+        } else {
+            detectMessage = "\(status.title)：\(status.detail)"
         }
     }
 

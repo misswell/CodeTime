@@ -75,13 +75,45 @@ if [ -n "$APP" ]; then
   codesign -d --entitlements :- "$APP" >"$PLIST" 2>/dev/null
   for key in \
     com.apple.security.app-sandbox \
+    com.apple.developer.icloud-services \
     com.apple.developer.icloud-container-identifiers \
-    com.apple.developer.ubiquity-container-identifiers; do
+    com.apple.developer.ubiquity-container-identifiers \
+    com.apple.security.application-groups \
+    keychain-access-groups; do
     /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" >/dev/null 2>&1 \
       || fail "signed app is missing $key"
   done
+  # CT-137: the SIGNED product must carry the exact identifiers — a profile that
+  # silently drops them would ship a build whose iCloud UI claims more than the
+  # binary can do.
+  for key in \
+    com.apple.developer.icloud-container-identifiers \
+    com.apple.developer.ubiquity-container-identifiers; do
+    /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" \
+      | grep -q "iCloud.com.codetime.app" \
+      || fail "signed app $key does not contain iCloud.com.codetime.app"
+  done
+  /usr/libexec/PlistBuddy -c "Print :com.apple.security.application-groups" "$PLIST" \
+    | grep -q "U8U443D7ZL.com.codetime.app" \
+    || fail "signed app application-groups does not contain U8U443D7ZL.com.codetime.app"
   rm -f "$PLIST"
-  note "signed app embeds sandbox and iCloud entitlements"
+  note "signed app embeds sandbox, iCloud container, app group and keychain entitlements"
+
+  # CT-137: an embedded Developer ID profile must authorize the same container.
+  PROFILE="$APP/Contents/embedded.provisionprofile"
+  if [ -f "$PROFILE" ]; then
+    DECODED="$(security cms -D -i "$PROFILE" 2>/dev/null || true)"
+    [ -n "$DECODED" ] || fail "embedded provisioning profile cannot be decoded"
+    printf '%s' "$DECODED" | plutil -extract Entitlements xml1 -o - - 2>/dev/null \
+      | grep -q "iCloud.com.codetime.app" \
+      || fail "provisioning profile does not authorize iCloud.com.codetime.app"
+    printf '%s' "$DECODED" | plutil -extract Entitlements xml1 -o - - 2>/dev/null \
+      | grep -q "U8U443D7ZL.com.codetime.app" \
+      || fail "provisioning profile does not authorize the app group"
+    note "embedded provisioning profile authorizes the iCloud container and app group"
+  else
+    note "no embedded provisioning profile (ad-hoc build)"
+  fi
 
   [ -f "$APP/Contents/Library/LaunchAgents/com.codetime.agent.plist" ] \
     || fail "app bundle is missing the embedded LaunchAgent"

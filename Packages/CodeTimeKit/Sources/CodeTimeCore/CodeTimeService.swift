@@ -109,16 +109,22 @@ private struct StaticPassword: RepositoryPasswordProviding {
 }
 
 public enum CloudLocation {
+    /// CT-129: the ONE container identifier used by the app. It must match
+    /// `Apps/CodeTime/CodeTime.entitlements`; the identifier is never taken from
+    /// the default container, so a misconfigured profile fails loudly instead of
+    /// silently writing to another app's container.
+    public static var containerIdentifier: String { CloudSetupService.containerIdentifier }
+
     public static func iCloudDocuments() async -> URL? {
         await Task.detached(priority: .userInitiated) {
             FileManager.default
-                .url(forUbiquityContainerIdentifier: nil)?
+                .url(forUbiquityContainerIdentifier: containerIdentifier)?
                 .appendingPathComponent("Documents", isDirectory: true)
         }.value
     }
 
     public static func iCloudStorageRoot() async -> URL? {
-        await iCloudDocuments()?.appendingPathComponent("CodeTime", isDirectory: true)
+        await iCloudDocuments()?.appendingPathComponent(CloudSetupService.storageFolderName, isDirectory: true)
     }
 }
 
@@ -877,7 +883,7 @@ public actor CodeTimeService {
             throw CodeTimeError.projectDeleted(projectID.uuidString)
         }
         guard !activeProjects.contains(projectID), !backupGateClosed else {
-            throw CodeTimeError.unsupported("已有备份任务在运行，请稍后再试")
+            throw CodeTimeError.backupAlreadyRunning
         }
         activeProjects.insert(projectID)
         backupGateClosed = true
@@ -1658,6 +1664,92 @@ public actor CodeTimeService {
         }
     }
 
+    /// CT-132: user-triggered "立即同步". Re-publishes the newest snapshot of
+    /// every project whose cloud state is not synced. Idempotent: publishing a
+    /// generation that already exists only re-confirms it.
+    @discardableResult
+    public func retryPendingCloudPublishes() async throws -> Int {
+        let settings = try await currentSettings()
+        guard settings.iCloudEnabled || !(settings.localMirrorPath ?? "").isEmpty else { return 0 }
+        var attempted = 0
+        for project in try await database.projects() where project.lifecycle == .active {
+            guard let latest = try await database.snapshots(projectID: project.id, limit: 1).first,
+                  latest.cloudState != .synced else { continue }
+            attempted += 1
+            _ = await publishIfConfigured(snapshot: latest)
+            await recomputeProjectStatus(projectID: project.id)
+        }
+        if attempted > 0 {
+            await logger.info("重新安排了 \(attempted) 个项目的云端同步")
+        }
+        return attempted
+    }
+
+    // MARK: - Storage configuration (CT-129/130)
+
+    /// Detection only: no settings change, no side effects beyond creating the
+    /// backup folder and a write probe when iCloud is actually available.
+    public func cloudSetupStatus() async -> CloudSetupStatus {
+        let status = await CloudSetupService.detect()
+        // Stable code + short reason only; no paths of user projects, no secrets.
+        await logger.info("iCloud 检测：\(status.diagnosticCode) · \(status.title)")
+        return status
+    }
+
+    public enum StorageMode: Sendable, Equatable {
+        case iCloud
+        case localMirror(path: String?)
+    }
+
+    /// Switches the storage mode ONLY after verification succeeds. On any
+    /// failure the existing settings are left untouched (CT-130) and the
+    /// previous cloud/mirror data is never deleted.
+    @discardableResult
+    public func configureStorage(_ mode: StorageMode) async throws -> CloudSetupStatus {
+        var settings = try await currentSettings()
+        switch mode {
+        case .iCloud:
+            let status = await CloudSetupService.detect()
+            guard status.isReady else {
+                throw CodeTimeError.cloudSetupUnavailable(state: status.state.rawValue, detail: status.detail)
+            }
+            // Keep `localMirrorPath`/bookmark: switching back must not require
+            // re-authorization, and the old mirror is never deleted.
+            settings.iCloudEnabled = true
+        case .localMirror(let path):
+            settings.iCloudEnabled = false
+            if let path, !path.isEmpty {
+                let url = URL(fileURLWithPath: path, isDirectory: true)
+                do {
+                    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                } catch {
+                    throw CodeTimeError.securityScopeUnavailable("\(path)：\(error.localizedDescription)")
+                }
+                guard FileManager.default.isWritableFile(atPath: url.path) else {
+                    throw CodeTimeError.securityScopeUnavailable(path)
+                }
+                if settings.localMirrorPath != path {
+                    settings.localMirrorPath = path
+                    settings.localMirrorBookmark = try? SecurityScopedBookmarks.makeBookmark(for: url)
+                }
+            }
+        }
+        settings.configRevision += 1
+        try await saveSettings(settings)
+        let status = await CloudSetupService.detect()
+        await logger.info("存储位置已切换为 \(mode == .iCloud ? "iCloud" : "本地镜像")")
+        return status
+    }
+
+    /// Disables iCloud mirroring but keeps every existing object, manifest and
+    /// the configured local mirror path.
+    public func disableICloudBackup() async throws {
+        var settings = try await currentSettings()
+        settings.iCloudEnabled = false
+        settings.configRevision += 1
+        try await saveSettings(settings)
+    }
+
     // MARK: - Cloud internals
 
     private func publishIfConfigured(snapshot: Snapshot) async -> String? {
@@ -1986,8 +2078,12 @@ public actor CodeTimeService {
         let tracker: any CloudUploadTracking
 
         if settings.iCloudEnabled {
-            guard let iCloud = await CloudLocation.iCloudStorageRoot() else {
-                throw CodeTimeError.cloudNotConfigured
+            // CT-129: never silently degrade. If iCloud was enabled but the
+            // container is unavailable, report the exact reason instead of
+            // publishing to a different location.
+            let status = await CloudSetupService.detect()
+            guard status.isReady, let iCloud = status.storageRoot else {
+                throw CodeTimeError.cloudSetupUnavailable(state: status.state.rawValue, detail: status.detail)
             }
             root = iCloud
             coordinated = true

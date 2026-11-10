@@ -705,15 +705,15 @@ final class FifthRoundRegressionTests: XCTestCase {
 
     func testCT092_RegressionGateCoversAllRequiredTests() throws {
         let gate = try String(contentsOf: repoScriptURL("regression_gate.sh"), encoding: .utf8)
-        XCTAssertTrue(gate.contains("range(1, 129)"), "门禁必须按索引检查 CT-001…CT-128 全量编号")
+        XCTAssertTrue(gate.contains("range(1, 138)"), "门禁必须按索引检查 CT-001…CT-137 全量编号")
         XCTAssertTrue(gate.contains("REGRESSION_INDEX.json"), "门禁必须由 REGRESSION_INDEX.json 驱动")
         let indexURL = repoScriptURL("../REGRESSION_INDEX.json").standardizedFileURL
         let indexData = try Data(contentsOf: indexURL)
         let index = try JSONSerialization.jsonObject(with: indexData) as? [[String: Any]]
         XCTAssertNotNil(index, "REGRESSION_INDEX.json 必须是数组")
-        XCTAssertEqual(index?.count, 128, "回归索引必须登记 CT-001…CT-128")
+        XCTAssertEqual(index?.count, 137, "回归索引必须登记 CT-001…CT-137")
         let ids = Set(index?.compactMap { $0["id"] as? String } ?? [])
-        for number in 1...128 {
+        for number in 1...137 {
             let ctID = String(format: "CT-%03d", number)
             XCTAssertTrue(ids.contains(ctID), "\(ctID) missing from index")
         }

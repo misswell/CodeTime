@@ -82,7 +82,16 @@ struct ProjectCard: View {
                     HStack(spacing: 8) {
                         Text(project.name)
                             .font(.system(size: 16, weight: .semibold))
-                        StatusPill(text: project.status.displayName, color: project.status.color)
+                        let syncDisplay = ProjectSyncDisplay.derived(
+                            status: project.status,
+                            cloudState: project.lastCloudState
+                        )
+                        StatusPill(
+                            text: syncDisplay.title,
+                            color: syncDisplay.kind == .cloudFailed || syncDisplay.kind == .failed
+                                ? CT.warning
+                                : project.status.color
+                        )
                         if let error = project.lastError {
                             TagChip(text: error, tint: CT.danger)
                                 .lineLimit(1)
@@ -121,7 +130,11 @@ struct ProjectCard: View {
                     .controlSize(.small)
                     .help(project.enabled ? "暂停自动备份" : "恢复自动备份")
 
-                    if model.activeProjectIDs.contains(project.id) {
+                    // `status == .backingUp` covers a SCHEDULED backup started by
+                    // the agent/scheduler, which AppModel.activeProjectIDs cannot
+                    // see; without it the button stays enabled and the click just
+                    // reports "already running".
+                    if model.activeProjectIDs.contains(project.id) || project.status == .backingUp {
                         ProgressView().controlSize(.small).frame(width: 26)
                     } else {
                         Button {
