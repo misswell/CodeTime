@@ -1368,5 +1368,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "签名后的 entitlements 与 profile 必须包含容器/App Group"
+  },
+  {
+    "id": "CT-138",
+    "test": "testCT138_StressTestIsOptInSeparatelyFromScale",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "百万文件压力测试与常规门禁分离（避免 CI job 超时）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "CT-037 只在 CODETIME_STRESS_TESTS=1 下运行，常规 CI 不超时"
   }
 ]

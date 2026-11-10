@@ -9,15 +9,15 @@
 | 单机真实 iCloud 往返（ICloudAcceptanceTests） | 默认环境没有真实 iCloud 容器 | 设置 `CODETIME_ICLOUD_TESTS=1`、`CODETIME_ICLOUD_CONTAINER` 后运行；仍不代表双 Mac 验收 |
 | 真实 iCloud 双 Mac 发布/恢复 | 需要两台 Mac、同一 iCloud 账号、签名 Release 构建与真实容器 | 按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md` 填写报告；Stable 脚本会强制检查 |
 | 10 万文件排除预览（CT-036） | 默认门禁关闭，避免 CI 资源消耗 | `CODETIME_SCALE_TESTS=1 Scripts/test.sh --filter testCT036` |
-| 100 万文件扫描上限（CT-037） | 创建 100 万文件耗时且占用大量 inode | `CODETIME_SCALE_TESTS=1 Scripts/test.sh --filter testCT037`（建议独立卷） |
+| 100 万文件扫描上限（CT-037） | 创建 100 万文件耗时且占用大量 inode | `CODETIME_STRESS_TESTS=1 Scripts/test.sh --filter testCT037`（建议独立卷；CT-138 起与常规 scale 开关分离） |
 | 磁盘满故障注入（CT-044） | 本机无可控小容量卷，无法安全制造 ENOSPC | 在独立 APFS 小容量卷或 CI 容器中运行；禁止在用户数据卷上注入 |
 | Developer ID 签名与公证 | 本环境未提供发布凭据 | 配置 `DEVELOPMENT_TEAM`、`APPLE_ID`、`NOTARY_PASSWORD` 后运行 `Scripts/package_release.sh` |
 | Stapling 与最终安装包验证 | 依赖公证结果 | `Scripts/verify_release.sh` |
 | 安装、升级、回退、卸载重装 | 需要真实安装环境与上一版本包 | 按 `RELEASE_CHECKLIST.md` 第 7 节执行 |
 | SwiftUI 界面视觉/交互验收 | 未在本环境启动应用逐屏检查 | 使用 Release 构建在 macOS 14/15 上人工检查 |
 
-全量默认测试结果：**178 个测试，0 失败，2 跳过**。跳过项即单机 iCloud 验收与 CT-044 磁盘写满；
-它们不计入“通过”。CT-036/CT-037 及 CT-117 的 3GiB 变体在本地门禁默认 `CODETIME_SCALE_TESTS=1`
+全量默认测试结果：**179 个测试，0 失败，3 跳过**。跳过项即单机 iCloud 验收与 CT-044 磁盘写满；
+它们不计入“通过”。CT-036 及 CT-117 的 3GiB 变体在门禁中由 `CODETIME_SCALE_TESTS=1` 启用；CT-037 百万文件与 3GiB 变体需 `CODETIME_STRESS_TESTS=1`（夜间/手动）
 下真实执行（CI 不设该变量，规模项在 CI 中跳过，两处口径在 TEST_REPORT 分开陈述）。
 CT-045…CT-057、CT-058…CT-116、CT-117…CT-128 全部通过。统计口径以 `TEST_REPORT.md` 的机器可读块
 为唯一事实源（`Scripts/check_test_report.py` 强制校验）。

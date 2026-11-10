@@ -283,9 +283,14 @@ final class SandboxMigrationRegressionTests: XCTestCase {
 
     // CT-037: 百万文件扫描必须在上限处截断，而不是无限增长（默认不跑）。
     func testCT037_MillionFilesBoundedByLimit() throws {
+        // CT-138: the million-file STRESS test is opt-in separately from the
+        // 100k "scale" preview. Running it in the regular gate takes tens of
+        // minutes and starves the macOS runner queue (the job then times out),
+        // so CI enables only CODETIME_SCALE_TESTS; stress runs at night via
+        // `Scripts/benchmark.sh stress` or with CODETIME_STRESS_TESTS=1.
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["CODETIME_SCALE_TESTS"] == "1",
-            "NOT RUN: 规模测试需设置 CODETIME_SCALE_TESTS=1"
+            ProcessInfo.processInfo.environment["CODETIME_STRESS_TESTS"] == "1",
+            "NOT RUN: 百万文件压力测试需设置 CODETIME_STRESS_TESTS=1（夜间/手动）"
         )
         let root = try makeRoot("ct037")
         defer { try? FileManager.default.removeItem(at: root) }

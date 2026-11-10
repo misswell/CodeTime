@@ -378,4 +378,38 @@ final class CloudSetupRegressionTests: XCTestCase {
         )
         XCTAssertTrue(workflow.contains("verify_release.sh") || workflow.contains("validate_entitlements.sh"))
     }
+
+    // MARK: - CT-138 stress test stays out of the regular gate
+
+    func testCT138_StressTestIsOptInSeparatelyFromScale() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let stress = try String(
+            contentsOf: repoRoot.appendingPathComponent(
+                "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift"
+            ),
+            encoding: .utf8
+        )
+        // The million-file test must be gated by the STRESS flag, not the scale
+        // flag that CI sets (otherwise the gate job exceeds its timeout).
+        XCTAssertTrue(stress.contains("CODETIME_STRESS_TESTS"))
+        let ci = try String(
+            contentsOf: repoRoot.appendingPathComponent(".github/workflows/ci.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(ci.contains("CODETIME_SCALE_TESTS"), "门禁仍需运行 10 万文件 scale 预览")
+        XCTAssertFalse(
+            ci.contains("CODETIME_STRESS_TESTS: \"1\""),
+            "常规 CI 不得启用百万文件压力测试"
+        )
+
+        // And the index must keep the stress test as manual acceptance only.
+        let indexData = try Data(contentsOf: repoRoot.appendingPathComponent("REGRESSION_INDEX.json"))
+        let entries = try XCTUnwrap(JSONSerialization.jsonObject(with: indexData) as? [[String: Any]])
+        let ct037 = try XCTUnwrap(entries.first { ($0["id"] as? String) == "CT-037" })
+        XCTAssertEqual(ct037["manualAcceptance"] as? Bool, true)
+        XCTAssertEqual(ct037["required"] as? Bool, false)
+    }
 }

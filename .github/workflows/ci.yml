@@ -174,9 +174,12 @@ jobs:
           path: Resources/Kopia
           key: kopia-${{ runner.os }}-${{ env.KOPIA_VERSION }}
       - run: ./Scripts/fetch_kopia.sh
-      - name: Full suite + CT-001 … CT-098 gate
+      - name: Full suite + CT-001 … CT-137 gate
         env:
           # CT-114: index-driven gate must run the real suite, including the
-          # scale preview test (CT-036) and the SIGKILL crash matrix (CT-098).
+          # 100k-file scale preview (CT-036) and the SIGKILL crash matrix (CT-098).
+          # CT-138: the million-file STRESS test stays opt-in
+          # (CODETIME_STRESS_TESTS=1, night runs) — it alone exceeds this job's
+          # timeout and starves the macOS runner queue.
           CODETIME_SCALE_TESTS: "1"
         run: ./Scripts/regression_gate.sh

@@ -6,7 +6,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 （CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
 
 <!-- test-report
-{"commit":"4f880a3800ade7713f52abbce9c3415fdd11a8e8","run":"42838938686","executed":178,"failures":0,"skipped":2,"passed":176,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满"]}
+{"commit":"b5a962b5f1ef0ad0f57b7f6e7b70ede67b1dff57","run":"42849498204","executed":179,"failures":0,"skipped":3,"passed":176,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
@@ -16,7 +16,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 | 基准 Commit | `ece7fff`（第七轮审查基准，main 最新） |
 | 交付 Commit SHA | `4f880a3`（iCloud 零配置改造最终提交） |
 | CI Run | `42838938686`（GitHub Actions `CI`，`main` push，10/10 全绿） |
-| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-137） |
+| 回归索引 | `REGRESSION_INDEX.json`（CT-001 … CT-138） |
 | 门禁脚本 | `Scripts/regression_gate.sh`（索引驱动、required 不可跳过、含报告一致性检查） |
 
 ## 2. 环境
@@ -32,7 +32,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 ## 3. 测试规模与口径（本轮统一）
 
 - **本地门禁**（发布验收依据）：`CODETIME_SCALE_TESTS=1`，XCTest 共 **166** 个，全部真实执行：
-  **164 通过，0 失败，2 跳过**。跳过项仅为两个人工验收测试（见第 6 节），不计入“通过”。
+  **176 通过，0 失败，3 跳过**。跳过项为人工验收测试（见第 6 节），不计入“通过”。
 - **CI**：不设置 `CODETIME_SCALE_TESTS`，规模测试（CT-036/CT-037/CT-117 的 3GiB 变体）在 CI 中
   跳过；CI 结果见「CI 结果」小节，两处口径分开陈述，不再混用。
 - 必需（required）回归：CT-001 … CT-128 中除人工验收项外的全部（128 项里 126 项 required）。
@@ -74,6 +74,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 
 | 项 | 状态 | 原因 |
 |---|---|---|
+| CT-037 百万文件压力测试 | **NOT RUN**（`CODETIME_STRESS_TESTS=1` 夜间/手动执行） | 常规门禁只跑 10 万文件 scale 预览；百万文件单测超出 CI job 超时 |
 | 双 Mac iCloud 真机验收 | **NOT RUN** | 需要两台真实 Mac 与真实 iCloud；Stable 发布前置条件（`require_icloud_acceptance.sh` 强制） |
 | 真实 Keychain 跨签名迁移 | **NOT RUN** | 需要 Developer ID 真机环境 |
 | CT-044 磁盘写满 | **NOT RUN** | 需要可控 ENOSPC 卷 |
