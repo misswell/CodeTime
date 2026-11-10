@@ -412,4 +412,42 @@ final class CloudSetupRegressionTests: XCTestCase {
         XCTAssertEqual(ct037["manualAcceptance"] as? Bool, true)
         XCTAssertEqual(ct037["required"] as? Bool, false)
     }
+
+    // MARK: - CT-139 recovery candidates expose device / time / projects
+
+    func testCT139_RecoveryCandidateListsProjectsBeforeDownload() async throws {
+        let cloud = try RegressionCloud(name: "ct139")
+        defer { cloud.cleanup() }
+        let device = UUID()
+        let store = cloud.store(deviceID: device)
+        try cloud.workspace.writeFile("repo/a.txt", "v1")
+        _ = try await cloud.publish(store, deviceID: device)
+
+        // The service records project roots after a confirmed publish; here we
+        // exercise the store API that does the recording.
+        try await store.recordProjectPaths(["/Users/dev/Code/Alpha"])
+        try await store.recordProjectPaths(["/Users/dev/Code/Beta", "/Users/dev/Code/Alpha/"])
+        // A later publish must not erase what was already recorded.
+        _ = try await cloud.publish(store, deviceID: device)
+
+        let candidates = try await CloudMirrorStore.recoverCandidates(
+            storageRoot: cloud.workspace.storageRoot,
+            recoveryKey: cloud.masterKey
+        )
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertEqual(candidate.projectPaths.count, 2, "项目路径必须去重")
+        XCTAssertEqual(
+            candidate.projectPaths,
+            ["/Users/dev/Code/Alpha", "/Users/dev/Code/Beta"],
+            "路径必须规范化并排序"
+        )
+        XCTAssertNotNil(candidate.latestBackupAt, "必须同时提供最近备份时间")
+        XCTAssertFalse(candidate.deviceName.isEmpty, "必须提供设备名称")
+
+        // The wizard renders last path components.
+        XCTAssertEqual(
+            candidate.projectPaths.map { URL(fileURLWithPath: $0).lastPathComponent },
+            ["Alpha", "Beta"]
+        )
+    }
 }

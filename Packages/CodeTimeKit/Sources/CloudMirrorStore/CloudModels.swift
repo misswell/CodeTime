@@ -70,6 +70,10 @@ struct RecoveryInfoFile: Codable {
     var createdAt: Date
     var keyFingerprint: String
     var payload: Data
+    /// CT-139: project roots this device backs up, so the recovery wizard can
+    /// show "设备 / 时间 / 项目" before downloading anything. Optional → older
+    /// recovery files (and older app versions) stay readable.
+    var projectPaths: [String]?
 }
 
 public struct RecoveredAccess: Sendable {

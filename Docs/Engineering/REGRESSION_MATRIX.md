@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-138）
+# 回归测试矩阵（CT-001 … CT-139）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -142,12 +142,13 @@
 | CT-136 | `testCT136_RecoveryAutoDetectsContainerStorageRoot` | 换机恢复自动发现容器目录 | 是 | 否 |
 | CT-137 | `testCT137_ReleaseValidationChecksTheSignedProduct` | 发布校验检查签名产物与描述文件 | 是 | 否 |
 | CT-138 | `testCT138_StressTestIsOptInSeparatelyFromScale` | 百万文件压力测试与常规门禁分离（避免 CI job 超时） | 是 | 否 |
+| CT-139 | `testCT139_RecoveryCandidateListsProjectsBeforeDownload` | 恢复页在下载前展示设备/时间/项目 | 是 | 否 |
 
 ## 门禁规则（CT-114 / CT-138）
 
-- 索引必须恰好登记 CT-001…CT-138，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-139，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。
-- 常规 CI 只启用 `CODETIME_SCALE_TESTS=1`（10 万文件预览）；百万文件压力需 `CODETIME_STRESS_TESTS=1`。
-- 门禁同时执行 `Scripts/check_test_report.py`：三份工程文档的测试统计必须与 TEST_REPORT 机器可读块一致。
+- 常规 CI 只启用 `CODETIME_SCALE_TESTS=1`；百万文件压力需 `CODETIME_STRESS_TESTS=1`。
+- 门禁同时执行 `Scripts/check_test_report.py`：工程文档统计必须与 TEST_REPORT 机器可读块一致。

@@ -1378,5 +1378,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "CT-037 只在 CODETIME_STRESS_TESTS=1 下运行，常规 CI 不超时"
+  },
+  {
+    "id": "CT-139",
+    "test": "testCT139_RecoveryCandidateListsProjectsBeforeDownload",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "恢复页在下载前展示设备/时间/项目",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "发布时记录项目路径，恢复候选去重排序后展示，且后续发布不丢失"
   }
 ]

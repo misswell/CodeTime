@@ -466,6 +466,9 @@ public struct RecoveryCandidate: Codable, Identifiable, Hashable, Sendable {
     public var kopiaVersion: String?
     public var recoveryInfoPath: String
     public var blockedReason: String?
+    /// CT-139: project roots recorded by the publishing device, shown in the
+    /// recovery wizard before anything is downloaded.
+    public var projectPaths: [String]
 
     public init(
         id: UUID = UUID(),
@@ -480,7 +483,8 @@ public struct RecoveryCandidate: Codable, Identifiable, Hashable, Sendable {
         integrityOK: Bool = false,
         kopiaVersion: String? = nil,
         blockedReason: String? = nil,
-        recoveryInfoPath: String = ""
+        recoveryInfoPath: String = "",
+        projectPaths: [String] = []
     ) {
         self.id = id
         self.repositoryID = repositoryID
@@ -495,6 +499,7 @@ public struct RecoveryCandidate: Codable, Identifiable, Hashable, Sendable {
         self.kopiaVersion = kopiaVersion
         self.blockedReason = blockedReason
         self.recoveryInfoPath = recoveryInfoPath
+        self.projectPaths = projectPaths
     }
 
     public var isRestorable: Bool {

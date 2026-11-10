@@ -69,6 +69,28 @@ requiresUserAction（账户/权限/凭据/配置）
 
 `CloudRecoverySheet` 打开时自动 `detect()`：就绪则直接使用 `storageRoot`，用户只需输入恢复密钥；只有在构建/账户/容器不可用时才提供「选择其他目录…」作为兜底。恢复仍沿用既有 CloudMirrorStore 候选发现、对象校验、staging 与提交日志。
 
+**CT-139 项目列表**：发布成功后把项目根路径（仅路径，不含内容/密钥）合并写入该设备的
+`recovery-info.json` 的 `projectPaths` 字段（去重、排序、上限 50）。恢复页因此在**下载任何对象之前**
+就能展示「设备名称 / 最近备份时间 / 项目」。该字段为可选，旧版恢复文件与旧版 App 均可正常读写；
+`publish` 刷新恢复文件时会保留已有列表。
+
+## 5.1 发布前置：Developer ID 描述文件
+
+带 iCloud 权限的 Developer ID 构建**必须**有 Developer ID 描述文件。两条路径：
+
+1. **自动（需先同意协议）**：`Scripts/setup_apple_provisioning.sh`
+   - 校验 asc/gh 认证 → 查找 Bundle ID 与 Developer ID 证书 → 创建/复用描述文件 →
+     下载并用 `security cms -D` 校验其中含 `iCloud.com.codetime.app`、App Group 与 Bundle ID →
+     base64 写入 secret `APPLE_PROVISIONING_PROFILE`。任何一步失败都会给出下一步操作。
+2. **手动**：developer.apple.com → Profiles → + → Developer ID → Mac App，
+   App ID `com.codetime.app`，勾选 iCloud 容器与 App Group，下载后
+   `base64 -i <file> | gh secret set APPLE_PROVISIONING_PROFILE --repo misswell/CodeTime`。
+
+> **当前环境阻塞（2026-11-11 实测）**：App Store Connect API 返回
+> `PLA Update available … Account Holder, Guofeng Liu, must agree to the latest Program License Agreement`。
+> 描述文件与证书接口全部不可用，`xcodebuild -allowProvisioningUpdates` 同样建不出 profile。
+> 只有账号持有人登录 developer.apple.com → Agreements 同意后才能继续；此后运行上面的脚本即可。
+
 ## 6. 发布校验
 
 `Scripts/validate_entitlements.sh <signed.app>` 现在验证**签名产物**：

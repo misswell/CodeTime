@@ -202,6 +202,30 @@ public actor CloudMirrorStore: CloudStore {
         }
     }
 
+    /// CT-139: records the project roots this device backs up in the plaintext
+    /// recovery metadata (paths only — never file contents or secrets). Merges
+    /// with what is already recorded so a new project never hides older ones.
+    public func recordProjectPaths(_ paths: [String]) async throws {
+        guard !paths.isEmpty else { return }
+        try await prepare()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var info: RecoveryInfoFile
+        if let data = try? await access.read(recoveryInfoURL),
+           let existing = try? decoder.decode(RecoveryInfoFile.self, from: data) {
+            info = existing
+        } else {
+            return
+        }
+        var merged = Set(info.projectPaths ?? [])
+        for path in paths where !path.isEmpty {
+            merged.insert(URL(fileURLWithPath: path).standardizedFileURL.path)
+        }
+        // Bounded and deterministic: the wizard only needs a readable summary.
+        info.projectPaths = Array(merged).sorted().prefix(50).map { $0 }
+        try await access.writeAtomically(try encoder.encode(info), to: recoveryInfoURL)
+    }
+
     private func writeRecoveryInfo() async throws {
         let masterKey = try configuration.masterKeyProvider.masterKey()
         let payload = RecoveryPayload(
@@ -217,6 +241,13 @@ public actor CloudMirrorStore: CloudStore {
             masterKey: masterKey,
             context: recoveryContext(repositoryID: configuration.repositoryID)
         )
+        // CT-139: publish also refreshes this file — never drop the project list
+        // recorded by `recordProjectPaths`.
+        let existingPaths: [String]? = {
+            guard let data = try? Data(contentsOf: recoveryInfoURL),
+                  let existing = try? decoder.decode(RecoveryInfoFile.self, from: data) else { return nil }
+            return existing.projectPaths
+        }()
         let info = RecoveryInfoFile(
             formatVersion: formatVersion,
             repositoryId: configuration.repositoryID,
@@ -224,7 +255,8 @@ public actor CloudMirrorStore: CloudStore {
             deviceName: configuration.deviceName,
             createdAt: Date(),
             keyFingerprint: Self.keyFingerprint(masterKey),
-            payload: sealed
+            payload: sealed,
+            projectPaths: existingPaths
         )
         try await access.writeAtomically(try encoder.encode(info), to: recoveryInfoURL)
     }
@@ -1926,7 +1958,8 @@ public actor CloudMirrorStore: CloudStore {
                         deviceID: info.deviceId,
                         deviceName: info.deviceName ?? device.lastPathComponent,
                         blockedReason: "恢复密钥与该设备不匹配",
-                        recoveryInfoPath: infoURL.path
+                        recoveryInfoPath: infoURL.path,
+                        projectPaths: info.projectPaths ?? []
                     ))
                     continue
                 }
@@ -1943,7 +1976,8 @@ public actor CloudMirrorStore: CloudStore {
                         deviceID: info.deviceId,
                         deviceName: info.deviceName ?? device.lastPathComponent,
                         blockedReason: "无法解密恢复信息：\(error.localizedDescription)",
-                        recoveryInfoPath: infoURL.path
+                        recoveryInfoPath: infoURL.path,
+                        projectPaths: info.projectPaths ?? []
                     ))
                     continue
                 }
@@ -2041,7 +2075,8 @@ public actor CloudMirrorStore: CloudStore {
                     integrityOK: blocked == nil,
                     kopiaVersion: nil,
                     blockedReason: blocked,
-                    recoveryInfoPath: infoURL.path
+                    recoveryInfoPath: infoURL.path,
+                    projectPaths: info.projectPaths ?? []
                 ))
             }
         }

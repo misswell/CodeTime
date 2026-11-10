@@ -903,6 +903,16 @@ struct CloudRecoverySheet: View {
                     Text(candidateSubtitle(candidate))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if !candidate.projectPaths.isEmpty {
+                        // CT-139: "设备 / 时间 / 项目" before anything is downloaded.
+                        Text("项目：" + candidate.projectPaths
+                            .map { URL(fileURLWithPath: $0).lastPathComponent }
+                            .joined(separator: "、"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
                     if let blocked = candidate.blockedReason {
                         Text(blocked)
                             .font(.caption2)

@@ -1783,6 +1783,17 @@ public actor CodeTimeService {
 
             try await store.publish(repositoryId: repository.id, generation: generation)
 
+            // CT-139: the recovery wizard shows "设备 / 时间 / 项目" before any
+            // download. Paths only, merged and bounded; never file contents.
+            if let project = try? await database.project(id: snapshot.projectID) {
+                do {
+                    try await store.recordProjectPaths([project.rootPath])
+                } catch {
+                    // Metadata only: a failure must never fail the publish.
+                    await logger.warning("记录恢复项目路径失败：\(error.localizedDescription)")
+                }
+            }
+
             if let published = try await store.listGenerations(repositoryId: repository.id)
                 .first(where: { $0.id == generation.id }) {
                 generation = published
@@ -2842,6 +2853,15 @@ public actor CodeTimeService {
             message: "已从 iCloud 恢复备份仓库",
             details: "校验 \(report.verifiedObjects) 个对象，发现 \(sources.count) 个历史项目路径"
         ))
+        // CT-139: after a successful recovery, persist the recovered project roots
+        // so a later device also sees the project list before downloading.
+        if !sources.isEmpty {
+            do {
+                try await store.recordProjectPaths(sources)
+            } catch {
+                await logger.warning("记录恢复后的项目路径失败：\(error.localizedDescription)")
+            }
+        }
         try await database.setCodable(true, forKey: Keys.cloudRecoveryAttempted)
         return CloudRecoveryResult(
             repositoryID: recovered.repositoryID,

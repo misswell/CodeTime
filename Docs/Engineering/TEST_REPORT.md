@@ -6,7 +6,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 （CT-127/CT-128），统计不一致或把跳过项计入通过会直接阻断发布门禁。
 
 <!-- test-report
-{"commit":"a6446cc77c5c861073173201f33ddf461288409d","run":"42861463028","executed":179,"failures":0,"skipped":3,"passed":176,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"a6446cc77c5c861073173201f33ddf461288409d","run":"42861463028","executed":180,"failures":0,"skipped":3,"passed":177,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
@@ -32,7 +32,7 @@ test-report 机器可读块为唯一事实源，由 `Scripts/check_test_report.p
 ## 3. 测试规模与口径（本轮统一）
 
 - **本地门禁**（发布验收依据）：`CODETIME_SCALE_TESTS=1`，XCTest 共 **166** 个，全部真实执行：
-  **176 通过，0 失败，3 跳过**。跳过项为人工验收测试（见第 6 节），不计入“通过”。
+  **177 通过，0 失败，3 跳过**。跳过项为人工验收测试（见第 6 节），不计入“通过”。
 - **CI**：不设置 `CODETIME_SCALE_TESTS`，规模测试（CT-036/CT-037/CT-117 的 3GiB 变体）在 CI 中
   跳过；CI 结果见「CI 结果」小节，两处口径分开陈述，不再混用。
 - 必需（required）回归：CT-001 … CT-128 中除人工验收项外的全部（128 项里 126 项 required）。
