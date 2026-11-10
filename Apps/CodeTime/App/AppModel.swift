@@ -453,6 +453,20 @@ final class AppModel: ObservableObject {
     }
 
     private func installObservers() {
+        // CT-129: iCloud account / Drive availability can change while the app
+        // runs (sign-in, sign-out, Drive toggled). Re-probe instead of showing a
+        // stale capability.
+        let ubiquityToken = NotificationCenter.default.addObserver(
+            forName: .NSUbiquityIdentityDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.refreshCloudSetup()
+            }
+        }
+        notifications.append(ubiquityToken)
+
         let center = DistributedNotificationCenter.default()
         let token = center.addObserver(
             forName: NSNotification.Name("com.codetime.changed"),

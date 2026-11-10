@@ -50,6 +50,9 @@ public struct CloudSetupStatus: Sendable, Equatable {
     public var requiresSystemSettings: Bool
     public var containerURL: URL?
     public var storageRoot: URL?
+    /// Checks that already passed, in order, so the wizard can show a checklist
+    /// instead of one opaque status line (goal §3.1 检测项目).
+    public var passedChecks: [String]
 
     public init(
         state: State,
@@ -57,7 +60,8 @@ public struct CloudSetupStatus: Sendable, Equatable {
         detail: String,
         requiresSystemSettings: Bool = false,
         containerURL: URL? = nil,
-        storageRoot: URL? = nil
+        storageRoot: URL? = nil,
+        passedChecks: [String] = []
     ) {
         self.state = state
         self.title = title
@@ -65,6 +69,7 @@ public struct CloudSetupStatus: Sendable, Equatable {
         self.requiresSystemSettings = requiresSystemSettings
         self.containerURL = containerURL
         self.storageRoot = storageRoot
+        self.passedChecks = passedChecks
     }
 
     public var isReady: Bool { state.isReady }
@@ -145,14 +150,17 @@ public enum CloudSetupService {
     ) async -> CloudSetupStatus {
         await Task.detached(priority: .userInitiated) { () -> CloudSetupStatus in
             guard probe.buildSupportsICloud() else { return .unsupported }
+            var passed: [String] = ["当前版本支持 iCloud"]
             guard probe.hasUbiquityIdentity() else {
                 return CloudSetupStatus(
                     state: .accountNotSignedIn,
                     title: "请先登录 Apple 账户",
                     detail: "iCloud 备份需要一个已登录的 Apple 账户。登录后回到这里点「重新检测」。",
-                    requiresSystemSettings: true
+                    requiresSystemSettings: true,
+                    passedChecks: passed
                 )
             }
+            passed.append("已检测到 Apple 账户")
             guard let container = probe.containerURL(containerIdentifier) else {
                 // Distinguish "iCloud Drive is off" from "our container is missing".
                 if probe.defaultContainerURL() == nil {
@@ -160,15 +168,18 @@ public enum CloudSetupService {
                         state: .driveDisabled,
                         title: "请开启 iCloud Drive",
                         detail: "系统设置 → Apple 账户 → iCloud → iCloud Drive 打开后重试。",
-                        requiresSystemSettings: true
+                        requiresSystemSettings: true,
+                        passedChecks: passed
                     )
                 }
                 return CloudSetupStatus(
                     state: .containerUnavailable,
                     title: "iCloud 服务暂时不可用",
-                    detail: "已登录且 iCloud Drive 正常，但 CodeTime 的 iCloud 容器无法访问。请稍后重试，或检查是否限制了该 App 的 iCloud 权限。"
+                    detail: "已登录且 iCloud Drive 正常，但 CodeTime 的 iCloud 容器无法访问。请稍后重试，或检查是否限制了该 App 的 iCloud 权限。",
+                    passedChecks: passed
                 )
             }
+            passed.append("iCloud 容器可访问")
             let documents = container.appendingPathComponent("Documents", isDirectory: true)
             let storageRoot = documents.appendingPathComponent(storageFolderName, isDirectory: true)
             guard provision else {
@@ -177,7 +188,8 @@ public enum CloudSetupService {
                     title: "iCloud 已就绪",
                     detail: "备份会保存到 iCloud Drive / CodeTime。",
                     containerURL: container,
-                    storageRoot: storageRoot
+                    storageRoot: storageRoot,
+                    passedChecks: passed
                 )
             }
             // Create + write-probe: a container that cannot be written is not
@@ -200,15 +212,18 @@ public enum CloudSetupService {
                     title: "iCloud 备份目录不可写",
                     detail: "无法在 iCloud Drive/CodeTime 创建文件：\(error.localizedDescription)。请检查磁盘空间或 iCloud 权限后重试。",
                     containerURL: container,
-                    storageRoot: storageRoot
+                    storageRoot: storageRoot,
+                    passedChecks: passed
                 )
             }
+            passed.append("备份目录可读写")
             return CloudSetupStatus(
                 state: .ready,
                 title: "iCloud 已就绪",
                 detail: "备份会保存到 iCloud Drive / CodeTime，并自动同步与校验。",
                 containerURL: container,
-                storageRoot: storageRoot
+                storageRoot: storageRoot,
+                passedChecks: passed
             )
         }.value
     }

@@ -242,6 +242,18 @@ struct OnboardingView: View {
                 }
 
                 if !status.isReady {
+                    if !status.passedChecks.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(status.passedChecks, id: \.self) { check in
+                                Label(check, systemImage: "checkmark.circle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(CT.success)
+                            }
+                            Label(status.title, systemImage: "exclamationmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(CT.warning)
+                        }
+                    }
                     Text(status.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
