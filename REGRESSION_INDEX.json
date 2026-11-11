@@ -1448,5 +1448,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "doctor 报告 window 检查项（不阻塞）；Scripts/fix_window.sh 可执行且分别移动窗口与 SecurityAgent 授权框"
+  },
+  {
+    "id": "CT-146",
+    "test": "testCT146_ProjectDiscoverySkipsTCCProtectedFolders",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudSetupRegressionTests.swift",
+    "purpose": "首启向导的项目发现不得自动扫描 TCC 保护目录（文稿/桌面/下载）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "ProjectDiscovery 过滤受保护目录；AppModel 使用共享候选列表，不硬编码"
   }
 ]

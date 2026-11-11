@@ -645,13 +645,16 @@ final class AppModel: ObservableObject {
     }
 
     /// Candidate project directories to SUGGEST in onboarding. Bounded depth and
-    /// only well-known developer folders — never a whole-disk scan.
+    /// only well-known developer folders — never a whole-disk scan, and never a
+    /// TCC-protected folder (CT-146: probing ~/Documents raised a privacy prompt
+    /// the instant step 2 opened).
     func suggestedProjectDirectories() -> [URL] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
-        let candidates = ["Developer", "Code", "Projects", "Documents", "Desktop", "src", "work"]
+        let candidates = ProjectDiscovery.effectiveCandidates
         var result: [URL] = []
         for name in candidates {
+            guard ProjectDiscovery.isAutoScannable(name) else { continue }
             let url = home.appendingPathComponent(name, isDirectory: true)
             guard fm.fileExists(atPath: url.path) else { continue }
             result.append(contentsOf: gitRepositories(in: url, maxDepth: 2))

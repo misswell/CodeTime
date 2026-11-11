@@ -704,4 +704,44 @@ final class CloudSetupRegressionTests: XCTestCase {
         XCTAssertTrue(fixScript.contains("System Events"))
         XCTAssertTrue(fixScript.contains("SecurityAgent"), "授权框与窗口是不同进程，必须分别移动")
     }
+
+    /// CT-146: the first-run wizard must not probe TCC-protected folders.
+    /// Scanning ~/Documents raised "CodeTime.app 想访问'文稿'文件夹" the instant step 2
+    /// opened — an authorization prompt the user never asked for, which also
+    /// blocks the flow (§3.2: no reading other directories without consent).
+    func testCT146_ProjectDiscoverySkipsTCCProtectedFolders() throws {
+        for protected in ["Documents", "Desktop", "Downloads"] {
+            XCTAssertFalse(
+                ProjectDiscovery.isAutoScannable(protected),
+                "\(protected) 需要用户显式授权，不得自动扫描"
+            )
+            XCTAssertFalse(
+                ProjectDiscovery.effectiveCandidates.contains(protected),
+                "\(protected) 不得出现在自动发现候选里"
+            )
+            XCTAssertFalse(
+                ProjectDiscovery.isAutoScannable(protected.lowercased()),
+                "大小写变体也必须被拒绝"
+            )
+        }
+        XCTAssertTrue(ProjectDiscovery.isAutoScannable("Developer"))
+        XCTAssertTrue(ProjectDiscovery.isAutoScannable("Code"))
+        XCTAssertFalse(ProjectDiscovery.effectiveCandidates.isEmpty, "至少要留下可用的开发目录")
+
+        // The app must consume the shared list instead of re-hardcoding one
+        // (that hardcoded array is what pulled Documents/Desktop back in).
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appModel = try String(
+            contentsOf: repoRoot.appendingPathComponent("Apps/CodeTime/App/AppModel.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(appModel.contains("ProjectDiscovery.effectiveCandidates"))
+        XCTAssertFalse(
+            appModel.contains("\"Documents\", \"Desktop\""),
+            "AppModel 不得再硬编码受保护目录"
+        )
+    }
 }
