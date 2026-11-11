@@ -116,7 +116,7 @@
 
 | 项 | 状态 | 原因 |
 |---|---|---|
-| 真实双 Mac iCloud 上传/驱逐/重新下载/跨设备发现 | **BLOCKED / NOT RUN** | 无第二台 Mac；Apple Developer PLA 未由用户接受；Xcode 无签名账号；真实容器写入报 `NSCocoaErrorDomain 4355` |
+| 真实双 Mac iCloud 上传/驱逐/重新下载/跨设备发现 | **BLOCKED / NOT RUN** | 无第二台 Mac；PLA 未接受；Xcode CLI 报 `No Accounts`；无带 iCloud feature 的 profile；iCloud Drive 探测写入即报 `NSCocoaErrorDomain 4355`。详见 `ICLOUD_ACCEPTANCE_STATUS.md` |
 | 真实 Keychain 跨签名迁移 | **NOT RUN** | 需要 Developer ID/Beta→Release 真机签名链 |
 | 100 GB 全随机数据 | **NOT RUN** | 本机可用空间不足，外接卷 ACL 不可写 |
 | 100 万文件 v3 全量备份 | **NOT RUN** | 未生成百万 inode 数据集；CT-037 只验证扫描上限 |
@@ -134,4 +134,7 @@ Packages/CodeTimeKit/.build/out/Products/Release/V3Acceptance \
   perf /tmp/codetime-v3perf-100k small 100000 1024
 ```
 
-真实双 Mac iCloud 验收按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md` 执行；在完成前发布报告必须保持 `BLOCKED`。
+两台 Mac 先运行 `Scripts/icloud_acceptance.sh preflight`，只有返回
+`ICLOUD_PRECHECK_READY` 后才按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md`
+执行；在完成前发布报告必须保持 `BLOCKED`。当前真实阻塞证据见
+`ICLOUD_ACCEPTANCE_STATUS.md`。

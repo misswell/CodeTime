@@ -60,6 +60,10 @@ os_version() {
 cmd="${1:-}"; shift || true
 
 case "$cmd" in
+  preflight)
+    exec "$(cd "$(dirname "$0")" && pwd)/icloud_preflight.sh" "$@"
+    ;;
+
   prepare)
     PROJECT=""; OUT=""
     while [ $# -gt 0 ]; do
