@@ -21,7 +21,7 @@ let package = Package(
         .target(name: "CodeTimeSecurity", dependencies: ["SharedModels"], path: "Sources/Security"),
         .target(
             name: "BackupEngine",
-            dependencies: ["SharedModels"],
+            dependencies: ["SharedModels", "CodeTimeSecurity"],
             resources: [.copy("Resources/ExclusionPresets")]
         ),
         .target(name: "CloudMirrorStore", dependencies: ["SharedModels", "CodeTimeSecurity"]),

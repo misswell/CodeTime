@@ -1458,5 +1458,55 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "ProjectDiscovery 过滤受保护目录；AppModel 使用共享候选列表，不硬编码"
+  },
+  {
+    "id": "CT-147",
+    "test": "testCT147_ChunkerIsContentDefinedAndStable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3CoreTests.swift",
+    "purpose": "内容定义分块稳定、追加不改已有块、插入可复用",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "FastCDC 边界由内容决定；相同输入恒得相同块 ID"
+  },
+  {
+    "id": "CT-148",
+    "test": "testCT148_ObjectIdentityIsStableAndKeyScoped",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3CoreTests.swift",
+    "purpose": "对象 ID 由 HMAC 派生且按仓库密钥隔离",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "同内容同密钥同 ID；换密钥 ID 必变；64 位十六进制"
+  },
+  {
+    "id": "CT-149",
+    "test": "testCT149_EncryptedObjectRoundTrip",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3CoreTests.swift",
+    "purpose": "对象信封压缩+AEAD 往返与防篡改",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "CO3 头绑定为 AAD；篡改/换钥/换 ID 必须拒绝"
+  },
+  {
+    "id": "CT-150",
+    "test": "testCT150_TreeIsDeterministicAndOrderIndependent",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3CoreTests.swift",
+    "purpose": "Merkle 树身份确定且变更只沿路径传播",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "输入顺序无关；同层无关子树 ID 不变"
+  },
+  {
+    "id": "CT-151",
+    "test": "testCT151_CommitRequiresManifestAndMatchingHash",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
+    "purpose": "v3 云存储发布顺序与幂等",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "无 Manifest 不得发布 Commit；哈希不符拒绝；未 Commit 版本不可见"
   }
 ]
