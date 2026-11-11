@@ -11,6 +11,8 @@
 | `icloud-preflight-blocked-20261111.log` | 真实 iCloud 预检：PLA 未同意、iCloud Drive 上传报 4355 | 本机 macOS 27.2.1 |
 | `icloud-preflight-recheck-20261111T1348Z.log` | 复检：PLA、Xcode 账号、iCloud 4355、第二台 Mac 均未变化 | 本机 macOS 27.2.1 |
 | `icloud-preflight-after-bird-restart-20261111.log` | 重启 bird 后仍报 iCloud 4355，排除同步进程卡死 | 本机 macOS 27.2.1 |
+| `icloud-signing-ready-20261111.log` | Bundle/container/profile/entitlement 全链路，输出 ICLOUD_SIGNING_READY | 本机 macOS 27.2.1 |
+| `icloud-selftest-upload-4355-20261111.log` | 已签名 App 解析容器成功、ubiquity token 存在，但上传仍报 4355 | 本机 macOS 27.2.1 |
 | `v3icloud-single-mac-blocked-20261111.log` | `V3Acceptance icloud` 单机真实 iCloud 上传失败（未确认上传） | 本机 macOS 27.2.1 |
 | `betaicloud-provisioning-blocked-20261111.log` | BetaICloud 构建失败：缺少带 iCloud feature 的 provisioning profile | 本机 Xcode |
 | `xcodebuild-automatic-signing-blocked-20261111.log` | `-allowProvisioningUpdates` 失败：Xcode CLI `No Accounts` | 本机 Xcode |

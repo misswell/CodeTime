@@ -85,8 +85,11 @@ targets:
           ARCHS: "arm64 x86_64"
         BetaICloud:
           CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_IDENTITY: "Apple Development"
           DEVELOPMENT_TEAM: U8U443D7ZL
+          # Scoped to the app target only: passing PROVISIONING_PROFILE on the
+          # xcodebuild command line would also hit SwiftPM targets, which reject it.
+          PROVISIONING_PROFILE_SPECIFIER: "$(CODETIME_PROVISIONING_PROFILE)"
           CODE_SIGN_ENTITLEMENTS: Apps/CodeTime/CodeTime.entitlements
           ENABLE_HARDENED_RUNTIME: YES
           ONLY_ACTIVE_ARCH: NO

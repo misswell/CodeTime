@@ -64,7 +64,12 @@ if ! printf '%s' "$CAPS" | grep -q 'ICLOUD'; then
 fi
 
 # 3. This Mac must be a registered development device.
-UDID="$(asc devices local-udid 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["udid"])')"
+# Xcode identifies a Mac by the "Provisioning UDID", which differs from the
+# hardware UUID. Prefer system_profiler and fall back to asc for older systems.
+UDID="$(system_profiler SPHardwareDataType 2>/dev/null | awk -F': ' '/Provisioning UDID/ {print $2; exit}')"
+if [ -z "$UDID" ]; then
+  UDID="$(asc devices local-udid 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["udid"])')"
+fi
 DEVICE_ID="$(asc devices list --paginate 2>/dev/null | python3 -c '
 import json,sys
 try: d=json.load(sys.stdin)
@@ -178,7 +183,7 @@ xcodebuild \
   CODE_SIGN_STYLE=Manual \
   CODE_SIGN_IDENTITY="Apple Development" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
-  PROVISIONING_PROFILE="$PROFILE_UUID" \
+  CODETIME_PROVISIONING_PROFILE="$PROFILE_NAME" \
   build > "$TMP/build.log" 2>&1 || {
     tail -40 "$TMP/build.log" >&2
     fail "BetaICloud build failed"

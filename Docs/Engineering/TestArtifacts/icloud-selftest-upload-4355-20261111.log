@@ -1,0 +1,4 @@
+ubiquityIdentityToken=true
+container=/Users/guofeng/Library/Mobile Documents/iCloud~com~codetime~app
+probe=/Users/guofeng/Library/Mobile Documents/iCloud~com~codetime~app/Documents/CodeTimeSelfTest/probe-6916C9E5-8DB0-4814-A57D-DFA40002DB6C.txt
+ICLOUD_SELFTEST_BLOCKED reason=upload-error domain=NSCocoaErrorDomain code=4355 detail=Couldn’t access your iCloud account. The iCloud servers might be unreachable or your settings might be incorrect.

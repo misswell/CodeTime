@@ -5,7 +5,9 @@ import SharedModels
 @main
 enum CodeTimeLauncher {
     static func main() {
-        if CommandLine.arguments.contains("--agent") || ProcessInfo.processInfo.environment["CODETIME_AGENT_MODE"] == "1" {
+        if CommandLine.arguments.contains("--icloud-selftest") {
+            ICloudSelfTest.run()
+        } else if CommandLine.arguments.contains("--agent") || ProcessInfo.processInfo.environment["CODETIME_AGENT_MODE"] == "1" {
             AgentRunner.run()
         } else {
             CodeTimeApp.main()

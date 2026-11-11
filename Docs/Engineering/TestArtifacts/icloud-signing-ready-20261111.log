@@ -1,0 +1,13 @@
+ICLOUD_SIGNING_BEGIN 2026-11-11T15:09:41Z
+bundle_resource=33UYTPSVJB
+device_id=SMGZ2QYF24
+certificate_id=L38ZGDWS9K
+creating provisioning profile CodeTime Mac Development iCloud
+profile_id=7D64XCN7Y8
+profile_containers=iCloud.com.codetime.app
+profile_ubiquity=iCloud.com.codetime.app
+installed_profile=4f39ecbc-f58e-446f-9fdb-5294fe9a9b97
+app_containers=iCloud.com.codetime.app
+app_services=CloudDocuments
+app=/Users/guofeng/Code/solo/CodeTime/.build/DerivedData/Build/Products/BetaICloud/CodeTime.app
+ICLOUD_SIGNING_READY

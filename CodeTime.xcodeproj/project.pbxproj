@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0F714445033CE5DE4BC38810 /* DiffViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201D4855E5D218F44128F44D /* DiffViewerView.swift */; };
+		13600CE7028A4DCF5F00C634 /* ICloudSelfTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3730303C8FC66E16FCDA797C /* ICloudSelfTest.swift */; };
 		170990406D54A87653CA7BC2 /* ProjectEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC338252E04354F9D8F7F262 /* ProjectEditorView.swift */; };
 		30E9183BD3AD0EAC6EE17CBA /* Diagnostics in Frameworks */ = {isa = PBXBuildFile; productRef = 20E01511A7378FF76924FDFD /* Diagnostics */; };
 		49674D9C805C77DB24BFF5CD /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCB9BCCA0B5B0D38CE735F3 /* AgentRunner.swift */; };
@@ -36,6 +37,7 @@
 		19349A156B89D836EE0612E1 /* CodeTimeKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CodeTimeKit; path = Packages/CodeTimeKit; sourceTree = SOURCE_ROOT; };
 		201D4855E5D218F44128F44D /* DiffViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffViewerView.swift; sourceTree = "<group>"; };
 		3665CE384B07E1BBBAF95847 /* CodeTime-Beta.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "CodeTime-Beta.entitlements"; sourceTree = "<group>"; };
+		3730303C8FC66E16FCDA797C /* ICloudSelfTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloudSelfTest.swift; sourceTree = "<group>"; };
 		3E382B9BD58BBA805236E863 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		49B66F0026ECDDBF0F2216E8 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		5874F154F37949185331A070 /* RestoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestoreSheet.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 				CE046E3C80125C9970016D99 /* AppModel.swift */,
 				13327DE188950797D28C8FB6 /* CodeTimeApp.swift */,
 				79A0F006315E5B825ED73B4D /* DesignSystem.swift */,
+				3730303C8FC66E16FCDA797C /* ICloudSelfTest.swift */,
 				F680740EF9F5365BF14C45E8 /* LaunchAgentManager.swift */,
 			);
 			path = App;
@@ -337,6 +340,7 @@
 				67B575FFD2E296E65D5B2A09 /* DashboardView.swift in Sources */,
 				93A2BBFBAF8A3F09712BE505 /* DesignSystem.swift in Sources */,
 				0F714445033CE5DE4BC38810 /* DiffViewerView.swift in Sources */,
+				13600CE7028A4DCF5F00C634 /* ICloudSelfTest.swift in Sources */,
 				A656CC23CFDF50754BC77AAE /* LaunchAgentManager.swift in Sources */,
 				C9CFEA9EB5571EF92591BEBE /* LineDiff.swift in Sources */,
 				F110351B6C78FBC2ED9C8C65 /* OnboardingView.swift in Sources */,
@@ -357,7 +361,7 @@
 				ARCHS = "arm64 x86_64";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Apps/CodeTime/CodeTime.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = U8U443D7ZL;
@@ -367,6 +371,7 @@
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.codetime.app;
 				PRODUCT_NAME = CodeTime;
+				PROVISIONING_PROFILE_SPECIFIER = "$(CODETIME_PROVISIONING_PROFILE)";
 				SDKROOT = macosx;
 			};
 			name = BetaICloud;
