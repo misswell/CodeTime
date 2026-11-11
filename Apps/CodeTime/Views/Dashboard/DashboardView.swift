@@ -222,7 +222,7 @@ struct StorageSummaryCard: View {
                     HStack(spacing: 18) {
                         storageItem(
                             "元数据索引",
-                            CodeTimeFormat.bytes(storage.indexedChunkBytes),
+                            CodeTimeFormat.bytes(storage.metadataBytes),
                             "重建即可恢复"
                         )
                         storageItem(
@@ -236,9 +236,9 @@ struct StorageSummaryCard: View {
                             storage.pendingTasks == 0 ? "云端已确认" : "\(storage.pendingTasks) 个任务 · 不可删除"
                         )
                         storageItem(
-                            "iCloud 备份",
-                            model.cloudSummary.map { CodeTimeFormat.bytes($0.byteSize) } ?? "已启用",
-                            "最终恢复来源"
+                            "云端数据块",
+                            CodeTimeFormat.bytes(storage.indexedChunkBytes),
+                            "iCloud 最终恢复来源"
                         )
                         Spacer()
                         if storage.cacheBytes > 0 {

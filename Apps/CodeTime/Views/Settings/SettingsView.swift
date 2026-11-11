@@ -354,9 +354,16 @@ private struct CloudSettingsView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(CodeTimeFormat.bytes(storage.indexedChunkBytes))
+                                    Text(CodeTimeFormat.bytes(storage.metadataBytes))
                                         .font(.system(size: 18, weight: .semibold, design: .rounded))
                                     Text("元数据索引")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(CodeTimeFormat.bytes(storage.indexedChunkBytes))
+                                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                    Text("云端数据块")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -379,7 +386,7 @@ private struct CloudSettingsView: View {
                                     Task { await model.clearDownloadCache() }
                                 }
                                 .disabled(storage.cacheBytes == 0)
-                                Button("查看待上传任务") {
+                                Button("立即上传待传数据") {
                                     Task { await model.resumePendingUploads() }
                                 }
                                 .disabled(storage.pendingTasks == 0)

@@ -79,6 +79,7 @@ public struct V3StorageStatus: Sendable, Equatable {
     public var spoolSoftLimitBytes: Int64
     public var oldestPendingAt: Date?
     public var cacheBytes: Int64
+    public var metadataBytes: Int64
     public var indexedChunkBytes: Int64
     public var cacheBudgetBytes: Int64
     public var isSpoolOversized: Bool
@@ -90,6 +91,7 @@ public struct V3StorageStatus: Sendable, Equatable {
         spoolSoftLimitBytes: Int64 = 0,
         oldestPendingAt: Date? = nil,
         cacheBytes: Int64 = 0,
+        metadataBytes: Int64 = 0,
         indexedChunkBytes: Int64 = 0,
         cacheBudgetBytes: Int64 = 0,
         isSpoolOversized: Bool = false
@@ -100,6 +102,7 @@ public struct V3StorageStatus: Sendable, Equatable {
         self.spoolSoftLimitBytes = spoolSoftLimitBytes
         self.oldestPendingAt = oldestPendingAt
         self.cacheBytes = cacheBytes
+        self.metadataBytes = metadataBytes
         self.indexedChunkBytes = indexedChunkBytes
         self.cacheBudgetBytes = cacheBudgetBytes
         self.isSpoolOversized = isSpoolOversized
@@ -970,6 +973,9 @@ public actor CodeTimeService {
                 spoolSoftLimitBytes: spool.softLimitBytes,
                 oldestPendingAt: spool.oldestPendingAt,
                 cacheBytes: cacheBytes,
+                metadataBytes: (try? FileManager.default.attributesOfItem(
+                    atPath: paths.database.path
+                )[.size] as? NSNumber)?.int64Value ?? 0,
                 indexedChunkBytes: chunkBytes,
                 cacheBudgetBytes: settings.effectiveCacheBytes,
                 isSpoolOversized: spool.oversized
