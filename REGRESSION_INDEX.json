@@ -1548,5 +1548,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "先 staging 后原子提交；单文件只下载自身块；目标已存在不覆盖；损坏/篡改必须中止"
+  },
+  {
+    "id": "CT-156",
+    "test": "testCT156_CacheStoresReadsAndEvictsLRUWithinBudget",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SpaceManagementTests.swift",
+    "purpose": "缓存预算/固定条目/越界拒绝 + iCloud 本地副本驱逐的确认与失败上报",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "pinned 不驱逐；缓存只删除自身根目录内文件；未确认上传不得驱逐；失败必须上报"
   }
 ]

@@ -104,6 +104,7 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
     private(set) var chunks: [String: ChunkRecordV3] = [:]
     private(set) var snapshots: [SnapshotRecordV3] = []
     private(set) var uploads: [PendingUploadV3] = []
+    private(set) var cache: [String: CacheEntryV3] = [:]
 
     func fileNodes(projectID: UUID) async throws -> [FileNode] {
         lock.lock(); defer { lock.unlock() }
@@ -164,5 +165,33 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
     func removeUpload(_ taskID: String) async throws {
         lock.lock(); defer { lock.unlock() }
         uploads.removeAll { $0.taskID == taskID }
+    }
+}
+
+extension InMemoryIndex: ChunkCacheIndex {
+    func cacheEntry(_ key: String) async throws -> CacheEntryV3? {
+        lock.lock(); defer { lock.unlock() }
+        return cache[key]
+    }
+
+    func upsertCacheEntry(_ entry: CacheEntryV3) async throws {
+        lock.lock(); defer { lock.unlock() }
+        cache[entry.key] = entry
+    }
+
+    func cacheEntries(pinned: Bool?, limit: Int) async throws -> [CacheEntryV3] {
+        lock.lock(); defer { lock.unlock() }
+        let values = cache.values.filter { pinned == nil || $0.pinned == pinned }
+        return Array(values.sorted { $0.lastAccessedAt < $1.lastAccessedAt }.prefix(limit))
+    }
+
+    func removeCacheEntry(_ key: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        cache.removeValue(forKey: key)
+    }
+
+    func cacheBytes() async throws -> Int64 {
+        lock.lock(); defer { lock.unlock() }
+        return cache.values.reduce(0) { $0 + $1.size }
     }
 }

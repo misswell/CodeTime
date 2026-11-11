@@ -166,3 +166,12 @@ public protocol RestoreObjectCache: Sendable {
     func cachedChunk(objectID: String) async throws -> Data?
     func storeChunk(objectID: String, data: Data) async throws
 }
+
+/// Cache bookkeeping for the bounded download cache.
+public protocol ChunkCacheIndex: Sendable {
+    func cacheEntry(_ key: String) async throws -> CacheEntryV3?
+    func upsertCacheEntry(_ entry: CacheEntryV3) async throws
+    func cacheEntries(pinned: Bool?, limit: Int) async throws -> [CacheEntryV3]
+    func removeCacheEntry(_ key: String) async throws
+    func cacheBytes() async throws -> Int64
+}

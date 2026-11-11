@@ -445,3 +445,5 @@ extension SQLiteStore: CloudSnapshotIndex {
         )
     }
 }
+
+extension SQLiteStore: ChunkCacheIndex {}
