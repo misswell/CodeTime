@@ -1,0 +1,3 @@
+V3PERF_RESULT {"backupSeconds":40.827533960342407,"cloudBytes":167770202,"committed":true,"createSeconds":9.6623769998550415,"databaseBytes":247180336,"files":100000,"firstBytesUploaded":109488890,"firstObjectsUploaded":100000,"firstPacksUploaded":53,"logicalBytes":102400000,"peakMemoryBytes":545406976,"scenario":"many-small-files","secondBytesUploaded":0,"secondFilesReused":100000,"secondSeconds":17.698989987373352,"sourcePhysicalBytes":409600000,"spoolBytesAfter":0}
+V3PERF_WORKROOT /tmp/v3perf-100k-1794386309
+EXIT=0

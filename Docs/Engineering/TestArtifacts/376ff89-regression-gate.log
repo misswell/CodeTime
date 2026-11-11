@@ -1,0 +1,49 @@
+test-report check: PASS (executed=263, failures=0, skipped=3, commit=376ff895652479a78d4043bf29ca9fc8133c09a5, run=202611110006)
+regression gate: building CodeTimeCrashChild…
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT067_InterruptedMigrationStagingIsReclaimed]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT067_InterruptedMigrationStagingIsReclaimed]' passed (0.024 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT068_ManualDispatchPublishesRelease]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT068_ManualDispatchPublishesRelease]' passed (0.218 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT069_GateRejectsMissingTestsAndUnexpectedSkips]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT069_GateRejectsMissingTestsAndUnexpectedSkips]' passed (3.645 seconds).
+Test Suite 'ThirdRoundRegressionTests' passed at 2026-11-11 15:39:09.024.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 12.301 (12.303) seconds
+Test Suite 'UploadQueueTests' started at 2026-11-11 15:39:09.025.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' passed (0.001 seconds).
+Test Suite 'UploadQueueTests' passed at 2026-11-11 15:39:09.046.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.021 (0.022) seconds
+Test Suite 'CodeTimeKitTests.xctest' passed at 2026-11-11 15:39:09.046.
+	 Executed 263 tests, with 3 tests skipped and 0 failures (0 unexpected) in 229.230 (229.260) seconds
+Test Suite 'All tests' passed at 2026-11-11 15:39:09.046.
+	 Executed 263 tests, with 3 tests skipped and 0 failures (0 unexpected) in 229.230 (229.261) seconds
+PERF: files=200 backup=1695ms restore=1763ms
+PERF_METRICS:
+  files: 300
+  totalBytes: 259000
+  backupDurationMs: 1661
+  restoreDurationMs: 2461
+  peakMemoryMB: 149.8
+  cpuUserSec: 3.61
+  cpuSysSec: 3.00
+  cpuPercent: 397.7
+  concurrencyBackup: 2
+  concurrentTasks: 1
+  verifyFiles: 300 (all content-verified)
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+regression gate: PASS
+  executed: 263 tests, 0 failures
+  skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
+testCT044_DiskFullLeavesRepositoryUntouched
+testSingleMacICloudRoundTrip
+  index: CT-001 … CT-167 (165 required)
+EXIT=0

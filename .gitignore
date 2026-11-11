@@ -14,6 +14,7 @@ build/
 *.sqlite-shm
 *.sqlite-wal
 *.log
+!Docs/Engineering/TestArtifacts/*.log
 
 # macOS
 .DS_Store

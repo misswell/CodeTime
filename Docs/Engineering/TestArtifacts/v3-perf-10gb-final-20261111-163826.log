@@ -1,0 +1,3 @@
+V3PERF_RESULT {"backupPeakResidentBytes":467075072,"backupSeconds":79.616389036178589,"cloudBytes":1903886673,"committed":true,"createSeconds":0,"databaseBytes":1683456,"files":1,"firstBytesRead":10737418240,"firstBytesUploaded":1901425797,"firstObjectsUploaded":2056,"incrementalBytesRead":10737418240,"incrementalBytesUploaded":1026542,"incrementalObjectsUploaded":1,"incrementalPeakResidentBytes":436813824,"incrementalSeconds":47.93429696559906,"logicalBytes":10737418240,"peakMemoryBytes":470515712,"scenario":"single-large-file-sparse-0.25","sourcePhysicalBytes":9114222592,"spoolBytesAfter":0}
+V3PERF_WORKROOT /tmp/v3perf-10g-final-1794386141
+EXIT=0

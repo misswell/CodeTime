@@ -5,14 +5,14 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"376ff895652479a78d4043bf29ca9fc8133c09a5","run":"202611110006","executed":263,"failures":0,"skipped":3,"passed":260,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"7eb52b82bed9ab6353a55661ce68c3e2671fa2c3","run":"202611110006","executed":263,"failures":0,"skipped":3,"passed":260,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 交付 Commit SHA | `376ff89`（FSEvents、恢复续传、并发去重、每日内容校验与空间展示） |
+| 交付 Commit SHA | `7eb52b8`（流式读取修复、§17 性能验收与报告） |
 | CI Run | `202611110006`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
 | 门禁结果 | `PASS`，263 tests / 0 failures / 3 skipped |
