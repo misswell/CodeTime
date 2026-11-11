@@ -648,6 +648,9 @@ actor PackBuffer {
     private let builder: ObjectPackBuilder
     private var pending: [(objectID: String, payload: Data)] = []
     private var pendingBytes = 0
+    /// Concurrent files can produce the same chunk before either consults the
+    /// registry; a pack must contain each object exactly once.
+    private var stagedIDs: Set<String> = []
     private(set) var locations: [String: (packID: String, offset: Int)] = [:]
     private(set) var uploadedPackCount = 0
 
@@ -658,6 +661,7 @@ actor PackBuffer {
     }
 
     func append(objectID: String, payload: Data) async throws {
+        guard locations[objectID] == nil, stagedIDs.insert(objectID).inserted else { return }
         pending.append((objectID, payload))
         pendingBytes += payload.count
         if pendingBytes >= builder.options.targetBytes {
@@ -677,5 +681,6 @@ actor PackBuffer {
         }
         pending.removeAll(keepingCapacity: true)
         pendingBytes = 0
+        stagedIDs.removeAll(keepingCapacity: true)
     }
 }

@@ -141,5 +141,30 @@ final class ObjectPackTests: XCTestCase {
             let data = try Data(contentsOf: destination.appendingPathComponent("file\(index).txt"))
             XCTAssertEqual(data, Data("tiny-file-\(index)-content".utf8))
         }
+
+        // Concurrent files can produce the same chunk before either consults the
+        // object registry; a pack must still contain it exactly once.
+        let raceCloud = InMemoryCloud()
+        let buffer = PackBuffer(
+            threshold: 1024,
+            sink: raceCloud,
+            builder: ObjectPackBuilder(options: .init(targetBytes: 1 << 20))
+        )
+        let raceID = objectID(7)
+        let racePayload = payload(7, bytes: 100)
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<8 {
+                group.addTask {
+                    try? await buffer.append(objectID: raceID, payload: racePayload)
+                }
+            }
+        }
+        try await buffer.flush()
+        let locations = await buffer.locations
+        XCTAssertEqual(locations.count, 1, "同一对象在并发暂存时只能进入包一次")
+        let packID = try XCTUnwrap(locations[raceID]?.packID)
+        let pack = try XCTUnwrap(raceCloud.packs[packID])
+        let entries = try ObjectPackReader().entries(in: pack)
+        XCTAssertEqual(entries.map(\.objectID), [raceID])
     }
 }
