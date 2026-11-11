@@ -1,6 +1,9 @@
 # 真实 iCloud 双 Mac 验收状态
 
-状态：**BLOCKED / NOT RUN**（截至 2026-11-11）
+状态：**BLOCKED / NOT RUN**（最近复检：2026-11-11T13:48Z，状态未变化）
+
+> 接受 Apple Developer Program License Agreement 是 Account Holder 的法律行为，
+> Agent 不得代为接受。以下阻塞必须由用户本人完成。
 
 本文件记录真实环境验收的前置条件、已执行检查与原始证据。任何前置条件未满足时，
 不得将本项标记为通过，也不得用本地镜像/模拟环境替代。
@@ -72,3 +75,4 @@ Scripts/icloud_preflight.sh
 - `Docs/Engineering/TestArtifacts/v3icloud-single-mac-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/betaicloud-provisioning-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/xcodebuild-automatic-signing-blocked-20261111.log`
+- `Docs/Engineering/TestArtifacts/icloud-preflight-recheck-20261111T1348Z.log`

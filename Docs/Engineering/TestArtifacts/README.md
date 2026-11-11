@@ -9,6 +9,7 @@
 | `376ff89-regression-gate.log` | 前一轮全量门禁输出（263 tests / 0 failures / 3 skips） | `376ff89` |
 | `3ab6bde-reliability-gate.log` | 可靠性加固后全量门禁输出（295 tests / 0 failures / 3 skips，scale=1） | `3ab6bde` |
 | `icloud-preflight-blocked-20261111.log` | 真实 iCloud 预检：PLA 未同意、iCloud Drive 上传报 4355 | 本机 macOS 27.2.1 |
+| `icloud-preflight-recheck-20261111T1348Z.log` | 复检：PLA、Xcode 账号、iCloud 4355、第二台 Mac 均未变化 | 本机 macOS 27.2.1 |
 | `v3icloud-single-mac-blocked-20261111.log` | `V3Acceptance icloud` 单机真实 iCloud 上传失败（未确认上传） | 本机 macOS 27.2.1 |
 | `betaicloud-provisioning-blocked-20261111.log` | BetaICloud 构建失败：缺少带 iCloud feature 的 provisioning profile | 本机 Xcode |
 | `xcodebuild-automatic-signing-blocked-20261111.log` | `-allowProvisioningUpdates` 失败：Xcode CLI `No Accounts` | 本机 Xcode |
