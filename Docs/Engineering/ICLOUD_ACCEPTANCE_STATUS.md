@@ -57,8 +57,10 @@ Scripts/icloud_preflight.sh
 
 ## 4. 解除阻塞所需的外部操作（只能由用户/Account Holder 完成）
 
-1. 在 Developer Portal → Identifiers → iCloud Containers 注册
-   `iCloud.com.codetime.app`（描述 CodeTime）。
+1. 运行 `Scripts/create_icloud_container.command`（已打开终端窗口等待输入）。
+   在终端输入 Apple ID、密码与 2FA；fastlane 会创建/关联
+   `iCloud.com.codetime.app`，随后调用 `configure_icloud_signing.sh`。
+   也可手动在 Developer Portal → Identifiers → iCloud Containers 注册并关联。
 2. 在 Identifiers → App IDs → `com.codetime.app` → iCloud → Configure，
    勾选该 container 并保存。
 3. 运行 `Scripts/configure_icloud_signing.sh`：脚本会重建 profile、校验
@@ -95,3 +97,4 @@ Scripts/icloud_preflight.sh
 - `Docs/Engineering/TestArtifacts/icloud-preflight-recheck-20261111T1348Z.log`
 - `Docs/Engineering/TestArtifacts/icloud-preflight-after-bird-restart-20261111.log`（重启 bird 后仍 4355）
 - 签名配置脚本：`Scripts/configure_icloud_signing.sh`
+- 交互式 Container 创建脚本：`Scripts/create_icloud_container.command`
