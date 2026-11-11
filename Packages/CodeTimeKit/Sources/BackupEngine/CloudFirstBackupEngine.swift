@@ -520,9 +520,19 @@ public struct CloudFirstBackupEngine: Sendable {
                     if let packBuffer, let threshold = options.packObjectsUpTo,
                        encoded.storedSize <= threshold {
                         // Small objects go into an immutable pack; the reference
-                        // gets its pack offset after the flush.
+                        // gets its pack offset after the flush. The pack buffer is
+                        // itself idempotent per object ID.
                         try await packBuffer.append(objectID: objectID, payload: encoded.payload)
                     } else {
+                        // A concurrent file may hold the same chunk: only one task
+                        // uploads it. Encryption uses a random nonce, so two writers
+                        // would otherwise race with different valid ciphertexts.
+                        guard registry.reserve(objectID) else {
+                            outcome.bytesDeduped += Int64(chunk.size)
+                            outcome.objectsReused += 1
+                            refs.append(Self.reusedRef(objectID: objectID, size: chunk.size))
+                            continue
+                        }
                         try await sink.putObject(encoded.payload, objectID: objectID)
                     }
                     registry.insert(objectID, storedSize: encoded.storedSize)
@@ -636,6 +646,16 @@ final class ObjectRegistry: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         known[id] = Known(storedSize: storedSize, packID: nil, packOffset: nil)
+    }
+
+    /// Atomically claims an object for upload. Returns false when another task
+    /// already owns it (or it is known), so only one writer touches the cloud.
+    func reserve(_ id: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard known[id] == nil else { return false }
+        known[id] = Known(storedSize: 0, packID: nil, packOffset: nil)
+        return true
     }
 }
 
