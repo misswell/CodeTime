@@ -30,7 +30,7 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(settings.configRevision, 1)
         await store.close()
 
-        XCTAssertEqual(try userVersion(at: url), 2)
+        XCTAssertEqual(try userVersion(at: url), 3)
         let tables = try tableNames(at: url)
         for table in [
             "cloud_restore_jobs", "gc_journals", "maintenance_state",
@@ -57,7 +57,7 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(loaded?.lifecycle, .active)
         XCTAssertEqual(loaded?.configRevision, 0)
         await reopened.close()
-        XCTAssertEqual(try userVersion(at: url), 2)
+        XCTAssertEqual(try userVersion(at: url), 3)
     }
 
     // MIG-002: a crash after some ALTER TABLE statements leaves user_version at 1;
@@ -75,7 +75,7 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(loaded?.lifecycle, .active)
         await store.close()
 
-        XCTAssertEqual(try userVersion(at: url), 2)
+        XCTAssertEqual(try userVersion(at: url), 3)
         let columns = try columnNames(at: url, table: "jobs")
         XCTAssertTrue(columns.contains("owner_pid"))
         XCTAssertTrue(columns.contains("next_retry_at"))
