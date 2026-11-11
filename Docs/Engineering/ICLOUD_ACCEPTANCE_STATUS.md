@@ -1,6 +1,11 @@
 # 真实 iCloud 双 Mac 验收状态
 
-状态：**BLOCKED / NOT RUN**（最近复检：2026-11-11T13:48Z，状态未变化）
+状态：**PARTIAL / BLOCKED**（最近更新：2026-11-11T14:09Z）
+
+已完成：PLA 已接受；`com.codetime.app` Bundle ID 已创建；ICLOUD capability 已启用；
+本机已注册为 Mac 开发设备；Mac Development profile 已生成。
+仍阻塞：profile 的 iCloud container 数组为空（public API 不能创建/关联 container）；
+本机 iCloud Drive 上传仍报 4355；没有第二台 Mac。
 
 > 接受 Apple Developer Program License Agreement 是 Account Holder 的法律行为，
 > Agent 不得代为接受。以下阻塞必须由用户本人完成。
@@ -16,7 +21,11 @@
 | Xcode 可见开发团队 | 部分：`com.apple.dt.Xcode` 可见 team `U8U443D7ZL` | `defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier` |
 | Xcode 命令行有可用账号 | **失败**：`xcodebuild -allowProvisioningUpdates` 报 `No Accounts` | `xcodebuild-automatic-signing-blocked-20261111.log` |
 | 带 iCloud feature 的 provisioning profile | **失败**：无 `com.codetime.app` 的 Mac Development/Developer ID profile；BetaICloud 构建报 “requires a provisioning profile with the iCloud feature” | `betaicloud-provisioning-blocked-20261111.log` |
-| Apple Developer Program License Agreement | **失败**：App Store Connect API 报 “PLA Update available … Account Holder must agree” | `icloud-preflight-blocked-20261111.log` |
+| Apple Developer Program License Agreement | **通过**：2026-11-11T13:52Z 后 `asc bundle-ids list` 可用 | `asc bundle-ids list` |
+| Bundle ID `com.codetime.app` | **通过**：已创建，resource `33UYTPSVJB` | `asc bundle-ids` |
+| ICLOUD capability | **通过**：已启用 `ICLOUD_VERSION=XCODE_6` | `asc bundle-ids capabilities list` |
+| Mac Development provisioning profile | **部分**：profile ACTIVE，但 container 数组为空 | `Scripts/configure_icloud_signing.sh --check-only` |
+| iCloud Container `iCloud.com.codetime.app` | **失败**：公共 API 不支持创建/关联，需 Developer Portal | `configure_icloud_signing.sh` 输出 |
 | 真实 iCloud Drive 可上传 | **失败**：对 iCloud Drive 的探测文件返回 `NSCocoaErrorDomain 4355` “Couldn't access your iCloud account” | `icloud-preflight-blocked-20261111.log`、`v3icloud-single-mac-blocked-20261111.log` |
 | 第二台 Mac（同一 Apple ID） | **未提供** | 无第二台设备证据 JSON |
 
@@ -48,13 +57,13 @@ Scripts/icloud_preflight.sh
 
 ## 4. 解除阻塞所需的外部操作（只能由用户/Account Holder 完成）
 
-1. 用团队 Account Holder `Guofeng Liu` 登录 App Store Connect，接受最新
-   Apple Developer Program License Agreement。
-2. 在 Xcode → Settings → Accounts 中登录同一 Apple ID，确认账号可用于
-   `com.codetime.app`。
-3. 在 Xcode Signing & Capabilities 中为 `CodeTime` 配置 iCloud
-   (CloudDocuments) capability，使用 `iCloud.com.codetime.app`，生成并选择
-   Mac Development / Developer ID provisioning profile。
+1. 在 Developer Portal → Identifiers → iCloud Containers 注册
+   `iCloud.com.codetime.app`（描述 CodeTime）。
+2. 在 Identifiers → App IDs → `com.codetime.app` → iCloud → Configure，
+   勾选该 container 并保存。
+3. 运行 `Scripts/configure_icloud_signing.sh`：脚本会重建 profile、校验
+   container entitlement、安装 profile 并构建/验证 BetaICloud。若 container
+   未关联，脚本以 `ICLOUD_SIGNING_BLOCKED` 退出。
 4. 修复本机 iCloud 账户状态（系统设置 → Apple ID → iCloud），直到向
    iCloud Drive 写入探测文件后 `ubiquitousItemIsUploaded == true` 且
    `ubiquitousItemUploadingError == nil`。
@@ -85,3 +94,4 @@ Scripts/icloud_preflight.sh
 - `Docs/Engineering/TestArtifacts/xcodebuild-automatic-signing-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/icloud-preflight-recheck-20261111T1348Z.log`
 - `Docs/Engineering/TestArtifacts/icloud-preflight-after-bird-restart-20261111.log`（重启 bird 后仍 4355）
+- 签名配置脚本：`Scripts/configure_icloud_signing.sh`

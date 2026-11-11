@@ -116,7 +116,7 @@
 
 | 项 | 状态 | 原因 |
 |---|---|---|
-| 真实双 Mac iCloud 上传/驱逐/重新下载/跨设备发现 | **BLOCKED / NOT RUN** | 无第二台 Mac；PLA 未接受；Xcode CLI 报 `No Accounts`；无带 iCloud feature 的 profile；iCloud Drive 探测写入即报 `NSCocoaErrorDomain 4355`。详见 `ICLOUD_ACCEPTANCE_STATUS.md` |
+| 真实双 Mac iCloud 上传/驱逐/重新下载/跨设备发现 | **BLOCKED / NOT RUN** | PLA 已接受，Bundle ID/ICLOUD capability/profile 已创建；但 iCloud Container 尚未在 Developer Portal 注册/关联（profile container 数组为空），本机 iCloud Drive 仍报 4355，且无第二台 Mac。详见 `ICLOUD_ACCEPTANCE_STATUS.md` |
 | 真实 Keychain 跨签名迁移 | **NOT RUN** | 需要 Developer ID/Beta→Release 真机签名链 |
 | 100 GB 全随机数据 | **NOT RUN** | 本机可用空间不足，外接卷 ACL 不可写 |
 | 100 万文件 v3 全量备份 | **NOT RUN** | 未生成百万 inode 数据集；CT-037 只验证扫描上限 |
