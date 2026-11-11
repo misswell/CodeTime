@@ -169,7 +169,13 @@ public struct CloudObjectStoreV3: Sendable {
         )
         try await access.ensureDirectory(layout.tombstonesDir)
 
-        if let existing = try? await access.read(layout.formatFile) {
+        let formatExists = FileManager.default.fileExists(atPath: layout.formatFile.path)
+        if formatExists {
+            guard let existing = try? await access.read(layout.formatFile) else {
+                // Exists but unreadable (network/placeholder/corruption): never
+                // re-initialise over it.
+                throw CloudObjectStoreV3Error.notConfirmed("format.json 暂时不可读")
+            }
             guard let decoded = try? JSONDecoder().decode(FormatFile.self, from: existing) else {
                 // A present but unreadable format marker is corruption, not an
                 // invitation to re-initialise the store over it.
