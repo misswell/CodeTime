@@ -513,3 +513,7 @@ extension SQLiteStore: CloudSnapshotIndex {
 extension SQLiteStore: ChunkCacheIndex {}
 
 extension SQLiteStore: MigrationJournaling {}
+
+/// The rebuildable local metadata index (Cloud Format v3). SQLiteStore is the
+/// concrete implementation; the alias names the architectural role.
+public typealias LocalMetadataStore = SQLiteStore

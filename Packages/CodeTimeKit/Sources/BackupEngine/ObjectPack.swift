@@ -48,6 +48,9 @@ public enum ObjectPackError: Error, Sendable, Equatable {
     case duplicateObject(String)
 }
 
+/// Deliverable name from the task book; the builder emits immutable packs.
+public typealias ObjectPackWriter = ObjectPackBuilder
+
 public struct ObjectPackBuilder: Sendable {
     public struct Options: Sendable {
         /// Flush a pack once it reaches this size (before compression/formatting

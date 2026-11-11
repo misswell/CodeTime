@@ -43,6 +43,9 @@ public enum ChunkCacheError: Error, Sendable, Equatable {
 /// 2. Pinned entries (an active restore, an upload in flight) are never evicted,
 ///    so the budget can be exceeded rather than destroying something in use. The
 ///    report says so instead of pretending the limit was met.
+/// Deliverable name for the bounded download-cache manager.
+public typealias CacheManager = DiskChunkCache
+
 public actor DiskChunkCache: RestoreObjectCache {
     public let root: URL
     private let index: ChunkCacheIndex
