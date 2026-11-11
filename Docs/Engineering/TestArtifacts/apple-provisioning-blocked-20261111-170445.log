@@ -1,0 +1,4 @@
+==> 检查 App Store Connect 认证
+无法读取 Bundle ID。最常见原因：账号持有人未同意新版开发者协议。
+  请由 Account Holder 打开 https://developer.apple.com/account → Agreements 同意后重试。
+EXIT=1

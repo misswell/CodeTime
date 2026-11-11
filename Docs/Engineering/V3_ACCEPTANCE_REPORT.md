@@ -47,16 +47,16 @@
 
 | 场景 | 逻辑大小 | 物理随机数据 | 首次备份 | 增量修改 | 增量上传 | 峰值 RSS | 本地 DB | spool 结束 | 云端数据 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 10 GB 单文件 | 10 GiB | 2.5 GiB（25%） | 79.6 s | 文件中间改 1 KiB | 1.03 MB / 1 对象 | 467 MB | 1.68 MB | 0 | 1.90 GB |
-| 100 GB 单文件 | 100 GiB | 1 GiB（1%） | 465.8 s | 未执行（`--no-incremental`） | — | 379 MB | 6.58 MB | 0 | 789 MB |
+| 10 GB 单文件（全随机） | 10 GiB | 10 GiB（100%） | 126.4 s | 文件中间改 1 KiB | 1.84 MB / 1 对象 | 477 MB（增量 502 MB） | 4.97 MB | 0 | 8.42 GB |
+| 100 GB 单文件（稀疏） | 100 GiB | 1 GiB（1%） | 465.8 s | 未执行（`--no-incremental`） | — | 379 MB | 6.58 MB | 0 | 789 MB |
 | 10 万小文件 | 100 MB（100k×1 KiB） | 100k 文件 | 40.8 s | 无修改重跑 | 0 B；100k 文件复用 | 545 MB | 247 MB | 0 | 167.7 MB（53 packs） |
 
 关键结论：
 
 - 100 GB 文件首次备份**确实读取了 100 GiB**（`firstBytesRead=107374182400`），
   峰值 RSS 379 MB；本地只增加 6.6 MB 索引，spool 上传确认后为 0。
-- 10 GB 文件中间修改 1 KiB，第二次备份只上传 **1.03 MB / 1 个对象**（约为文件的 0.01%），
-  证明内容定义分块与块级去重生效。
+- 全随机 10 GiB 文件中间修改 1 KiB，第二次备份只上传 **1.84 MB / 1 个对象**（约为文件的 0.017%），
+  证明内容定义分块与块级去重生效；首次上传 8.42 GB（LZFSE 对随机数据保留原样 + 封装开销）。
 - 10 万小文件第二次备份零上传；元数据约 247 MB（随文件数量线性增长），不含备份正文。
 - 首次备份期间没有项目大小的长期本地副本；spool 峰值受 pack 目标大小与上传并发约束。
 - 本轮修复了两个流式读取缺陷（否则 10 GiB 只读一半、缓冲区会保留整个文件）：
@@ -67,7 +67,7 @@
 
 | 项目 | 状态 | 原因 |
 |---|---|---|
-| 全随机 10 GB / 100 GB | **NOT RUN** | 根卷可用空间不足；外接卷不可写 |
+| 全随机 100 GB | **NOT RUN** | 需要约 190 GB 空闲（源 100 GB + 云端 85 GB）；本机仅 30 GB，外接卷 ACL 不可写 |
 | 1000 个历史版本 | **NOT RUN** | 需长时间连续快照与额外空间 |
 | 磁盘写满 ENOSPC | **NOT RUN** | 需可控小容量卷 |
 | 真实 iCloud 下载缓存驱逐/空间变化 | **NOT RUN** | 当前 iCloud 账户上传不可用（见 §3） |
@@ -78,7 +78,7 @@
 |---|---|---|
 | 两台真实 Mac、同一 Apple 账号 | **NOT RUN** | 当前只有一台 Mac；SSH 主机为 Linux；无第二台 macOS 设备或虚拟机 |
 | 签名 Release 构建（iCloud entitlement） | **BLOCKED** | `xcodebuild -configuration Release`：`"CodeTime" requires a provisioning profile with the iCloud feature` |
-| 创建 Developer ID iCloud 描述文件 | **BLOCKED** | `asc profiles list`：Account Holder 未同意最新 Apple Developer Program License Agreement |
+| 创建 Developer ID iCloud 描述文件 | **BLOCKED** | `Scripts/setup_apple_provisioning.sh` → EXIT 1；`asc bundle-ids list` 返回 PLA 未同意。原始日志：`TestArtifacts/apple-provisioning-blocked-*.log` |
 | 真实 iCloud Drive 上传（单机） | **BLOCKED** | 写入后 `ubiquitousItemUploadingError` = `NSCocoaErrorDomain 4355`（Couldn’t access your iCloud account）；1 KiB 探测文件曾被标记 uploaded，但 2 MiB 文件稳定失败 |
 | 单机双设备命名空间发现/恢复（同一台 Mac） | PASS（CT-164） | 两个 device 目录，Mac B 读取 Mac A 命名空间；不下载 Kopia 仓库 |
 | 真实 iCloud 并发上传、同步延迟、配额不足、账户切换 | **NOT RUN** | iCloud 账户在当前环境不可上传 |

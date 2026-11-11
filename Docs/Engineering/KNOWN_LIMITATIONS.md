@@ -30,9 +30,9 @@ CT-045…CT-057、CT-058…CT-116、CT-117…CT-128、CT-129…CT-146、CT-147�
 - **真实 iCloud 未验收**：v3 的对象、包、节点、Manifest、Commit、spool 续传与恢复均由本地镜像和内存云双端测试覆盖；
   真实 iCloud 的同步延迟、占位符下载、配额不足、账户切换、`evictUbiquitousItem` 实际释放行为未执行。
 - **双 Mac 未验收**：跨设备命名空间读取由 CT-164 在单机模拟（两个设备目录）；真实两台 Mac 的并发上传与恢复未执行。
-- **规模验收部分执行**：10 GiB/100 GiB 单文件（稀疏数据集，物理随机数据分别 2.5 GiB/1 GiB）
-  与 10 万小文件已真实执行，结果见 `V3_ACCEPTANCE_REPORT.md` §2.2；全随机 10/100 GB、
-  1000 个历史版本仍未执行（磁盘空间不足）。
+- **规模验收部分执行**：全随机 10 GiB 单文件、稀疏 100 GiB 单文件与 10 万小文件已真实执行，
+  结果见 `V3_ACCEPTANCE_REPORT.md` §2.2；全随机 100 GB（需约 190 GB 空闲）与 1000 个
+  历史版本仍未执行（磁盘空间不足）。
 - **真实 iCloud 被环境阻塞**：Developer ID iCloud 描述文件无法创建（Account Holder 未同意
   最新 PLA），本机 iCloud Drive 写入返回 `NSCocoaErrorDomain 4355`；单机真实 iCloud 与
   双 Mac 均未通过。
