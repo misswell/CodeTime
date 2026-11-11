@@ -67,6 +67,7 @@ public struct BackupRunReport: Sendable, Equatable {
     public var nodesUploaded: Int
     public var packsUploaded: Int
     public var nodeCount: Int
+    public var totalBytes: Int64
     public var excludedFileCount: Int
     public var excludedSize: Int64
     public var committed: Bool
@@ -89,6 +90,7 @@ public struct BackupRunReport: Sendable, Equatable {
         nodesUploaded: Int = 0,
         packsUploaded: Int = 0,
         nodeCount: Int = 0,
+        totalBytes: Int64 = 0,
         excludedFileCount: Int = 0,
         excludedSize: Int64 = 0,
         committed: Bool = false,
@@ -109,6 +111,7 @@ public struct BackupRunReport: Sendable, Equatable {
         self.nodesUploaded = nodesUploaded
         self.packsUploaded = packsUploaded
         self.nodeCount = nodeCount
+        self.totalBytes = totalBytes
         self.excludedFileCount = excludedFileCount
         self.excludedSize = excludedSize
         self.committed = committed
@@ -322,6 +325,7 @@ public struct CloudFirstBackupEngine: Sendable {
         if try await sink.putNode(tree.root) { nodesUploaded += 1 }
         report.nodesUploaded = nodesUploaded
         report.nodeCount = tree.nodeCount
+        report.totalBytes = tree.totalBytes
 
         let manifest = SnapshotManifest(
             snapshotID: snapshotID,

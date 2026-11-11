@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-165）
+# 回归测试矩阵（CT-001 … CT-167）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -169,10 +169,12 @@
 | CT-163 | `testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData` | v3 两阶段云端 GC 与安全中止 | 是 | 否 |
 | CT-164 | `testCT164_NewMacDiscoversAndRestoresV3Project` | 新 Mac v3 发现与按需恢复 | 是 | 否 |
 | CT-165 | `testCT165_OnboardingStartsFreshInstallOnV3` | 全新安装默认引擎选择 | 是 | 否 |
+| CT-166 | `testCT166_InterruptedRestoreResumesStagedFiles` | v3 恢复中断与续传 | 是 | 否 |
+| CT-167 | `testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval` | FSEvents 变化监听与节流 | 是 | 否 |
 
 ## 门禁规则（CT-114 / CT-138）
 
-- 索引必须恰好登记 CT-001…CT-165，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-167，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。

@@ -5,18 +5,18 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"4a52883ea32fe32a44dd6566aa7a633b527924a2","run":"202611110006","executed":261,"failures":0,"skipped":3,"passed":258,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"290d4c459cbc8e40a980b203fe759d1bab217621","run":"202611110006","executed":263,"failures":0,"skipped":3,"passed":260,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
 -->
 
 ## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 交付 Commit SHA | `4a52883`（v3 服务集成、云端 GC、新 Mac 恢复） |
+| 交付 Commit SHA | `290d4c4`（v3 缓存上限、spool 校验、全新安装引擎选择） |
 | CI Run | `202611110006`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
-| 门禁结果 | `PASS`，261 tests / 0 failures / 3 skipped |
-| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-165（163 required） |
+| 门禁结果 | `PASS`，263 tests / 0 failures / 3 skipped |
+| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-167（165 required） |
 | 运行标识 | `202611110006`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
 
 ## 2. 环境
@@ -31,7 +31,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ## 3. 测试规模
 
-- **全量门禁**：261 个 XCTest，258 通过，0 失败，3 跳过。
+- **全量门禁**：263 个 XCTest，260 通过，0 失败，3 跳过。
 - 跳过项均为人工/规模验收，登记在 `REGRESSION_INDEX.json` 的
   `manualAcceptance=true`：CT-037 百万文件、CT-044 磁盘写满、单机真实 iCloud 往返。
 - 规模测试（`CODETIME_SCALE_TESTS=1`）在门禁中真实执行 CT-036/CT-117 的规模变体。
@@ -60,6 +60,8 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | CT-163 | 云端 GC | 先墓碑；引用重算；宽限期内不删除；只删无引用对象/版本；引用缺失立即中止 |
 | CT-164 | 新 Mac 恢复 | 发现 v3 项目；恢复密钥校验；按需恢复；注册项目并继续浏览历史；不下载 Kopia 仓库 |
 | CT-165 | 全新安装引擎选择 | 云端可用且无历史时直接使用 v3；已有快照的安装保持旧引擎直到迁移 |
+| CT-166 | 恢复续传 | 中断保留 staging；重试复用已校验文件；成功后原子移走 |
+| CT-167 | FSEvents 变化监听 | 事件去抖；最小变化间隔生效；FSEvents 仅优化，完整扫描兜底 |
 
 ## 5. 可靠性与兼容回归
 
@@ -83,11 +85,11 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ```
 regression gate: PASS
-  executed: 261 tests, 0 failures
+  executed: 263 tests, 0 failures
   skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
 testCT044_DiskFullLeavesRepositoryUntouched
 testSingleMacICloudRoundTrip
-  index: CT-001 … CT-165 (163 required)
+  index: CT-001 … CT-167 (165 required)
   test-report check: PASS
 ```
 

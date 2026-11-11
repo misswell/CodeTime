@@ -153,6 +153,12 @@ final class UploadQueueTests: XCTestCase {
         let payload = Data("already-uploaded".utf8)
         let file = spool.appendingPathComponent("object-\(objectID)")
         try payload.write(to: file)
+        // Simulate a task left behind by a crash an hour ago; a fresh .uploading
+        // file may belong to another process that is still uploading.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-3700)],
+            ofItemAtPath: file.path
+        )
 
         let cloud = GatedCloud(base: InMemoryCloud())
         try await cloud.base.putObject(payload, objectID: objectID)

@@ -130,7 +130,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
             status: .complete,
             consistency: .consistent,
             fileCount: report.filesScanned,
-            totalSize: report.bytesRead,
+            totalSize: report.totalBytes,
             errorCount: 0,
             excludedFileCount: report.excludedFileCount,
             excludedSize: report.excludedSize,

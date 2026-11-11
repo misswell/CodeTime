@@ -1648,5 +1648,25 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "没有旧历史不得继续创建完整本地仓库；有历史时不得跳过迁移验证"
+  },
+  {
+    "id": "CT-166",
+    "test": "testCT166_InterruptedRestoreResumesStagedFiles",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RestoreResumeTests.swift",
+    "purpose": "v3 恢复中断后从确定性 staging 续传，已校验文件不重复下载",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "失败不触碰目标；staging 保留；成功后才原子移走"
+  },
+  {
+    "id": "CT-167",
+    "test": "testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ProjectChangeMonitorTests.swift",
+    "purpose": "FSEvents 变化监听与最小变化间隔；FSEvents 仅作优化，完整扫描仍兜底",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "事件去抖；间隔内不重复触发；首次备份不因文件写入被动触发"
   }
 ]

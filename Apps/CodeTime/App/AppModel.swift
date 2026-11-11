@@ -606,6 +606,7 @@ final class AppModel: ObservableObject {
             if selectedProjectID == nil, let first = projects.first {
                 selectedProjectID = first.id
             }
+            await service.syncProjectActivityMonitors()
         } catch {
             if !silent { showToast(error.localizedDescription, style: .error) }
         }

@@ -290,8 +290,17 @@ public actor UploadQueue: CloudObjectSink {
         var report = UploadDrainReport()
         do {
             // A crash during upload leaves `.uploading`; it is not proof of an
-            // upload, so it goes back to pending and is retried.
+            // upload. Only reclaim stale tasks: another process may be actively
+            // uploading the same object right now.
+            let now = Date()
             for stale in try await index.pendingUploads(state: .uploading, limit: 10_000) {
+                let url = URL(fileURLWithPath: stale.localPath)
+                let modified = (try? FileManager.default.attributesOfItem(
+                    atPath: url.path
+                )[.modificationDate]) as? Date
+                if let modified, now.timeIntervalSince(modified) < 3600 {
+                    continue
+                }
                 try await index.updateUploadState(stale.taskID, state: .pending, bumpRetry: false)
             }
 

@@ -5,7 +5,7 @@
 
 - 代码提交：`4a52883`
 - 门禁：`Scripts/regression_gate.sh`，`PASS`
-- 测试：261 executed / 0 failures / 3 skipped（CT-001 … CT-165）
+- 测试：263 executed / 0 failures / 3 skipped（CT-001 … CT-167）
 - 环境：macOS 27.2 arm64；本地镜像 + 内存云；Kopia 0.23.1 仅用于 v2 兼容测试
 
 ## 1. 架构验收

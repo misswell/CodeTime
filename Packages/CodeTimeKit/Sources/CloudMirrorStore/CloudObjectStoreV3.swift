@@ -169,8 +169,12 @@ public struct CloudObjectStoreV3: Sendable {
         )
         try await access.ensureDirectory(layout.tombstonesDir)
 
-        if let existing = try? await access.read(layout.formatFile),
-           let decoded = try? JSONDecoder().decode(FormatFile.self, from: existing) {
+        if let existing = try? await access.read(layout.formatFile) {
+            guard let decoded = try? JSONDecoder().decode(FormatFile.self, from: existing) else {
+                // A present but unreadable format marker is corruption, not an
+                // invitation to re-initialise the store over it.
+                throw CloudObjectStoreV3Error.notConfirmed("format.json 不可解析")
+            }
             return decoded
         }
         let created = FormatFile(
@@ -422,7 +426,19 @@ extension CloudObjectStoreV3: CloudGarbageCollectible {
         let directory = layout.projectDir(projectID)
             .appendingPathComponent("snapshots", isDirectory: true)
         let fm = FileManager.default
-        guard fm.fileExists(atPath: directory.path) else { return [] }
+        guard fm.fileExists(atPath: directory.path) else {
+            // A project with manifests but no commit markers is a half-published
+            // or partially synced version. GC must not read that as "no history".
+            let manifests = layout.projectDir(projectID)
+                .appendingPathComponent("manifests", isDirectory: true)
+            if fm.fileExists(atPath: manifests.path),
+               ((try? fm.contentsOfDirectory(atPath: manifests.path)) ?? []).isEmpty == false {
+                throw CloudObjectStoreV3Error.notConfirmed(
+                    "项目 \(projectID.uuidString) 有清单但没有提交标记，可能仍在发布或同步不完整"
+                )
+            }
+            return []
+        }
         let entries: [URL]
         do {
             entries = try await access.list(directory, keys: [.isRegularFileKey])

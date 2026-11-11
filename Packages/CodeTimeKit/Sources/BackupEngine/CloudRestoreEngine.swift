@@ -170,13 +170,11 @@ public struct CloudRestoreEngine: Sendable {
         }
 
         let packCache = PackCache(limit: 2)
-        let staging = destination.deletingLastPathComponent()
-            .appendingPathComponent(".codetime-restore-\(snapshotID.prefix(8))-\(UUID().uuidString.prefix(6))")
+        // Deterministic staging per (destination, snapshot): an interrupted run
+        // can resume and skip files that already hash correctly. It stays hidden
+        // and is removed by the successful atomic move.
+        let staging = Self.stagingURL(for: destination, snapshotID: snapshotID)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        var committed = false
-        defer {
-            if !committed { try? fm.removeItem(at: staging) }
-        }
 
         // Resolve target → the directory node to walk and an optional single file.
         let startNode: DirectoryNode
@@ -228,7 +226,6 @@ public struct CloudRestoreEngine: Sendable {
             try fm.trashItem(at: destination, resultingItemURL: &trashed)
         }
         try fm.moveItem(at: staging, to: destination)
-        committed = true
         report.commited = true
         return report
     }
@@ -533,6 +530,19 @@ public struct CloudRestoreEngine: Sendable {
             try await cache.storeChunk(objectID: chunk.objectID, data: data)
         }
         return data
+    }
+
+    static func stagingURL(for destination: URL, snapshotID: String) -> URL {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in destination.standardizedFileURL.path.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return destination.deletingLastPathComponent()
+            .appendingPathComponent(
+                ".codetime-restore-\(snapshotID.prefix(8))-\(String(hash, radix: 16))",
+                isDirectory: true
+            )
     }
 
     // MARK: - Path safety

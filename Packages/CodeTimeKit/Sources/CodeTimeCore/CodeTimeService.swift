@@ -211,6 +211,9 @@ public actor CodeTimeService {
     private var legacyRecoveryEngine: KopiaBackupEngine?
     private var legacyRecoveryRoot: URL?
     private var legacyRecoveryLastUsedAt: Date?
+    /// FSEvents monitors (optimization only; periodic scans remain the fallback).
+    private var activityMonitors: [UUID: ProjectChangeMonitor] = [:]
+    private var activityAccesses: [UUID: SecurityScopedAccess] = [:]
     /// CT-124: injectable hardware-identity anchor (IOPlatformUUID in
     /// production) so tests can simulate a database moving between Macs.
     private let hardwareUUIDProvider: @Sendable () -> String?
@@ -246,6 +249,11 @@ public actor CodeTimeService {
         self.gitInspector = GitInspector()
         self.kopiaBinaryURL = kopiaBinaryURL ?? KopiaBinary.locate()
         self.hardwareUUIDProvider = hardwareUUIDProvider ?? { PlatformIdentity.currentHardwareUUID() }
+    }
+
+    deinit {
+        for monitor in activityMonitors.values { monitor.stop() }
+        for access in activityAccesses.values { access.stop() }
     }
 
     // MARK: - Bootstrap
@@ -408,6 +416,7 @@ public actor CodeTimeService {
             message: "CodeTime 已启动",
             details: version
         ))
+        await syncProjectActivityMonitors()
         return report
     }
 
@@ -720,6 +729,71 @@ public actor CodeTimeService {
         )
         v3AdapterCache = adapter
         return adapter
+    }
+
+    /// Starts/stops FSEvents monitors for projects that are currently schedulable.
+    /// Safe to call after any project or settings change; unchanged projects keep
+    /// their existing stream.
+    public func syncProjectActivityMonitors() async {
+        let projects = ((try? await database.projects()) ?? []).filter(\.isSchedulable)
+        let desired = Set(projects.map(\.id))
+        for id in activityMonitors.keys where !desired.contains(id) {
+            activityMonitors[id]?.stop()
+            activityMonitors[id] = nil
+            activityAccesses[id]?.stop()
+            activityAccesses[id] = nil
+        }
+        for project in projects where activityMonitors[project.id] == nil {
+            var access: SecurityScopedAccess?
+            var root = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+            if let bookmark = project.bookmark,
+               let resolved = try? SecurityScopedBookmarks.resolve(bookmark) {
+                root = resolved.url
+                access = SecurityScopedAccess(url: resolved.url)
+            }
+            let monitor = ProjectChangeMonitor(root: root) { [weak self] in
+                Task { await self?.handleFileActivity(project.id) }
+            }
+            if monitor.start() {
+                activityMonitors[project.id] = monitor
+                activityAccesses[project.id] = access
+            } else {
+                access?.stop()
+                await logger.warning("无法监听项目变化（将回退到定时扫描）：\(project.name)")
+            }
+        }
+    }
+
+    public func stopProjectActivityMonitors() {
+        for monitor in activityMonitors.values { monitor.stop() }
+        for access in activityAccesses.values { access.stop() }
+        activityMonitors.removeAll()
+        activityAccesses.removeAll()
+    }
+
+    /// A file event is only a hint: global pause, project lifecycle and the
+    /// per-project minimum interval still decide whether a snapshot may run.
+    private func handleFileActivity(_ projectID: UUID) async {
+        guard let settings = try? await currentSettings(),
+              settings.scheduler.allowsScheduling,
+              let project = try? await database.project(id: projectID),
+              project.isSchedulable,
+              let policy = try? await database.policy(projectID: projectID)
+        else { return }
+        guard !activeProjects.contains(projectID) else { return }
+        // The first backup is an explicit/scheduled decision, not a side effect of
+        // files being created while a project is added. After that, events may
+        // trigger a snapshot only when the minimum interval has elapsed.
+        guard let lastBackupAt = project.lastBackupAt else { return }
+        let gate = FileActivityGate(
+            minimumInterval: TimeInterval(max(0, policy.minimumChangeIntervalMinutes) * 60)
+        )
+        guard gate.shouldTrigger(lastBackupAt: lastBackupAt) else { return }
+        do {
+            _ = try await createSnapshot(projectID: projectID, trigger: .fileActivity)
+        } catch {
+            await logger.warning("变更触发的备份未执行（\(project.name)）：\(error.localizedDescription)")
+        }
     }
 
     /// The engine backing browse/restore/verify calls. Both implementations
@@ -1243,6 +1317,7 @@ public actor CodeTimeService {
             projectID: project.id,
             message: "已添加项目 \(project.name)"
         ))
+        await syncProjectActivityMonitors()
         return project
     }
 
@@ -1350,6 +1425,7 @@ public actor CodeTimeService {
 
         try await database.deleteProject(id: id)
         notifyChange()
+        await syncProjectActivityMonitors()
         try await recordActivity(ActivityEvent(
             kind: .system,
             level: .warning,
@@ -2224,8 +2300,19 @@ public actor CodeTimeService {
         return report
     }
 
-    private func isIdleForGarbageCollection() -> Bool {
-        activeProjects.isEmpty && registeredWork.isEmpty && pendingWorkClaims == 0
+    private func isIdleForGarbageCollection() async -> Bool {
+        guard activeProjects.isEmpty, registeredWork.isEmpty, pendingWorkClaims == 0 else {
+            return false
+        }
+        // Another process (UI or LaunchAgent) may own a backup lease even when
+        // this process is idle.
+        let projects = (try? await database.projects()) ?? []
+        for project in projects {
+            if ((try? await database.liveRunningJob(projectID: project.id)) ?? nil) != nil {
+                return false
+            }
+        }
+        return true
     }
 
     /// Runs a maintenance task only when its persisted next-run time has passed.
@@ -3912,10 +3999,36 @@ public actor CodeTimeService {
         try await database.activities(limit: limit)
     }
 
+    private static func directoryBytes(_ url: URL) throws -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
+        ) else { return 0 }
+        var total: Int64 = 0
+        for case let file as URL in enumerator {
+            let values = try file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values.isRegularFile == true {
+                total += Int64(values.fileSize ?? 0)
+            }
+        }
+        return total
+    }
+
     public func diagnostics(settings: AppSettings) async -> DiagnosticsReport {
         var checks: [(String, Bool, String)] = []
         let fm = FileManager.default
-        if let repository {
+        if settings.engineMode == .cloudFirst {
+            if let root = try? await v3StorageRoot(settings: settings) {
+                let format = root.appendingPathComponent(CloudFormatV3.formatFile)
+                checks.append(("v3 云端格式", fm.fileExists(atPath: format.path), root.path))
+            } else {
+                checks.append(("v3 云端格式", false, "云端位置不可用（尚未配置 iCloud 或本地镜像）"))
+            }
+            let spoolSize = (try? Self.directoryBytes(paths.spoolPending)) ?? 0
+            checks.append(("待上传数据", true, CodeTimeFormat.bytes(spoolSize) + "（受保护，不随缓存清理）"))
+            let cacheSize = (try? await database.cacheBytes()) ?? 0
+            checks.append(("下载缓存", true, CodeTimeFormat.bytes(cacheSize)))
+        } else if let repository {
             let exists = fm.fileExists(atPath: repository.path)
             let config = fm.fileExists(atPath: repository.configPath)
             checks.append(("备份仓库", exists, exists ? repository.path : "仓库目录不存在"))
@@ -4003,6 +4116,7 @@ public actor CodeTimeService {
 
     public func beginShutdown() {
         shuttingDown = true
+        stopProjectActivityMonitors()
     }
 
     public func cancelShutdown() {
