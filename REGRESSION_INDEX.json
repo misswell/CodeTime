@@ -1558,5 +1558,35 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "pinned 不驱逐；缓存只删除自身根目录内文件；未确认上传不得驱逐；失败必须上报"
+  },
+  {
+    "id": "CT-157",
+    "test": "testCT157_PackFormatRoundTripsEveryObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackTests.swift",
+    "purpose": "不可变对象包：格式往返、越界/重复/截断拒绝、引擎打包并恢复",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "包 ID = 内容哈希；包不可变；恢复从包内精确切片"
+  },
+  {
+    "id": "CT-158",
+    "test": "testCT158_HappyPathWithConsentReleasesLegacyLast",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/MigrationCoordinatorTests.swift",
+    "purpose": "v2→v3 迁移状态机：顺序、失败阻塞、崩溃续跑、释放旧仓库需显式同意",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "旧云副本与 v3 基线都验证通过后才允许清理；失败一律 blocked 且保留旧数据"
+  },
+  {
+    "id": "CT-159",
+    "test": "testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadQueueTests.swift",
+    "purpose": "持久化待上传队列：失败保留加密数据、软上限暂停、崩溃续传、引擎离线后恢复",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "未确认上传的数据永不删除；spool 只在上传确认后释放；续传不重新编码"
   }
 ]

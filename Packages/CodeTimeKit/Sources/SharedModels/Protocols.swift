@@ -128,6 +128,10 @@ public protocol CloudObjectSink: Sendable {
     func putObject(_ payload: Data, objectID: String) async throws -> Bool
     @discardableResult
     func putNode(_ node: DirectoryNode) async throws -> Bool
+    /// Immutable pack of already-encrypted objects (see ObjectPackFormat).
+    @discardableResult
+    func putPack(_ payload: Data, packID: String) async throws -> Bool
+    func hasPack(_ packID: String) async throws -> Bool
     /// Returns the SHA-256 of the stored payload; the commit marker binds to it.
     func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String
     /// Must only succeed when the manifest exists and still matches its hash.
@@ -139,6 +143,9 @@ public protocol CloudSnapshotIndex: Sendable {
     func fileNodes(projectID: UUID) async throws -> [FileNode]
     func replaceFileIndex(projectID: UUID, files: [FileNode], snapshotID: String) async throws
     func knownObjectIDs(_ objectIDs: [String]) async throws -> Set<String>
+    /// Full records for known chunks. A packed chunk must be reused through its
+    /// pack reference — the object does not exist as a standalone cloud item.
+    func knownChunks(_ objectIDs: [String]) async throws -> [String: ChunkRecordV3]
     func upsertChunks(_ chunks: [ChunkRecordV3]) async throws
     func upsertSnapshot(_ record: SnapshotRecordV3) async throws
     func updateSnapshot(
@@ -150,11 +157,17 @@ public protocol CloudSnapshotIndex: Sendable {
     func snapshotRecords(projectID: UUID, limit: Int) async throws -> [SnapshotRecordV3]
     func enqueueUploads(_ uploads: [PendingUploadV3]) async throws
     func removeUpload(_ taskID: String) async throws
+    /// Durable upload journal: everything still owed to the cloud, including
+    /// tasks that failed or were interrupted mid-upload.
+    func pendingUploads(state: UploadTaskState?, limit: Int) async throws -> [PendingUploadV3]
+    func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws
+    func pendingUploadBytes() async throws -> Int64
 }
 
 /// Read side of Cloud Format v3, used by restore and verification.
 public protocol CloudObjectSource: Sendable {
     func readObject(_ objectID: String) async throws -> Data
+    func readPack(_ packID: String) async throws -> Data
     func readNode(_ nodeID: String) async throws -> DirectoryNode
     func readManifestPayload(projectID: UUID, snapshotID: String) async throws -> Data
     func readCommit(projectID: UUID, snapshotID: String) async throws -> SnapshotCommit?
@@ -174,4 +187,11 @@ public protocol ChunkCacheIndex: Sendable {
     func cacheEntries(pinned: Bool?, limit: Int) async throws -> [CacheEntryV3]
     func removeCacheEntry(_ key: String) async throws
     func cacheBytes() async throws -> Int64
+}
+
+/// Migration journal seam (lives here so Persistence can conform without
+/// depending on the engine).
+public protocol MigrationJournaling: Sendable {
+    func appendMigrationEvent(_ entry: MigrationJournalEntryV3) async throws
+    func latestMigrationPhase() async throws -> String?
 }

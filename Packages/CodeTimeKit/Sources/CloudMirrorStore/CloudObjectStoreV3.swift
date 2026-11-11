@@ -111,18 +111,34 @@ public struct CloudObjectStoreV3: Sendable {
     private let access: CloudFileAccess
     private let tracker: CloudUploadTracking
     private let uploadTimeout: TimeInterval
+    private let eviction: ICloudEvictionManager?
+    private let evictionObserver: (@Sendable (EvictionOutcome) -> Void)?
 
     public init(
         root: URL,
         deviceID: String,
         access: CloudFileAccess = LocalFileAccess(),
         tracker: CloudUploadTracking = NoopUploadTracker(),
-        uploadTimeout: TimeInterval = 120
+        uploadTimeout: TimeInterval = 120,
+        eviction: ICloudEvictionManager? = nil,
+        evictionObserver: (@Sendable (EvictionOutcome) -> Void)? = nil
     ) {
         self.layout = Layout(root: root, deviceID: deviceID)
         self.access = access
         self.tracker = tracker
         self.uploadTimeout = uploadTimeout
+        self.eviction = eviction
+        self.evictionObserver = evictionObserver
+    }
+
+    /// Confirms the upload and, when configured, releases the local iCloud copy.
+    /// A failed eviction is reported to the observer — never silently treated as
+    /// released space.
+    private func confirmAndRelease(_ url: URL) async throws {
+        try await tracker.waitForUpload(url, timeout: uploadTimeout)
+        guard let eviction else { return }
+        let outcome = await eviction.evictLocalCopies(of: [url])
+        evictionObserver?(outcome)
     }
 
     // MARK: - Format / device
@@ -181,7 +197,7 @@ public struct CloudObjectStoreV3: Sendable {
         let destination = layout.objectURL(objectID)
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         try await access.writeAtomically(payload, to: destination)
-        try await tracker.waitForUpload(destination, timeout: uploadTimeout)
+        try await confirmAndRelease(destination)
         return true
     }
 
@@ -300,7 +316,7 @@ public struct CloudObjectStoreV3: Sendable {
         if (try? await access.read(destination)) != nil { return false }
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         try await access.writeAtomically(payload, to: destination)
-        try await tracker.waitForUpload(destination, timeout: uploadTimeout)
+        try await confirmAndRelease(destination)
         return true
     }
 
@@ -309,6 +325,16 @@ public struct CloudObjectStoreV3: Sendable {
             throw CloudObjectStoreV3Error.objectMissing(packID)
         }
         return data
+    }
+
+    public func hasPack(_ packID: String) async throws -> Bool {
+        guard let entries = try? await access.list(
+            layout.packURL(packID).deletingLastPathComponent(),
+            keys: [.isRegularFileKey]
+        ) else {
+            return false
+        }
+        return entries.contains { $0.lastPathComponent == packID }
     }
 }
 

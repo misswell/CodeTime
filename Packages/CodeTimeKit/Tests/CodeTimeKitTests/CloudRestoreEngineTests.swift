@@ -100,7 +100,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     func testCT155_SingleFileRestoreDownloadsOnlyItsChunks() async throws {
         let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
         let target = destination("one-file")
-        let before = cloud.readObjectCount
+        let before = cloud.readObjectCount + cloud.readPackCount
 
         let report: CloudRestoreReport = try await engine.restore(
             projectID: projectID,
@@ -115,8 +115,8 @@ final class CloudRestoreEngineTests: XCTestCase {
             FileManager.default.fileExists(atPath: target.appendingPathComponent("src").path),
             "单文件恢复不得恢复其他文件"
         )
-        let downloaded = cloud.readObjectCount - before
-        XCTAssertEqual(downloaded, 1, "只应下载该文件需要的块（实际 \(downloaded)）")
+        let downloaded = (cloud.readObjectCount + cloud.readPackCount) - before
+        XCTAssertEqual(downloaded, 1, "只应下载该文件需要的块或包（实际 \(downloaded)）")
     }
 
     func testCT155_DirectoryRestoreSkipsSiblings() async throws {
@@ -166,7 +166,7 @@ final class CloudRestoreEngineTests: XCTestCase {
         let fileNodes = try await index.fileNodes(projectID: projectID)
         let node = try XCTUnwrap(fileNodes.first { $0.path == "src/util/data.txt" })
         let objectID = try XCTUnwrap(node.chunks.first?.objectID)
-        cloud.corruptObjects[objectID] = Data("garbage".utf8)
+        cloud.corruptObject(objectID)
 
         do {
             _ = try await engine.restore(

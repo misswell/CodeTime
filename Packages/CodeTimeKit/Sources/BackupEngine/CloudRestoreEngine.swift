@@ -65,6 +65,7 @@ public struct CloudRestoreReport: Sendable, Equatable {
     public var bytesWritten: Int64
     public var chunksDownloaded: Int
     public var chunksFromCache: Int
+    public var packsDownloaded: Int
     public var commited: Bool
 
     public init(
@@ -76,6 +77,7 @@ public struct CloudRestoreReport: Sendable, Equatable {
         bytesWritten: Int64 = 0,
         chunksDownloaded: Int = 0,
         chunksFromCache: Int = 0,
+        packsDownloaded: Int = 0,
         commited: Bool = false
     ) {
         self.snapshotID = snapshotID
@@ -86,6 +88,7 @@ public struct CloudRestoreReport: Sendable, Equatable {
         self.bytesWritten = bytesWritten
         self.chunksDownloaded = chunksDownloaded
         self.chunksFromCache = chunksFromCache
+        self.packsDownloaded = packsDownloaded
         self.commited = commited
     }
 }
@@ -164,6 +167,7 @@ public struct CloudRestoreEngine: Sendable {
             throw CloudRestoreError.destinationExists(destination.path)
         }
 
+        let packCache = PackCache(limit: 2)
         let staging = destination.deletingLastPathComponent()
             .appendingPathComponent(".codetime-restore-\(snapshotID.prefix(8))-\(UUID().uuidString.prefix(6))")
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -201,6 +205,7 @@ public struct CloudRestoreEngine: Sendable {
                 writingTo: MerkleTreeBuilder.lastComponent(of: singleFile.path),
                 into: staging,
                 report: &report,
+                packCache: packCache,
                 isCancelled: isCancelled
             )
         } else {
@@ -209,6 +214,7 @@ public struct CloudRestoreEngine: Sendable {
                 basePath: startNode.path,
                 into: staging,
                 report: &report,
+                packCache: packCache,
                 isCancelled: isCancelled
             )
         }
@@ -246,6 +252,7 @@ public struct CloudRestoreEngine: Sendable {
         basePath: String,
         into staging: URL,
         report: inout CloudRestoreReport,
+        packCache: PackCache,
         isCancelled: @Sendable () -> Bool
     ) async throws {
         let fm = FileManager.default
@@ -257,7 +264,10 @@ public struct CloudRestoreEngine: Sendable {
 
         for file in node.files {
             if isCancelled() { throw CloudRestoreError.cancelled }
-            try await restoreFile(file, writingTo: file.path, into: staging, report: &report, isCancelled: isCancelled)
+            try await restoreFile(
+                file, writingTo: file.path, into: staging,
+                report: &report, packCache: packCache, isCancelled: isCancelled
+            )
         }
         for directory in node.directories {
             if isCancelled() { throw CloudRestoreError.cancelled }
@@ -267,6 +277,7 @@ public struct CloudRestoreEngine: Sendable {
                 basePath: basePath,
                 into: staging,
                 report: &report,
+                packCache: packCache,
                 isCancelled: isCancelled
             )
         }
@@ -277,6 +288,7 @@ public struct CloudRestoreEngine: Sendable {
         writingTo relative: String,
         into staging: URL,
         report: inout CloudRestoreReport,
+        packCache: PackCache,
         isCancelled: @Sendable () -> Bool
     ) async throws {
         let fm = FileManager.default
@@ -330,7 +342,20 @@ public struct CloudRestoreEngine: Sendable {
                     data = cached
                     report.chunksFromCache += 1
                 } else {
-                    let payload = try await source.readObject(chunk.objectID)
+                    let payload: Data
+                    if let packID = chunk.packID {
+                        let pack: Data
+                        if let cached = packCache.get(packID) {
+                            pack = cached
+                        } else {
+                            pack = try await source.readPack(packID)
+                            packCache.put(packID, pack)
+                            report.packsDownloaded += 1
+                        }
+                        payload = try ObjectPackReader().object(chunk.objectID, in: pack)
+                    } else {
+                        payload = try await source.readObject(chunk.objectID)
+                    }
                     data = try ObjectEncoder(masterKey: masterKey).decode(
                         payload,
                         objectID: chunk.objectID,
@@ -387,5 +412,36 @@ public struct CloudRestoreEngine: Sendable {
             throw CloudRestoreError.invalidPath(relativePath)
         }
         return candidate
+    }
+}
+
+/// Tiny LRU for packs during a restore. A pack can hold many small objects, so
+/// keeping the last two avoids re-downloading for sibling chunks while bounding
+/// memory to a couple of pack sizes.
+final class PackCache: @unchecked Sendable {
+    private var storage: [String: Data] = [:]
+    private var order: [String] = []
+    private let limit: Int
+    private let lock = NSLock()
+
+    init(limit: Int = 2) { self.limit = max(1, limit) }
+
+    func get(_ key: String) -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        guard let data = storage[key] else { return nil }
+        order.removeAll { $0 == key }
+        order.append(key)
+        return data
+    }
+
+    func put(_ key: String, _ data: Data) {
+        lock.lock(); defer { lock.unlock() }
+        storage[key] = data
+        order.removeAll { $0 == key }
+        order.append(key)
+        while order.count > limit {
+            let evicted = order.removeFirst()
+            storage.removeValue(forKey: evicted)
+        }
     }
 }

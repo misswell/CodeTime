@@ -20,9 +20,16 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         var events: [String] = []
         private let lock = NSLock()
 
+        var packedObjectIDs: Set<String> = []
+
         func hasObject(_ objectID: String) async throws -> Bool {
             lock.lock(); defer { lock.unlock() }
-            return objects[objectID] != nil
+            return objects[objectID] != nil || packedObjectIDs.contains(objectID)
+        }
+
+        func containsObject(_ objectID: String) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return objects[objectID] != nil || packedObjectIDs.contains(objectID)
         }
 
         @discardableResult
@@ -41,6 +48,25 @@ final class CloudFirstBackupEngineTests: XCTestCase {
             nodes[node.nodeID] = node
             events.append("node:\(node.nodeID)")
             return true
+        }
+
+        var packs: [String: Data] = [:]
+
+        @discardableResult
+        func putPack(_ payload: Data, packID: String) async throws -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if packs[packID] != nil { return false }
+            packs[packID] = payload
+            if let entries = try? ObjectPackReader().entries(in: payload) {
+                packedObjectIDs.formUnion(entries.map(\.objectID))
+            }
+            events.append("pack:\(packID)")
+            return true
+        }
+
+        func hasPack(_ packID: String) async throws -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return packs[packID] != nil
         }
 
         func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
@@ -90,6 +116,15 @@ final class CloudFirstBackupEngineTests: XCTestCase {
             return Set(objectIDs.filter { chunks[$0] != nil })
         }
 
+        func knownChunks(_ objectIDs: [String]) async throws -> [String: ChunkRecordV3] {
+            lock.lock(); defer { lock.unlock() }
+            var result: [String: ChunkRecordV3] = [:]
+            for id in objectIDs {
+                if let record = chunks[id] { result[id] = record }
+            }
+            return result
+        }
+
         func upsertChunks(_ newChunks: [ChunkRecordV3]) async throws {
             lock.lock(); defer { lock.unlock() }
             for chunk in newChunks { chunks[chunk.objectID] = chunk }
@@ -135,6 +170,28 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         func removeUpload(_ taskID: String) async throws {
             lock.lock(); defer { lock.unlock() }
             uploads.removeAll { $0.taskID == taskID }
+        }
+
+        func pendingUploads(state: UploadTaskState?, limit: Int) async throws -> [PendingUploadV3] {
+            lock.lock(); defer { lock.unlock() }
+            return Array(
+                uploads
+                    .filter { state == nil || $0.state == state }
+                    .sorted { $0.createdAt < $1.createdAt }
+                    .prefix(limit)
+            )
+        }
+
+        func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws {
+            lock.lock(); defer { lock.unlock() }
+            guard let index = uploads.firstIndex(where: { $0.taskID == taskID }) else { return }
+            uploads[index].state = state
+            if bumpRetry { uploads[index].retryCount += 1 }
+        }
+
+        func pendingUploadBytes() async throws -> Int64 {
+            lock.lock(); defer { lock.unlock() }
+            return uploads.reduce(0) { $0 + $1.fileSize }
         }
     }
 
@@ -323,7 +380,7 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         let oldFiles = try treeFiles(sink, rootNodeID: firstManifest.rootNodeID)
         XCTAssertEqual(oldFiles.map(\.path).sorted(), ["README.md", "src/big.txt"])
         for chunk in oldFiles.flatMap(\.chunks) {
-            XCTAssertNotNil(sink.objects[chunk.objectID], "历史版本引用的对象不得丢失")
+            XCTAssertTrue(sink.containsObject(chunk.objectID), "历史版本引用的对象不得丢失（独立对象或包内）")
         }
     }
 

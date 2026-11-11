@@ -131,6 +131,25 @@ extension SQLiteStore {
         return try decode(ChunkRecordV3.self, from: data)
     }
 
+    public func chunkRecords(_ objectIDs: [String]) throws -> [String: ChunkRecordV3] {
+        guard !objectIDs.isEmpty else { return [:] }
+        var found: [String: ChunkRecordV3] = [:]
+        for slice in stride(from: 0, to: objectIDs.count, by: 400) {
+            let batch = Array(objectIDs[slice..<min(slice + 400, objectIDs.count)])
+            let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
+            let rows = try query(
+                "SELECT payload FROM v3_chunk_index WHERE object_id IN (\(placeholders))",
+                batch.map { .text($0) }
+            )
+            for row in rows {
+                guard case .blob(let data) = row[0] else { continue }
+                let record = try decode(ChunkRecordV3.self, from: data)
+                found[record.objectID] = record
+            }
+        }
+        return found
+    }
+
     public func markChunkVerified(_ objectID: String, at date: Date = Date()) throws {
         // Rewrite the whole record: the column and the JSON payload must agree,
         // otherwise a decode of the payload reports the chunk as unverified.
@@ -234,7 +253,13 @@ extension SQLiteStore {
                     INSERT INTO v3_pending_uploads
                         (task_id, object_id, file_size, upload_state, retry_count, created_at, payload)
                     VALUES (?,?,?,?,?,?,?)
-                    ON CONFLICT(task_id) DO UPDATE SET payload=excluded.payload
+                    ON CONFLICT(task_id) DO UPDATE SET
+                        object_id=excluded.object_id,
+                        file_size=excluded.file_size,
+                        upload_state=excluded.upload_state,
+                        retry_count=excluded.retry_count,
+                        created_at=excluded.created_at,
+                        payload=excluded.payload
                     """,
                     [
                         .text(upload.taskID),
@@ -250,7 +275,7 @@ extension SQLiteStore {
         }
     }
 
-    public func pendingUploads(state: UploadTaskState? = nil, limit: Int = 500) throws -> [PendingUploadV3] {
+    public func uploadTasks(state: UploadTaskState? = nil, limit: Int = 500) throws -> [PendingUploadV3] {
         let sql: String
         let params: [SQLValue]
         if let state {
@@ -272,7 +297,7 @@ extension SQLiteStore {
 
     /// Marks a task failed and bumps its retry counter in one statement, so a
     /// crash cannot lose the count and turn a poison task into an infinite retry.
-    public func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool = false) throws {
+    public func setUploadTaskState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool = false) throws {
         if bumpRetry {
             try upsert(
                 """
@@ -282,7 +307,7 @@ extension SQLiteStore {
                 """,
                 [.text(state.rawValue), .text(taskID)]
             )
-            if let record = try pendingUploads(limit: 5000).first(where: { $0.taskID == taskID }) {
+            if let record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) {
                 var updated = record
                 updated.state = state
                 updated.retryCount += 1
@@ -295,7 +320,7 @@ extension SQLiteStore {
                 "UPDATE v3_pending_uploads SET upload_state = ? WHERE task_id = ?",
                 [.text(state.rawValue), .text(taskID)]
             )
-            if var record = try pendingUploads(limit: 5000).first(where: { $0.taskID == taskID }) {
+            if var record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) {
                 record.state = state
                 if let payload = try? encode(record) {
                     try? upsert("UPDATE v3_pending_uploads SET payload = ? WHERE task_id = ?", [.blob(payload), .text(taskID)])
@@ -312,7 +337,7 @@ extension SQLiteStore {
         try scalarInt("SELECT COUNT(*) FROM v3_pending_uploads;")
     }
 
-    public func pendingUploadBytes() throws -> Int64 {
+    public func uploadTaskBytes() throws -> Int64 {
         let rows = try query("SELECT COALESCE(SUM(file_size),0) FROM v3_pending_uploads;", [])
         if case .int(let value)? = rows.first?.first { return value }
         if case .double(let value)? = rows.first?.first { return Int64(value) }
@@ -444,6 +469,31 @@ extension SQLiteStore: CloudSnapshotIndex {
             manifestPayloadHash: manifestPayloadHash
         )
     }
+
+    public func pendingUploads(
+        state: UploadTaskState? = nil,
+        limit: Int = 500
+    ) async throws -> [PendingUploadV3] {
+        try uploadTasks(state: state, limit: limit)
+    }
+
+    public func updateUploadState(
+        _ taskID: String,
+        state: UploadTaskState,
+        bumpRetry: Bool
+    ) async throws {
+        try setUploadTaskState(taskID, state: state, bumpRetry: bumpRetry)
+    }
+
+    public func pendingUploadBytes() async throws -> Int64 {
+        try uploadTaskBytes()
+    }
+
+    public func knownChunks(_ objectIDs: [String]) async throws -> [String: ChunkRecordV3] {
+        try chunkRecords(objectIDs)
+    }
 }
 
 extension SQLiteStore: ChunkCacheIndex {}
+
+extension SQLiteStore: MigrationJournaling {}
