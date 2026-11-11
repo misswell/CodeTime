@@ -389,6 +389,11 @@ public struct CloudRestoreEngine: Sendable {
         if let modified = file.modifiedAt {
             try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
         }
+        // Bound the cache to roughly one file's worth of overshoot. Pinned entries
+        // still win, and a failure to enforce never affects the restored file.
+        if let cache = options.cache as? DiskChunkCache {
+            _ = try? await cache.enforceBudget()
+        }
         report.filesRestored += 1
         report.bytesWritten += written
     }
@@ -467,6 +472,9 @@ public struct CloudRestoreEngine: Sendable {
             guard CanonicalHashing.sha256Hex(data) == expected else {
                 throw CloudRestoreError.fileHashMismatch(path: path)
             }
+        }
+        if let cache = options.cache as? DiskChunkCache {
+            _ = try? await cache.enforceBudget()
         }
         return data
     }

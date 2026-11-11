@@ -197,6 +197,13 @@ private struct CloudSettingsView: View {
     /// CT-134: advanced options are collapsed for ordinary users.
     @State private var showAdvanced = false
     @State private var isWorking = false
+    @State private var migrationPrompt: MigrationPrompt?
+
+    private enum MigrationPrompt: String, Identifiable {
+        case start
+        case release
+        var id: String { rawValue }
+    }
 
     @EnvironmentObject var model: AppModel
 
@@ -408,6 +415,12 @@ private struct CloudSettingsView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
+                                if let estimate = model.migrationEstimate {
+                                    Text(estimate.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                                 if migration.legacyLocalBytes > 0 {
                                     Text("旧本地仓库占用：\(CodeTimeFormat.bytes(migration.legacyLocalBytes))")
                                         .font(.caption)
@@ -417,15 +430,44 @@ private struct CloudSettingsView: View {
                             Spacer()
                             if migration.phase == .legacyLocalCleanupPending {
                                 Button("释放旧本地空间…") {
-                                    Task { await model.runMigration(releaseLegacyLocalSpace: true) }
+                                    migrationPrompt = .release
                                 }
                                 .buttonStyle(.bordered)
                             } else if migration.phase == .blocked {
-                                Button("重新尝试") {
-                                    Task { await model.runMigration() }
+                                Button("重新尝试…") {
+                                    migrationPrompt = .start
                                 }
                                 .buttonStyle(.bordered)
+                            } else {
+                                Button("开始迁移…") {
+                                    migrationPrompt = .start
+                                }
+                                .buttonStyle(.borderedProminent)
                             }
+                        }
+                        .confirmationDialog(
+                            migrationPrompt == .release ? "释放旧本地仓库？" : "开始迁移到云端优先引擎？",
+                            isPresented: Binding(
+                                get: { migrationPrompt != nil },
+                                set: { if !$0 { migrationPrompt = nil } }
+                            ),
+                            titleVisibility: .visible
+                        ) {
+                            if migrationPrompt == .release {
+                                Button("释放旧本地空间", role: .destructive) {
+                                    migrationPrompt = nil
+                                    Task { await model.runMigration(releaseLegacyLocalSpace: true) }
+                                }
+                            } else {
+                                Button("开始迁移") {
+                                    migrationPrompt = nil
+                                    Task { await model.runMigration() }
+                                }
+                            }
+                            Button("取消", role: .cancel) { migrationPrompt = nil }
+                        } message: {
+                            Text(model.migrationEstimate?.detail
+                                 ?? "迁移会保留旧历史，只在新格式验证通过后询问是否释放旧本地仓库。")
                         }
                     }
                 }

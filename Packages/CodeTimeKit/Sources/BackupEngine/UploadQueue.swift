@@ -120,18 +120,24 @@ public actor UploadQueue: CloudObjectSink {
     private let index: CloudSnapshotIndex
     private let configuration: UploadQueueConfiguration
     private let fileManager: FileManager
+    /// Verifies staged bytes before they are trusted. A corrupted spool file must
+    /// never become a published object; it stays failed for the next backup run
+    /// (which re-reads the source file) instead.
+    private let validate: (@Sendable (Data, String, Bool) -> Bool)?
     private var spoolBytes: Int64?
 
     public init(
         base: CloudObjectSink,
         index: CloudSnapshotIndex,
         configuration: UploadQueueConfiguration,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        validate: (@Sendable (Data, String, Bool) -> Bool)? = nil
     ) {
         self.base = base
         self.index = index
         self.configuration = configuration
         self.fileManager = fileManager
+        self.validate = validate
     }
 
     public var spoolRoot: URL { configuration.spoolRoot }
@@ -237,6 +243,10 @@ public actor UploadQueue: CloudObjectSink {
     }
 
     private func upload(taskID: String, kind: String, id: String, payload: Data) async throws -> Bool {
+        if let validate, !validate(payload, id, kind == Self.packKind) {
+            try? await index.updateUploadState(taskID, state: .failed, bumpRetry: true)
+            throw UploadQueueError.spoolReadFailed("待上传数据校验失败：\(id)")
+        }
         try await index.updateUploadState(taskID, state: .uploading, bumpRetry: false)
         do {
             let uploaded: Bool
@@ -381,6 +391,10 @@ public actor UploadQueue: CloudObjectSink {
         }
 
         try await index.updateUploadState(task.taskID, state: .uploading, bumpRetry: false)
+        if let validate, !validate(payload, task.objectID, kind == Self.packKind) {
+            try? await index.updateUploadState(task.taskID, state: .failed, bumpRetry: true)
+            throw UploadQueueError.spoolReadFailed("待上传数据校验失败：\(task.objectID)")
+        }
         do {
             let uploaded: Bool
             switch kind {

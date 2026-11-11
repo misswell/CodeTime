@@ -127,6 +127,7 @@ final class AppModel: ObservableObject {
     @Published var repositoryBytes: Int64?
     @Published var v3Storage: V3StorageStatus?
     @Published var migrationStatus: MigrationStatus?
+    @Published var migrationEstimate: MigrationCapacityEstimate?
 
     @Published var selectedSection: SidebarSection = .dashboard
     @Published var selectedProjectID: UUID?
@@ -601,6 +602,7 @@ final class AppModel: ObservableObject {
             if settings.engineMode == .cloudFirst {
                 migrationStatus = await service.backupMigrationStatus()
             }
+            migrationEstimate = await service.migrationCapacityEstimate()
             if selectedProjectID == nil, let first = projects.first {
                 selectedProjectID = first.id
             }
@@ -788,6 +790,7 @@ final class AppModel: ObservableObject {
         guard let service else { return }
         v3Storage = await service.v3StorageStatus()
         migrationStatus = await service.backupMigrationStatus()
+        migrationEstimate = await service.migrationCapacityEstimate()
     }
 
     /// Clears only rebuildable download data; un-uploaded objects are never here.

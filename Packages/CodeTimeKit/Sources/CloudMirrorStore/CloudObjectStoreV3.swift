@@ -203,8 +203,15 @@ public struct CloudObjectStoreV3: Sendable {
     /// was actually written (false when it already existed).
     @discardableResult
     public func putObject(_ payload: Data, objectID: String) async throws -> Bool {
-        if try await hasObject(objectID) { return false }
         let destination = layout.objectURL(objectID)
+        if let existing = try? await access.read(destination) {
+            // Same object ID must mean the same encrypted bytes. A mismatch is a
+            // collision or corruption, never silently accepted.
+            guard existing == payload else {
+                throw CloudObjectStoreV3Error.objectMissing(objectID)
+            }
+            return false
+        }
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         try await access.writeAtomically(payload, to: destination)
         try await confirmAndRelease(destination)
@@ -275,6 +282,11 @@ public struct CloudObjectStoreV3: Sendable {
         snapshotID: String
     ) async throws -> String {
         let destination = layout.manifestURL(projectID: projectID, snapshotID: snapshotID)
+        if let existing = try? await access.read(destination), existing != payload {
+            // A published manifest is immutable; rewriting it would invalidate
+            // the commit hash that points at it.
+            throw CloudObjectStoreV3Error.manifestHashMismatch
+        }
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         try await access.writeAtomically(payload, to: destination)
         try await tracker.waitForUpload(destination, timeout: uploadTimeout)
@@ -305,6 +317,18 @@ public struct CloudObjectStoreV3: Sendable {
             throw CloudObjectStoreV3Error.manifestHashMismatch
         }
         let destination = layout.commitURL(projectID: commit.projectID, snapshotID: commit.snapshotID)
+        if let existing = try? await access.read(destination) {
+            let decoded = try? JSONDecoder().decode(SnapshotCommit.self, from: existing)
+            guard decoded == commit else {
+                // A version marker is immutable; a different commit for the same
+                // snapshot ID is a conflict, not an update.
+                throw CloudObjectStoreV3Error.deviceMismatch(
+                    expected: commit.snapshotID,
+                    found: "existing commit"
+                )
+            }
+            return
+        }
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         let data = try JSONEncoder().encode(commit)
         try await access.writeAtomically(data, to: destination)
@@ -340,7 +364,12 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putPack(_ payload: Data, packID: String) async throws -> Bool {
         let destination = layout.packURL(packID)
-        if (try? await access.read(destination)) != nil { return false }
+        if let existing = try? await access.read(destination) {
+            guard existing == payload else {
+                throw CloudObjectStoreV3Error.objectMissing(packID)
+            }
+            return false
+        }
         try await access.ensureDirectory(destination.deletingLastPathComponent())
         try await access.writeAtomically(payload, to: destination)
         try await confirmAndRelease(destination)

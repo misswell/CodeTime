@@ -2,6 +2,42 @@ import Foundation
 import CryptoKit
 import SharedModels
 
+/// Coordinates one snapshot: scan → streaming chunks → Merkle upload → manifest
+/// → commit. The heavy lifting lives in `CloudFirstBackupEngine`; this type is
+/// the single entry point the service uses when it needs an explicit snapshot
+/// operation rather than a bare engine call.
+public struct SnapshotCoordinator: Sendable {
+    private let engine: CloudFirstBackupEngine
+    private let index: CloudSnapshotIndex
+
+    public init(engine: CloudFirstBackupEngine, index: CloudSnapshotIndex) {
+        self.engine = engine
+        self.index = index
+    }
+
+    public func createSnapshot(
+        projectID: UUID,
+        root: URL,
+        matcher: ExclusionMatcher,
+        snapshotID: String = UUID().uuidString,
+        isCancelled: @escaping @Sendable () -> Bool = { false }
+    ) async throws -> BackupRunReport {
+        try await engine.run(
+            projectID: projectID,
+            root: root,
+            matcher: matcher,
+            snapshotID: snapshotID,
+            isCancelled: isCancelled
+        )
+    }
+
+    /// What would the baseline upload cost? Used only for the migration warning.
+    public func estimateUploadBytes(projectID: UUID) async throws -> Int64 {
+        let files = try await index.fileNodes(projectID: projectID)
+        return files.reduce(0) { $0 + $1.size }
+    }
+}
+
 /// `BackupEngine` facade over Cloud Format v3.
 ///
 /// The service and the UI keep talking to `Snapshot` / `FileEntry` / `RestoreRequest`;
@@ -74,7 +110,8 @@ public struct CloudFirstEngineAdapter: BackupEngine {
             options: options,
             clock: clock
         )
-        let report = try await engine.run(
+        let coordinator = SnapshotCoordinator(engine: engine, index: index)
+        let report = try await coordinator.createSnapshot(
             projectID: project.id,
             root: root,
             matcher: matcher

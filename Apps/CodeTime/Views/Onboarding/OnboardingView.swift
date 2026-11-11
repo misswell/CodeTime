@@ -689,7 +689,7 @@ struct CloudRecoverySheet: View {
     @State private var isScanning = false
     @State private var hasScanned = false
     @State private var selectedCandidateID: UUID?
-    @State private var selectedV3ID: UUID?
+    @State private var selectedV3ID: String?
     @State private var isRestoring = false
     @State private var restoreAttempts = 0
     @State private var errorMessage: String?

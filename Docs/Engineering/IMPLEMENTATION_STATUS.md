@@ -97,17 +97,44 @@
 | R2-23 | 手动发布 TAG 错误 | `.github/workflows/release.yml` | 手动输入 version/prerelease 生成 tag；下游统一使用解析后的 tag | YAML 校验 | PASS（静态） |
 | R2-24 | 伪 iCloud XCTFail 测试 | `SandboxPerformanceRegressionTests.swift`、`Scripts/require_icloud_acceptance.sh` | 改为可执行单机 iCloud 往返；双 Mac 验收改为 Stable 必需的人工报告门禁 | iCloud 测试默认跳过；门禁静态检查 | PARTIAL（真机未执行） |
 
+## CodeTime 2.0（Cloud Format v3）
+
+| ID | 内容 | 修改文件 | 测试 | 状态 |
+|---|---|---|---|---|
+| V3-01 | 内容定义分块与流式读取 | `FastCDCChunker.swift` | CT-147 | PASS |
+| V3-02 | HMAC 内容寻址、LZFSE/AEAD 对象封装 | `ContentAddressing.swift`、`ObjectEncoder.swift` | CT-148 | PASS |
+| V3-03 | 不可变目录 Merkle 树 | `MerkleTreeBuilder.swift` | CT-149 | PASS |
+| V3-04 | 版本模型、Manifest/Commit | `SharedModels/CloudFormatV3.swift` | CT-150 | PASS |
+| V3-05 | 云端对象存储、节点加密、发布顺序 | `CloudObjectStoreV3.swift` | CT-151 | PASS |
+| V3-06 | 本地索引 schema v3（文件/块/版本/任务/缓存/迁移） | `CloudIndexV3.swift`、`SQLiteStore.swift` | CT-152 | PASS |
+| V3-07 | 项目扫描与增量判断 | `ProjectScanner.swift` | CT-153 | PASS |
+| V3-08 | 云优先备份引擎（流式、去重、提交） | `CloudFirstBackupEngine.swift` | CT-154 | PASS |
+| V3-09 | 按需恢复（单文件/目录/项目） | `CloudRestoreEngine.swift` | CT-155 | PASS |
+| V3-10 | 有界下载缓存与 iCloud 本地副本驱逐 | `DiskChunkCache.swift`、`ICloudEvictionManager.swift` | CT-156 | PASS（驱逐真机行为 NOT RUN） |
+| V3-11 | 不可变对象包 | `ObjectPack.swift` | CT-157 | PASS |
+| V3-12 | 迁移状态机与旧数据保护 | `MigrationCoordinator.swift`、`LegacyKopiaCoordinator.swift` | CT-158、CT-162 | PASS |
+| V3-13 | 持久待上传队列（spool、软上限、续传） | `UploadQueue.swift`、`AppPaths.swift` | CT-159 | PASS |
+| V3-14 | BackupEngine v3 适配层 | `CloudFirstEngineAdapter.swift` | CT-160 | PASS |
+| V3-15 | 服务层引擎选择与空间统计 | `CodeTimeService.swift`、`RestoreAndSettings.swift` | CT-161 | PASS |
+| V3-16 | 两阶段云端 GC | `CloudGarbageCollector.swift` | CT-163 | PASS |
+| V3-17 | 新 Mac 恢复（跨设备命名空间） | `CloudRecoveryV3.swift`、`CloudMultiDeviceStoreV3.swift` | CT-164 | PASS |
+| V3-18 | Dashboard/设置/恢复界面 v3 空间与迁移 | `DashboardView.swift`、`SettingsView.swift`、`OnboardingView.swift` | App 构建通过；视觉验收 NOT RUN | PARTIAL |
+| V3-19 | v3 双 Mac 与 100 GB 验收 | — | 未执行 | NOT RUN |
+
 ## 当前测试汇总
 
 | 类别 | 数量 | 结果 |
 |---|---|---|
-| 全量测试（本机） | 186 | 0 失败，3 跳过 |
+| 全量测试（本机） | 261 | 0 失败，3 跳过 |
 | CT-001…CT-044 | 44 | 42 通过，2 跳过（单机 iCloud 验收、CT-044 磁盘满；CT-036/037 在 scale=1 下真实执行） |
 | CT-045…CT-057 | 13 | 13 通过 |
 | CT-058…CT-116 | 59 | 59 通过 |
 | CT-117…CT-128 | 12 | 12 通过（第七轮） |
-| Schema 迁移 | 2 | 通过 |
+| CT-129…CT-146 | 18 | 18 通过（云端零配置与门禁） |
+| CT-147…CT-165 | 19 | 19 通过（CodeTime 2.0 / v3） |
+| Schema 迁移 | 2 | 通过（user_version 3） |
 | 静态发布检查 | 4 个脚本 | 通过（公证、stapling、真实 iCloud 未执行） |
+| 真实 iCloud 双 Mac / v3 100 GB | — | NOT RUN |
 
 统计口径以 `TEST_REPORT.md` 的机器可读块为唯一事实源（`Scripts/check_test_report.py` 强制校验）。
 跳过项不是“通过”，原因与执行方式见 `REGRESSION_MATRIX.md` 与 `KNOWN_LIMITATIONS.md`。

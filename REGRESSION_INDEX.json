@@ -1638,5 +1638,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "恢复不下载 Kopia 仓库；跨设备命名空间可读；历史版本保持可见"
+  },
+  {
+    "id": "CT-165",
+    "test": "testCT165_OnboardingStartsFreshInstallOnV3",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3IntegrationTests.swift",
+    "purpose": "全新安装且云端可用时默认启用 v3；已有快照的安装保持旧引擎直到迁移",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "没有旧历史不得继续创建完整本地仓库；有历史时不得跳过迁移验证"
   }
 ]

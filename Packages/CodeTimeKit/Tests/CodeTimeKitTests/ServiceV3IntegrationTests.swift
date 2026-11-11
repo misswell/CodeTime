@@ -57,8 +57,7 @@ final class ServiceV3IntegrationTests: XCTestCase {
         return (project, mirror)
     }
 
-    func testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace() async throws {
-        let (project, mirror) = try await configureV3()
+    func testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace() async throws {        let (project, mirror) = try await configureV3()
 
         let outcome = try await service.createSnapshot(projectID: project.id, trigger: .manual)
         XCTAssertNil(outcome.cloudError)
@@ -117,5 +116,23 @@ final class ServiceV3IntegrationTests: XCTestCase {
             snapshotID: outcome.snapshot.id
         )
         XCTAssertEqual(verification.outcome, .passed, verification.details)
+    }
+
+    /// A fresh install with a working cloud target starts on v3, while an install
+    /// that already has snapshots keeps the legacy engine until migration.
+    func testCT165_OnboardingStartsFreshInstallOnV3() async throws {
+        _ = try await service.bootstrap()
+        let mirror = workspace.appendingPathComponent("mirror", isDirectory: true)
+        var settings = try await service.currentSettings()
+        settings.engineMode = .kopia
+        settings.hasCompletedOnboarding = false
+        settings.iCloudEnabled = false
+        settings.localMirrorPath = mirror.path
+        _ = try await service.saveSettings(settings)
+
+        try await service.completeOnboarding()
+        let after = try await service.currentSettings()
+        XCTAssertEqual(after.engineMode, .cloudFirst, "全新安装没有旧历史时应直接使用 v3")
+        XCTAssertTrue(after.hasCompletedOnboarding)
     }
 }

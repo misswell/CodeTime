@@ -16,7 +16,9 @@ public struct V3RecoveryProject: Sendable, Equatable, Identifiable {
     public var restorable: Bool
     public var detail: String
 
-    public var id: UUID { projectID }
+    /// The same project may continue on two devices; both histories stay
+    /// selectable, so identity includes the device namespace.
+    public var id: String { "\(sourceDeviceID)-\(projectID.uuidString)" }
 }
 
 /// New-Mac discovery for Cloud Format v3 (§9.5).

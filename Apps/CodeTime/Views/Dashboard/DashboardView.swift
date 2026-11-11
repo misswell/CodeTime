@@ -268,8 +268,8 @@ struct StorageSummaryCard: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("迁移到云端优先引擎") {
-                            Task { await model.runMigration() }
+                        Button("查看迁移选项") {
+                            model.selectedSection = .settings
                         }
                         .controlSize(.small)
                     }

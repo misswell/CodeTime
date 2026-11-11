@@ -45,6 +45,31 @@ public struct BackupOutcome: Sendable {    public var snapshot: Snapshot
     }
 }
 
+/// What the v2→v3 baseline would cost before anything is uploaded. Shown to the
+/// user before migration starts; the v3 baseline is an additional cloud copy
+/// while the old v2 history is retained.
+public struct MigrationCapacityEstimate: Sendable, Equatable {
+    public var projectCount: Int
+    public var estimatedUploadBytes: Int64
+    public var legacyLocalBytes: Int64
+    public var legacyCloudBytes: Int64
+    public var detail: String
+
+    public init(
+        projectCount: Int = 0,
+        estimatedUploadBytes: Int64 = 0,
+        legacyLocalBytes: Int64 = 0,
+        legacyCloudBytes: Int64 = 0,
+        detail: String = ""
+    ) {
+        self.projectCount = projectCount
+        self.estimatedUploadBytes = estimatedUploadBytes
+        self.legacyLocalBytes = legacyLocalBytes
+        self.legacyCloudBytes = legacyCloudBytes
+        self.detail = detail
+    }
+}
+
 /// Local-space accounting for the v3 engine (§13.1). Spool and cache are kept
 /// separate: only the download cache is ever safe to clear.
 public struct V3StorageStatus: Sendable, Equatable {
@@ -615,6 +640,7 @@ public actor CodeTimeService {
         let settings = try await currentSettings()
         let store = try await currentV3Store()
         if let v3QueueCache { return v3QueueCache }
+        let encoder = ObjectEncoder(masterKey: try keychain.masterKey())
         let queue = UploadQueue(
             base: store,
             index: database,
@@ -623,7 +649,18 @@ public actor CodeTimeService {
                 softLimitBytes: settings.spoolSoftLimitBytes,
                 uploadConcurrency: max(1, settings.performance.backupParallelism),
                 maxRetries: 5
-            )
+            ),
+            validate: { payload, id, isPack in
+                if isPack {
+                    guard let entries = try? ObjectPackReader().entries(in: payload) else { return false }
+                    return entries.allSatisfy { entry in
+                        entry.offset >= ObjectPackFormat.headerSize
+                            && entry.length > 0
+                            && entry.offset + entry.length <= payload.count
+                    }
+                }
+                return (try? encoder.decode(payload, objectID: id)) != nil
+            }
         )
         v3QueueCache = queue
         return queue
@@ -801,6 +838,45 @@ public actor CodeTimeService {
             _ = try? await cache.enforceBudget()
         }
         return saved
+    }
+
+    /// Capacity warning before a migration. It deliberately over-estimates: the
+    /// newest snapshot's total size per project, while content-defined dedup will
+    /// usually upload less. The old v2 history is retained, so cloud usage can
+    /// grow by roughly this amount until old versions expire.
+    public func migrationCapacityEstimate() async -> MigrationCapacityEstimate? {
+        guard FileManager.default.fileExists(atPath: paths.repositories.path),
+              (try? FileManager.default.contentsOfDirectory(atPath: paths.repositories.path))?.isEmpty == false
+        else {
+            return nil
+        }
+        let projects = ((try? await database.projects()) ?? []).filter {
+            $0.lifecycle == .active && $0.enabled
+        }
+        var estimate: Int64 = 0
+        for project in projects {
+            if let newest = try? await database.snapshots(projectID: project.id, limit: 1).first {
+                estimate += newest.totalSize
+            }
+        }
+        let legacyLocal = await repositoryUsage() ?? 0
+        var legacyCloud: Int64 = 0
+        if let settings = try? await currentSettings(),
+           let store = try? await makeCloudStoreIfConfigured(settings: settings),
+           let repository {
+            legacyCloud = ((try? await store.listGenerations(repositoryId: repository.id)) ?? [])
+                .reduce(0) { $0 + $1.byteSize }
+        }
+        let detail = "预计新基线需上传约 \(CodeTimeFormat.bytes(estimate))（内容去重后通常更少）；"
+            + "旧 v2 历史继续保留，云端占用可能暂时增加到约 "
+            + CodeTimeFormat.bytes(estimate + legacyCloud) + "。"
+        return MigrationCapacityEstimate(
+            projectCount: projects.count,
+            estimatedUploadBytes: estimate,
+            legacyLocalBytes: legacyLocal,
+            legacyCloudBytes: legacyCloud,
+            detail: detail
+        )
     }
 
     /// Local spool/cache numbers for the dashboard. Cache and spool are reported
@@ -1081,7 +1157,24 @@ public actor CodeTimeService {
         var settings = try await currentSettings()
         settings.hasCompletedOnboarding = true
         keychain.markRecoveryKeyAcknowledged()
+        // A brand-new install with a working cloud target has no legacy history
+        // to preserve: start it on the cloud-first engine instead of creating a
+        // full local repository. Existing installs (any snapshot) keep their
+        // engine until the migration coordinator verifies a v3 baseline.
+        if settings.engineMode == .kopia, try await database.snapshotCount() == 0 {
+            let cloudReady: Bool
+            if settings.iCloudEnabled {
+                cloudReady = await CloudSetupService.detect().isReady
+            } else {
+                cloudReady = settings.localMirrorPath.map { !$0.isEmpty } ?? false
+            }
+            if cloudReady {
+                settings.engineMode = .cloudFirst
+                await logger.info("首次设置完成：新备份使用云端优先 v3 引擎")
+            }
+        }
         try await saveSettings(settings)
+        rebuildEngine()
     }
 
     public func takeRecoveryKeyText() throws -> String {
@@ -2882,6 +2975,11 @@ public actor CodeTimeService {
         else {
             throw CodeTimeError.snapshotNotFound(snapshotID ?? candidate.latestSnapshotID ?? "")
         }
+        // Registering the restored project uses its original ID (the manifest
+        // context depends on it), so refuse before downloading anything.
+        if try await database.project(id: candidate.projectID) != nil {
+            throw CodeTimeError.unsupported("该项目的恢复目标已存在，请使用普通恢复功能")
+        }
 
         let reader = CloudRestoreEngine(masterKey: key, source: store)
         _ = try await reader.restore(
@@ -2894,9 +2992,6 @@ public actor CodeTimeService {
         // Register the restored project under its ORIGINAL project ID: the cloud
         // commit/manifest context is keyed by it, so browsing and later backups
         // continue the same history instead of forking a second project.
-        if try await database.project(id: candidate.projectID) != nil {
-            throw CodeTimeError.unsupported("该项目的恢复目标已存在，请使用普通恢复功能")
-        }
         let bookmark = try? SecurityScopedBookmarks.makeBookmark(for: destination)
         var project = Project(
             id: candidate.projectID,
