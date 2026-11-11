@@ -291,3 +291,163 @@ public enum CanonicalHashing {
         func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
     }
 }
+
+// MARK: - Local index records (Cloud Format v3)
+
+public enum UploadTaskState: String, Codable, Sendable, Hashable {
+    case pending
+    case uploading
+    case uploaded
+    case failed
+}
+
+public enum SnapshotUploadState: String, Codable, Sendable, Hashable {
+    case pending
+    case uploading
+    case uploaded
+    case failed
+}
+
+public enum SnapshotCommitState: String, Codable, Sendable, Hashable {
+    /// Objects/manifest not finished; the version is not visible in the cloud.
+    case pending
+    /// Commit marker confirmed uploaded: the version is complete.
+    case committed
+    /// Publishing stopped on an error that needs user action (quota, account).
+    case blocked
+}
+
+/// What the local database knows about one cloud version. Rebuildable from the
+/// cloud (commits + manifest + nodes) — it is an index, never the only copy.
+public struct SnapshotRecordV3: Codable, Hashable, Sendable {
+    public var snapshotID: String
+    public var projectID: UUID
+    public var parentSnapshotID: String?
+    public var createdAt: Date
+    public var rootNodeID: String
+    public var fileCount: Int
+    public var totalBytes: Int64
+    public var uploadState: SnapshotUploadState
+    public var commitState: SnapshotCommitState
+    public var manifestPayloadHash: String?
+
+    public init(
+        snapshotID: String,
+        projectID: UUID,
+        parentSnapshotID: String? = nil,
+        createdAt: Date,
+        rootNodeID: String,
+        fileCount: Int,
+        totalBytes: Int64,
+        uploadState: SnapshotUploadState = .pending,
+        commitState: SnapshotCommitState = .pending,
+        manifestPayloadHash: String? = nil
+    ) {
+        self.snapshotID = snapshotID
+        self.projectID = projectID
+        self.parentSnapshotID = parentSnapshotID
+        self.createdAt = createdAt
+        self.rootNodeID = rootNodeID
+        self.fileCount = fileCount
+        self.totalBytes = totalBytes
+        self.uploadState = uploadState
+        self.commitState = commitState
+        self.manifestPayloadHash = manifestPayloadHash
+    }
+
+    public var isCommitted: Bool { commitState == .committed }
+}
+
+/// One remote chunk we know about. `verifiedAt` is nil until we have actually
+/// downloaded and decrypted it; a local index row alone never counts as proof.
+public struct ChunkRecordV3: Codable, Hashable, Sendable {
+    public var objectID: String
+    public var plaintextSize: Int
+    public var storedSize: Int
+    public var keyVersion: UInt16
+    public var packID: String?
+    public var packOffset: Int64?
+    public var verifiedAt: Date?
+
+    public init(
+        objectID: String,
+        plaintextSize: Int,
+        storedSize: Int,
+        keyVersion: UInt16,
+        packID: String? = nil,
+        packOffset: Int64? = nil,
+        verifiedAt: Date? = nil
+    ) {
+        self.objectID = objectID
+        self.plaintextSize = plaintextSize
+        self.storedSize = storedSize
+        self.keyVersion = keyVersion
+        self.packID = packID
+        self.packOffset = packOffset
+        self.verifiedAt = verifiedAt
+    }
+}
+
+/// A durable upload task. Lives in `spool/`: never LRU-evicted, never deleted
+/// because a cache budget was reached — un-uploaded data is the only copy.
+public struct PendingUploadV3: Codable, Hashable, Sendable {
+    public var taskID: String
+    public var objectID: String
+    public var localPath: String
+    public var remotePath: String
+    public var fileSize: Int64
+    public var state: UploadTaskState
+    public var retryCount: Int
+    public var createdAt: Date
+
+    public init(
+        taskID: String,
+        objectID: String,
+        localPath: String,
+        remotePath: String,
+        fileSize: Int64,
+        state: UploadTaskState = .pending,
+        retryCount: Int = 0,
+        createdAt: Date = Date()
+    ) {
+        self.taskID = taskID
+        self.objectID = objectID
+        self.localPath = localPath
+        self.remotePath = remotePath
+        self.fileSize = fileSize
+        self.state = state
+        self.retryCount = retryCount
+        self.createdAt = createdAt
+    }
+}
+
+public struct CacheEntryV3: Codable, Hashable, Sendable {
+    public var key: String
+    public var localPath: String
+    public var size: Int64
+    public var lastAccessedAt: Date
+    /// Pinned entries (active restore, pending upload) are never evicted.
+    public var pinned: Bool
+
+    public init(key: String, localPath: String, size: Int64, lastAccessedAt: Date = Date(), pinned: Bool = false) {
+        self.key = key
+        self.localPath = localPath
+        self.size = size
+        self.lastAccessedAt = lastAccessedAt
+        self.pinned = pinned
+    }
+}
+
+public struct MigrationJournalEntryV3: Codable, Hashable, Sendable {
+    public var id: String
+    public var phase: String
+    public var updatedAt: Date
+    public var detail: String
+
+    public init(id: String = UUID().uuidString, phase: String, updatedAt: Date = Date(), detail: String = "") {
+        self.id = id
+        self.phase = phase
+        self.updatedAt = updatedAt
+        self.detail = detail
+    }
+}

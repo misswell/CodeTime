@@ -1508,5 +1508,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "无 Manifest 不得发布 Commit；哈希不符拒绝；未 Commit 版本不可见"
+  },
+  {
+    "id": "CT-152",
+    "test": "testCT152_FileIndexReplacementLeavesNoGhosts",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudIndexV3Tests.swift",
+    "purpose": "v3 本地索引：扫描替换无残留、块索引、快照状态、待上传计数、缓存与迁移日志",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "replace 语义整表替换；retry_count 持久化；pinned 可区分；payload 与列一致"
   }
 ]

@@ -22,7 +22,7 @@ public enum PersistenceError: LocalizedError, Sendable, Equatable {
     }
 }
 
-private enum SQLValue {
+enum SQLValue {
     case text(String)
     case int(Int64)
     case double(Double)
@@ -249,6 +249,82 @@ public actor SQLiteStore {
                 );
                 """)
                 try exec(db, "PRAGMA user_version=2;")
+            }
+        }
+        if version < 3 {
+            // Cloud Format v3 local index (CT-152). Purely additive: v2 tables and
+            // the Kopia repository stay untouched, so an upgraded user can still
+            // restore every existing snapshot.
+            try transaction(db) {
+                try exec(db, """
+                CREATE TABLE IF NOT EXISTS v3_file_index (
+                    project_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    file_identity TEXT,
+                    size INTEGER NOT NULL,
+                    modified_at REAL,
+                    changed_at REAL NOT NULL,
+                    file_hash TEXT,
+                    last_scanned_at REAL NOT NULL,
+                    last_snapshot_id TEXT,
+                    payload BLOB NOT NULL,
+                    PRIMARY KEY(project_id, relative_path)
+                );
+                CREATE INDEX IF NOT EXISTS idx_v3_file_snapshot ON v3_file_index(project_id, last_snapshot_id);
+
+                CREATE TABLE IF NOT EXISTS v3_chunk_index (
+                    object_id TEXT PRIMARY KEY,
+                    plaintext_size INTEGER NOT NULL,
+                    stored_size INTEGER NOT NULL,
+                    key_version INTEGER NOT NULL,
+                    pack_id TEXT,
+                    pack_offset INTEGER,
+                    verified_at REAL,
+                    payload BLOB NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS v3_snapshot_index (
+                    snapshot_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    parent_snapshot_id TEXT,
+                    created_at REAL NOT NULL,
+                    root_node_id TEXT NOT NULL,
+                    total_files INTEGER NOT NULL,
+                    total_bytes INTEGER NOT NULL,
+                    upload_state TEXT NOT NULL,
+                    commit_state TEXT NOT NULL,
+                    payload BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_v3_snapshot_project ON v3_snapshot_index(project_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS v3_pending_uploads (
+                    task_id TEXT PRIMARY KEY,
+                    object_id TEXT NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    upload_state TEXT NOT NULL,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    payload BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_v3_pending_state ON v3_pending_uploads(upload_state, created_at);
+
+                CREATE TABLE IF NOT EXISTS v3_cache_index (
+                    cache_key TEXT PRIMARY KEY,
+                    local_path TEXT NOT NULL,
+                    cache_size INTEGER NOT NULL,
+                    last_accessed_at REAL NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    payload BLOB NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS v3_migration_journal (
+                    id TEXT PRIMARY KEY,
+                    phase TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    payload BLOB NOT NULL
+                );
+                """)
+                try exec(db, "PRAGMA user_version=3;")
             }
         }
     }
@@ -1463,29 +1539,29 @@ public actor SQLiteStore {
 
     // MARK: - SQL helpers
 
-    private func encode<T: Encodable>(_ value: T) throws -> Data {
+    func encode<T: Encodable>(_ value: T) throws -> Data {
         do { return try encoder.encode(value) }
         catch { throw PersistenceError.encodeFailed(String(describing: error)) }
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do { return try decoder.decode(type, from: data) }
         catch { throw PersistenceError.decodeFailed(String(describing: error)) }
     }
 
-    private func scalarInt(_ sql: String) throws -> Int {
+    func scalarInt(_ sql: String) throws -> Int {
         guard let row = try query(sql, []).first, case .int(let value) = row[0] else { return 0 }
         return Int(value)
     }
 
-    private func transaction(_ body: () throws -> Void) throws {
+    func transaction(_ body: () throws -> Void) throws {
         try transactionResult(body)
     }
 
     /// Read-check-write operations must hold a write transaction for their whole
     /// duration. The actor only serializes this process; UI and Agent use separate
     /// SQLite connections and would otherwise both pass a stale check.
-    private func transactionResult<T>(_ body: () throws -> T) throws -> T {
+    func transactionResult<T>(_ body: () throws -> T) throws -> T {
         try exec("BEGIN IMMEDIATE;")
         do {
             let result = try body()
@@ -1497,12 +1573,12 @@ public actor SQLiteStore {
         }
     }
 
-    private func exec(_ sql: String) throws {
+    func exec(_ sql: String) throws {
         guard let db else { throw PersistenceError.statementFailed("database closed") }
         try Self.execRaw(db, sql, errorCase: .statementFailed)
     }
 
-    private static func exec(_ db: OpaquePointer, _ sql: String) throws {
+    static func exec(_ db: OpaquePointer, _ sql: String) throws {
         try execRaw(db, sql, errorCase: .migrationFailed)
     }
 
@@ -1521,7 +1597,7 @@ public actor SQLiteStore {
         }
     }
 
-    private static func transaction(_ db: OpaquePointer, _ body: () throws -> Void) throws {
+    static func transaction(_ db: OpaquePointer, _ body: () throws -> Void) throws {
         try exec(db, "BEGIN IMMEDIATE;")
         do {
             try body()
@@ -1537,12 +1613,12 @@ public actor SQLiteStore {
         return Int(value)
     }
 
-    private func upsert(_ sql: String, _ params: [SQLValue]) throws {
+    func upsert(_ sql: String, _ params: [SQLValue]) throws {
         _ = try query(sql, params)
     }
 
     @discardableResult
-    private func query(_ sql: String, _ params: [SQLValue]) throws -> [[SQLValue]] {
+    func query(_ sql: String, _ params: [SQLValue]) throws -> [[SQLValue]] {
         guard let db else { throw PersistenceError.statementFailed("database closed") }
         return try Self.query(db, sql, params)
     }
