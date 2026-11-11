@@ -7,7 +7,7 @@
 |---|---|---|
 | `apple-provisioning-blocked-*.log` | `Scripts/setup_apple_provisioning.sh` 的真实失败输出（PLA 未同意） | 本机 |
 | `376ff89-regression-gate.log` | 前一轮全量门禁输出（263 tests / 0 failures / 3 skips） | `376ff89` |
-| `9468eba-reliability-gate.log` | 可靠性加固后全量门禁输出（295 tests / 0 failures / 3 skips，scale=1） | `9468eba` |
+| `3ab6bde-reliability-gate.log` | 可靠性加固后全量门禁输出（295 tests / 0 failures / 3 skips，scale=1） | `3ab6bde` |
 | `v3-perf-10gb-random-20261111-170416.log` | 10 GiB 全随机单文件：126.4s，上传 8.42GB；改 1 KiB → 1.84MB；峰值 477/502MB | 本机 macOS 27.2 |
 | `v3-perf-10gb-final-20261111-163826.log` | 10 GiB 稀疏单文件（2.5 GiB 随机）：79.6s，增量 1 KiB → 1.03 MB 上传，峰值 467/437 MB | 本机 macOS 27.2 |
 | `v3-perf-100gb-isolated-20261111-163504.log` | 100 GiB 逻辑单文件：465.8s，读取 100 GiB，峰值 379 MB，spool 0 | 本机 macOS 27.2 |
