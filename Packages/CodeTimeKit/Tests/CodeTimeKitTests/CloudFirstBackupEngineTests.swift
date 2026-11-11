@@ -330,6 +330,25 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         let firstManifest = try decryptManifest(sink, snapshotID: first.snapshotID)
         let secondManifest = try decryptManifest(sink, snapshotID: second.snapshotID)
         XCTAssertEqual(firstManifest.rootNodeID, secondManifest.rootNodeID)
+
+        // §7.2: once per day every file is re-read even when size+mtime match.
+        // Re-chunking finds the same objects, so nothing is uploaded again.
+        let nextDay = Date().addingTimeInterval(86_400)
+        let daily = CloudFirstBackupEngine(
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            sink: sink,
+            options: BackupRunOptions(
+                chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 16 * 1024),
+                uploadConcurrency: 2
+            ),
+            clock: { nextDay }
+        )
+        let third = try await daily.run(projectID: projectID, root: root, matcher: matcher())
+        XCTAssertEqual(third.filesReused, 0, "跨天后必须重新读取文件内容")
+        XCTAssertEqual(third.filesChanged, 2)
+        XCTAssertEqual(third.objectsUploaded, 0, "内容未变时重新分块不得产生新对象")
     }
 
     func testCT154_EditingOneFileUploadsOnlyNewChunks() async throws {

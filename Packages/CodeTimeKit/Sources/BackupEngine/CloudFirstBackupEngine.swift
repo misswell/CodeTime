@@ -34,19 +34,25 @@ public struct BackupRunOptions: Sendable {
     /// Pack encoded objects at or below this size into immutable packs instead of
     /// writing one iCloud item per chunk (CT-157). nil disables packing.
     public var packObjectsUpTo: Int?
+    /// Re-read every file at least once per calendar day. Size+mtime reuse is a
+    /// performance heuristic, never a guarantee; this is the periodic full
+    /// content verification §7.2 requires.
+    public var verifyUnchangedContentDaily: Bool
 
     public init(
         chunker: ChunkerConfig = .default,
         uploadConcurrency: Int = 2,
         maxReadAttempts: Int = 3,
         allowIncompleteScan: Bool = false,
-        packObjectsUpTo: Int? = 128 * 1024
+        packObjectsUpTo: Int? = 128 * 1024,
+        verifyUnchangedContentDaily: Bool = true
     ) {
         self.chunker = chunker
         self.uploadConcurrency = max(1, uploadConcurrency)
         self.maxReadAttempts = max(1, maxReadAttempts)
         self.allowIncompleteScan = allowIncompleteScan
         self.packObjectsUpTo = packObjectsUpTo
+        self.verifyUnchangedContentDaily = verifyUnchangedContentDaily
     }
 
     public static let `default` = BackupRunOptions()
@@ -203,12 +209,17 @@ public struct CloudFirstBackupEngine: Sendable {
         )
 
         // Reuse: unchanged size+mtime lets the previous node's chunk list stand.
+        // At least once per day every file is re-read (periodic full verification).
+        let now = clock()
+        let forceFullRead = options.verifyUnchangedContentDaily
+            && parent.map { !Calendar.current.isDate($0.createdAt, inSameDayAs: now) } == true
         var pending: [ScannedEntry] = []
         var reused: [FileNode] = []
         var seen = Set<String>()
         for entry in scan.entries where entry.kind != .directory {
             seen.insert(entry.path)
-            if let previous = previousByPath[entry.path],
+            if !forceFullRead,
+               let previous = previousByPath[entry.path],
                Self.looksUnchanged(entry: entry, previous: previous) {
                 reused.append(previous)
                 report.filesReused += 1
