@@ -1518,5 +1518,25 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "replace 语义整表替换；retry_count 持久化；pinned 可区分；payload 与列一致"
+  },
+  {
+    "id": "CT-153",
+    "test": "testCT153_ScanAppliesExclusionsAndKeepsStructure",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ProjectScannerTests.swift",
+    "purpose": "项目扫描：排除规则、符号链接不跟随、增量变化集、不可读子树如实标记",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "扫描不完整必须上报；未变化文件不重算；符号链接只记录目标"
+  },
+  {
+    "id": "CT-154",
+    "test": "testCT154_FirstBackupPublishesInOrderAndIsReadable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstBackupEngineTests.swift",
+    "purpose": "云优先引擎端到端：发布顺序、增量复用、历史不可变、跨文件去重",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "对象/节点先于 Manifest，Manifest 先于 Commit；未变化零上传；旧版本对象不被回收"
   }
 ]

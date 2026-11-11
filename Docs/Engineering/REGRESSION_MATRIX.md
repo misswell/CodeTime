@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-152）
+# 回归测试矩阵（CT-001 … CT-154）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -156,10 +156,12 @@
 | CT-150 | `testCT150_TreeIsDeterministicAndOrderIndependent` | Merkle 树身份确定且变更只沿路径传播 | 是 | 否 |
 | CT-151 | `testCT151_CommitRequiresManifestAndMatchingHash` | v3 云存储发布顺序与幂等 | 是 | 否 |
 | CT-152 | `testCT152_FileIndexReplacementLeavesNoGhosts` | v3 本地索引语义（替换无残留/重试计数/缓存 pin） | 是 | 否 |
+| CT-153 | `testCT153_ScanAppliesExclusionsAndKeepsStructure` | 项目扫描排除/链接/增量/不完整上报 | 是 | 否 |
+| CT-154 | `testCT154_FirstBackupPublishesInOrderAndIsReadable` | 云优先引擎端到端（顺序/复用/去重/历史） | 是 | 否 |
 
 ## 门禁规则（CT-114 / CT-138）
 
-- 索引必须恰好登记 CT-001…CT-152，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-154，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。

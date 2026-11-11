@@ -108,62 +108,40 @@ public struct FastCDCChunker: Sendable {
         isCancelled: () -> Bool = { false },
         _ body: (Chunk) throws -> Void
     ) throws {
+        guard var iterator = try? makeIterator(ofFile: url) else {
+            throw ChunkerError.readFailed(url.lastPathComponent)
+        }
+        while let chunk = try iterator.next(isCancelled: isCancelled) {
+            try body(chunk)
+        }
+    }
+
+    /// Pull-based iteration. The caller decides when to consume the next chunk,
+    /// so an async pipeline can do I/O between chunks without buffering the file.
+    public func makeIterator(ofFile url: URL) throws -> ChunkIterator {
         guard let handle = try? FileHandle(forReadingFrom: url) else {
             throw ChunkerError.readFailed(url.lastPathComponent)
         }
-        defer { try? handle.close() }
-        try forEachChunk(reader: {
+        return ChunkIterator(chunker: self, reader: {
+            defer { if let data = try? handle.read(upToCount: 1 << 20), data.isEmpty { try? handle.close() } }
             do {
                 return try handle.read(upToCount: 1 << 20) ?? Data()
             } catch {
                 throw ChunkerError.readFailed(error.localizedDescription)
             }
-        }, isCancelled: isCancelled, body)
+        })
     }
 
-    /// Core loop. `reader` returns empty data at EOF.
+    /// Core loop for callers that already have a byte source. `reader` returns
+    /// empty data at EOF.
     public func forEachChunk(
-        reader: () throws -> Data,
+        reader: @escaping () throws -> Data,
         isCancelled: () -> Bool = { false },
         _ body: (Chunk) throws -> Void
     ) throws {
-        var buffer = Data()
-        var head = 0                 // first unconsumed byte in `buffer`
-        var offset: Int64 = 0
-        var eof = false
-
-        func fill() throws {
-            while (buffer.count - head) < config.maxSize, !eof {
-                let piece = try reader()
-                if piece.isEmpty { eof = true; break }
-                buffer.append(piece)
-            }
-        }
-
-        while true {
-            if isCancelled() { throw ChunkerError.cancelled }
-            try fill()
-            let available = buffer.count - head
-            if available == 0 { break }
-
-            let length = boundaryLength(in: buffer, from: head, available: available)
-            let start = buffer.index(buffer.startIndex, offsetBy: head)
-            let end = buffer.index(start, offsetBy: length)
-            try body(Chunk(offset: offset, data: Data(buffer[start..<end])))
-            head += length
-            offset += Int64(length)
-
-            // Compact only when the consumed prefix is large, so the stream stays
-            // linear instead of shifting the whole tail on every chunk.
-            if head >= 8 * 1024 * 1024 {
-                buffer.removeFirst(head)
-                head = 0
-            }
-            if head == buffer.count {
-                buffer.removeAll(keepingCapacity: true)
-                head = 0
-                if eof { break }
-            }
+        var iterator = ChunkIterator(chunker: self, reader: reader)
+        while let chunk = try iterator.next(isCancelled: isCancelled) {
+            try body(chunk)
         }
     }
 
@@ -194,5 +172,49 @@ public struct FastCDCChunker: Sendable {
             cursor += 1
         }
         return limit
+    }
+}
+
+/// Synchronous pull iterator over content-defined chunks.
+///
+/// `next()` returns nil at end of stream. Only one chunk is materialised at a
+/// time; the read window is `maxSize`, so a 10 GB file never becomes 10 GB of RAM.
+public struct ChunkIterator {
+    private let chunker: FastCDCChunker
+    private let reader: () throws -> Data
+    private var buffer = Data()
+    private var head = 0
+    private var offset: Int64 = 0
+    private var eof = false
+    private var finished = false
+
+    init(chunker: FastCDCChunker, reader: @escaping () throws -> Data) {
+        self.chunker = chunker
+        self.reader = reader
+    }
+
+    public mutating func next(isCancelled: () -> Bool = { false }) throws -> Chunk? {
+        if finished { return nil }
+        if isCancelled() { throw ChunkerError.cancelled }
+        while (buffer.count - head) < chunker.config.maxSize, !eof {
+            let piece = try reader()
+            if piece.isEmpty { eof = true; break }
+            buffer.append(piece)
+        }
+        let available = buffer.count - head
+        if available == 0 { finished = true; return nil }
+
+        let length = chunker.boundaryLength(in: buffer, from: head, available: available)
+        let start = buffer.index(buffer.startIndex, offsetBy: head)
+        let end = buffer.index(start, offsetBy: length)
+        let chunk = Chunk(offset: offset, data: Data(buffer[start..<end]))
+        head += length
+        offset += Int64(length)
+
+        if head >= 8 * 1024 * 1024 || head == buffer.count {
+            buffer.removeFirst(head)
+            head = 0
+        }
+        return chunk
     }
 }

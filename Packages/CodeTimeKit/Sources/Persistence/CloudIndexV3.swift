@@ -415,3 +415,33 @@ extension SQLiteStore {
         try migrationEvents(limit: 1).first?.phase
     }
 }
+
+// MARK: - Engine seam
+
+extension SQLiteStore: CloudSnapshotIndex {
+    public func fileNodes(projectID: UUID) async throws -> [FileNode] {
+        try fileIndex(projectID: projectID)
+    }
+
+    public func replaceFileIndex(projectID: UUID, files: [FileNode], snapshotID: String) async throws {
+        try replaceFileIndex(projectID: projectID, files: files, snapshotID: snapshotID, at: Date())
+    }
+
+    public func upsertSnapshot(_ record: SnapshotRecordV3) async throws {
+        try upsertSnapshotRecord(record)
+    }
+
+    public func updateSnapshot(
+        _ snapshotID: String,
+        uploadState: SnapshotUploadState?,
+        commitState: SnapshotCommitState?,
+        manifestPayloadHash: String?
+    ) async throws {
+        try updateSnapshotRecord(
+            snapshotID,
+            uploadState: uploadState,
+            commitState: commitState,
+            manifestPayloadHash: manifestPayloadHash
+        )
+    }
+}

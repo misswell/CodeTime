@@ -93,6 +93,11 @@ public struct MerkleTreeBuilder: Sendable {
         // Every ancestor directory must exist, even when empty.
         var allDirectoryPaths: Set<String> = [""]
         for scanned in sorted {
+            if scanned.kind == .directory {
+                // An empty directory has no file beneath it to introduce its path
+                // — without this it would be referenced with an empty node ID.
+                allDirectoryPaths.insert(scanned.path)
+            }
             var parent = Self.parentPath(of: scanned.path)
             if scanned.kind != .directory {
                 allDirectoryPaths.insert(parent)

@@ -117,3 +117,37 @@ public struct VerificationReport: Codable, Hashable, Sendable {
         self.bytesChecked = bytesChecked
     }
 }
+
+// MARK: - Cloud Format v3 seams
+
+/// Where v3 objects, nodes, manifests and commit markers go. Implemented by
+/// `CloudObjectStoreV3` on the real container and by an in-memory double in tests.
+public protocol CloudObjectSink: Sendable {
+    func hasObject(_ objectID: String) async throws -> Bool
+    @discardableResult
+    func putObject(_ payload: Data, objectID: String) async throws -> Bool
+    @discardableResult
+    func putNode(_ node: DirectoryNode) async throws -> Bool
+    /// Returns the SHA-256 of the stored payload; the commit marker binds to it.
+    func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String
+    /// Must only succeed when the manifest exists and still matches its hash.
+    func putCommit(_ commit: SnapshotCommit) async throws
+}
+
+/// The rebuildable local index the engine consults before doing work.
+public protocol CloudSnapshotIndex: Sendable {
+    func fileNodes(projectID: UUID) async throws -> [FileNode]
+    func replaceFileIndex(projectID: UUID, files: [FileNode], snapshotID: String) async throws
+    func knownObjectIDs(_ objectIDs: [String]) async throws -> Set<String>
+    func upsertChunks(_ chunks: [ChunkRecordV3]) async throws
+    func upsertSnapshot(_ record: SnapshotRecordV3) async throws
+    func updateSnapshot(
+        _ snapshotID: String,
+        uploadState: SnapshotUploadState?,
+        commitState: SnapshotCommitState?,
+        manifestPayloadHash: String?
+    ) async throws
+    func snapshotRecords(projectID: UUID, limit: Int) async throws -> [SnapshotRecordV3]
+    func enqueueUploads(_ uploads: [PendingUploadV3]) async throws
+    func removeUpload(_ taskID: String) async throws
+}
