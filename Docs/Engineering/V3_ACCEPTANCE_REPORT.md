@@ -3,7 +3,7 @@
 本报告对应任务书 §16–§19 的交付验收。**自动化结果真实执行；真实 iCloud 双 Mac 与 100 GB
 规模验收未执行，明确标记 NOT RUN。**
 
-- 代码提交：`4a52883`
+- 代码提交：`376ff89`
 - 门禁：`Scripts/regression_gate.sh`，`PASS`
 - 测试：263 executed / 0 failures / 3 skipped（CT-001 … CT-167）
 - 环境：macOS 27.2 arm64；本地镜像 + 内存云；Kopia 0.23.1 仅用于 v2 兼容测试
