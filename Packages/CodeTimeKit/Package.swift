@@ -41,6 +41,12 @@ let package = Package(
             name: "CodeTimeCrashChild",
             dependencies: ["CodeTimeCore", "SharedModels", "BackupEngine", "CodeTimeSecurity"]
         ),
+        // §16.H/§17 acceptance harness: real-iCloud round trip and large-dataset
+        // performance measurements. Not part of the product or the regression gate.
+        .executableTarget(
+            name: "V3Acceptance",
+            dependencies: ["SharedModels", "BackupEngine", "CloudMirrorStore", "Persistence", "CodeTimeSecurity"]
+        ),
         .testTarget(
             name: "CodeTimeKitTests",
             dependencies: ["CodeTimeCore", "SharedModels", "Persistence", "CodeTimeSecurity", "BackupEngine", "CloudMirrorStore", "CSQLite"]

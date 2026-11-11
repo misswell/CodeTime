@@ -1,0 +1,15 @@
+# 测试产物
+
+本目录保存可以复核的门禁/验收原始日志。日志是当时命令的真实输出，不手工改写；
+机器路径与临时 UUID 会出现，但不包含用户代码内容、密钥或恢复密钥。
+
+| 文件 | 内容 | 对应提交/环境 |
+|---|---|---|
+| `376ff89-regression-gate.log` | `Scripts/regression_gate.sh` 全量门禁输出（263 tests / 0 failures / 3 skips） | `376ff89` |
+| `v3-perf-10gb-final-20261111-163826.log` | 10 GiB 逻辑单文件：首发 79.6s，增量 1 KiB → 1.03 MB 上传，峰值 467/437 MB | 本机 macOS 27.2 |
+| `v3-perf-100gb-isolated-20261111-163504.log` | 100 GiB 逻辑单文件：465.8s，读取 100 GiB，峰值 379 MB，spool 0 | 本机 macOS 27.2 |
+| `v3-perf-100k-files-20261111-164015.log` | 100k × 1 KiB：首发 40.8s，重跑 0 B，53 packs，DB 247 MB | 本机 macOS 27.2 |
+
+性能数据是稀疏数据集（逻辑大小达标，部分物理随机），不是全随机 10/100 GB；
+真实 iCloud 双 Mac 因 PLA / 第二台 Mac / 账户上传状态阻塞，未生成通过日志。
+门禁结果同时以 `Docs/Engineering/TEST_REPORT.md` 顶部机器可读块为准。

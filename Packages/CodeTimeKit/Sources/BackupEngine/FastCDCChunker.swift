@@ -123,9 +123,12 @@ public struct FastCDCChunker: Sendable {
             throw ChunkerError.readFailed(url.lastPathComponent)
         }
         return ChunkIterator(chunker: self, reader: {
-            defer { if let data = try? handle.read(upToCount: 1 << 20), data.isEmpty { try? handle.close() } }
             do {
-                return try handle.read(upToCount: 1 << 20) ?? Data()
+                let data = try autoreleasepool {
+                    try handle.read(upToCount: 1 << 20) ?? Data()
+                }
+                if data.isEmpty { try? handle.close() }
+                return data
             } catch {
                 throw ChunkerError.readFailed(error.localizedDescription)
             }
@@ -211,8 +214,16 @@ public struct ChunkIterator {
         head += length
         offset += Int64(length)
 
-        if head >= 8 * 1024 * 1024 || head == buffer.count {
-            buffer.removeFirst(head)
+        if head >= chunker.config.maxSize || head == buffer.count {
+            // Rebuild instead of removeFirst: Data may retain the consumed prefix
+            // in its backing store, which would grow to the whole file even though
+            // `count` stays small.
+            if head == buffer.count {
+                buffer = Data()
+            } else {
+                let remainingStart = buffer.index(buffer.startIndex, offsetBy: head)
+                buffer = Data(buffer[remainingStart...])
+            }
             head = 0
         }
         return chunk

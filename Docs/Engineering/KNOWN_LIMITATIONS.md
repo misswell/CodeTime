@@ -30,8 +30,12 @@ CT-045…CT-057、CT-058…CT-116、CT-117…CT-128、CT-129…CT-146、CT-147�
 - **真实 iCloud 未验收**：v3 的对象、包、节点、Manifest、Commit、spool 续传与恢复均由本地镜像和内存云双端测试覆盖；
   真实 iCloud 的同步延迟、占位符下载、配额不足、账户切换、`evictUbiquitousItem` 实际释放行为未执行。
 - **双 Mac 未验收**：跨设备命名空间读取由 CT-164 在单机模拟（两个设备目录）；真实两台 Mac 的并发上传与恢复未执行。
-- **规模未验收**：10 GB 单文件、100 GB 项目、1000 个历史版本、10 万小文件的 v3 性能与本地空间曲线未执行。
-  现有门禁性能数字只覆盖 300 文件砂箱场景。
+- **规模验收部分执行**：10 GiB/100 GiB 单文件（稀疏数据集，物理随机数据分别 2.5 GiB/1 GiB）
+  与 10 万小文件已真实执行，结果见 `V3_ACCEPTANCE_REPORT.md` §2.2；全随机 10/100 GB、
+  1000 个历史版本仍未执行（磁盘空间不足）。
+- **真实 iCloud 被环境阻塞**：Developer ID iCloud 描述文件无法创建（Account Holder 未同意
+  最新 PLA），本机 iCloud Drive 写入返回 `NSCocoaErrorDomain 4355`；单机真实 iCloud 与
+  双 Mac 均未通过。
 - **v3 GC 宽限期未真实验证**：两阶段逻辑由注入时钟测试；30 天真实等待与真实 iCloud 枚举完整性未执行。
 - **v3 本地副本驱逐**：`ICloudEvictionManager` 在本地镜像上会跳过非 ubiquitous 文件；真实 iCloud 上的释放结果与
   “等待释放”提示未验收。

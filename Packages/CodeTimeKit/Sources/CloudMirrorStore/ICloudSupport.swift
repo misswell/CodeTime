@@ -201,12 +201,16 @@ public struct LocalFileAccess: CloudFileAccess {
     public init() {}
 
     public func read(_ url: URL) async throws -> Data {
-        try await Task.detached(priority: .utility) { try Data(contentsOf: url) }.value
+        try await Task.detached(priority: .utility) {
+            try autoreleasepool { try Data(contentsOf: url) }
+        }.value
     }
 
     public func writeAtomically(_ data: Data, to url: URL) async throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
+        // Each object write is its own pool: a long backup must not accumulate
+        // Foundation's temporary buffers until the task ends.
+        try autoreleasepool { try data.write(to: url, options: .atomic) }
     }
 
     public func move(_ source: URL, to destination: URL) async throws {
@@ -259,13 +263,15 @@ public struct ICloudCoordinatedFileAccess: CloudFileAccess {
         // iCloud placeholders. Reading without downloading can fail or return an
         // empty file; make the download explicit.
         try await download(url, timeout: 300)
-        return try coordinateReading(url) { actual in try Data(contentsOf: actual) }
+        return try coordinateReading(url) { actual in
+            try autoreleasepool { try Data(contentsOf: actual) }
+        }
     }
 
     public func writeAtomically(_ data: Data, to url: URL) async throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try coordinateWriting(url) { actual in
-            try data.write(to: actual, options: .atomic)
+            try autoreleasepool { try data.write(to: actual, options: .atomic) }
         }
     }
 

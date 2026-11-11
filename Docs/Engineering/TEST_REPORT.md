@@ -18,6 +18,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | 门禁结果 | `PASS`，263 tests / 0 failures / 3 skipped |
 | 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-167（165 required） |
 | 运行标识 | `202611110006`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
+| 门禁日志 | `Docs/Engineering/TestArtifacts/376ff89-regression-gate.log`（原始输出归档） |
 
 ## 2. 环境
 
@@ -93,16 +94,17 @@ testSingleMacICloudRoundTrip
   test-report check: PASS
 ```
 
-## 8. 性能基线（本机，非验收规模）
+## 8. 性能与空间（真实执行，详见 V3_ACCEPTANCE_REPORT §2.2）
 
-门禁内置 300 文件 / 259 KB 砂箱场景：
+`Packages/CodeTimeKit/Sources/V3Acceptance` 是独立的验收工具（不属于门禁测试）。在根卷
+仅 11–23 GB 可用、外接卷 ACL 不可写的环境下，使用逻辑大小达标、部分物理随机数据的稀疏
+数据集；原始 `V3PERF_RESULT` 见 `Docs/Engineering/TestArtifacts/v3-perf-*.log`。
 
-| 指标 | 数值 |
-|---|---:|
-| 备份耗时 | 1.65 s |
-| 恢复耗时 | 2.42 s |
-| 峰值内存 | 133.5 MB |
-| CPU 用户/系统 | 3.34 s / 2.97 s |
-| 校验 | 300 个文件全部内容校验通过 |
+| 场景 | 首次备份 | 增量 | 峰值 RSS | 本地 DB | spool 结束 | 云端 |
+|---|---:|---:|---:|---:|---:|---:|
+| 10 GiB 单文件（2.5 GiB 随机） | 79.6 s / 上传 1.90 GB | 改 1 KiB → 上传 1.03 MB / 1 对象 | 467 MB | 1.68 MB | 0 | 1.90 GB |
+| 100 GiB 单文件（1 GiB 随机） | 465.8 s / 读取 100 GiB | 未执行 | 379 MB | 6.58 MB | 0 | 789 MB |
+| 100k × 1 KiB 文件 | 40.8 s / 53 packs | 重跑 0 B / 100k 复用 | 545 MB | 247 MB | 0 | 167.7 MB |
 
-该数字只证明流式流水线没有随项目大小线性占用内存，不构成 10 GB/100 GB 验收结论。
+门禁内置 300 文件砂箱仍保留：备份 1.65 s、恢复 2.42 s、峰值 133.5 MB。
+全随机 10/100 GB、1000 版本、ENOSPC 与真实 iCloud 驱逐仍为 **NOT RUN**，原因见验收报告。

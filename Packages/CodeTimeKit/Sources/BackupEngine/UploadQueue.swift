@@ -224,7 +224,7 @@ public actor UploadQueue: CloudObjectSink {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try payload.write(to: url, options: .atomic)
+            try autoreleasepool { try payload.write(to: url, options: .atomic) }
         } catch {
             throw UploadQueueError.spoolWriteFailed(error.localizedDescription)
         }

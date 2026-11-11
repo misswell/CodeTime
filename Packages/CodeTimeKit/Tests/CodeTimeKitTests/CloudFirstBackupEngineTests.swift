@@ -209,7 +209,7 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         let fm = FileManager.default
         try fm.createDirectory(at: root.appendingPathComponent("src"), withIntermediateDirectories: true)
         try fm.createDirectory(at: root.appendingPathComponent("empty"), withIntermediateDirectories: true)
-        try Data(String(repeating: "a", count: 300_000).utf8).write(to: root.appendingPathComponent("src/big.txt"))
+        try Data(String(repeating: "a", count: 3_000_000).utf8).write(to: root.appendingPathComponent("src/big.txt"))
         try Data("hello".utf8).write(to: root.appendingPathComponent("README.md"))
     }
 
@@ -295,11 +295,11 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         let files = try treeFiles(sink, rootNodeID: manifest.rootNodeID)
         XCTAssertEqual(files.map(\.path).sorted(), ["README.md", "src/big.txt"])
         let big = try XCTUnwrap(files.first { $0.path == "src/big.txt" })
-        XCTAssertEqual(big.size, 300_000)
+        XCTAssertEqual(big.size, 3_000_000)
         XCTAssertGreaterThan(big.chunks.count, 1)
         XCTAssertEqual(
             big.chunks.reduce(0) { $0 + Int($1.plaintextSize) },
-            300_000,
+            3_000_000,
             "所有块的大小之和必须等于文件大小"
         )
         XCTAssertNotNil(big.contentHash)
@@ -382,7 +382,7 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         // Old snapshot still fully present (immutable history).
         let firstManifest = try decryptManifest(sink, snapshotID: first.snapshotID)
         let oldFiles = try treeFiles(sink, rootNodeID: firstManifest.rootNodeID)
-        XCTAssertEqual(oldFiles.first { $0.path == "src/big.txt" }?.size, 300_000, "旧版本不可被改写")
+        XCTAssertEqual(oldFiles.first { $0.path == "src/big.txt" }?.size, 3_000_000, "旧版本不可被改写")
     }
 
     func testCT154_DeletingAFileKeepsHistoryAndUpdatesTree() async throws {
@@ -413,7 +413,7 @@ final class CloudFirstBackupEngineTests: XCTestCase {
         let index = FakeIndex()
         let engine = makeEngine(sink: sink, index: index)
 
-        let copy = Data(String(repeating: "a", count: 300_000).utf8)
+        let copy = Data(String(repeating: "a", count: 3_000_000).utf8)
         try copy.write(to: root.appendingPathComponent("src/copy.txt"))
         let report = try await engine.run(projectID: projectID, root: root, matcher: matcher())
 
