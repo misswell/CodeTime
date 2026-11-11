@@ -1,0 +1,12 @@
+ICLOUD_PRECHECK_BEGIN 2026-11-11T13:49:37Z
+host=MacBookAir
+model=MacBookAir10,1
+macos=27.2.1
+signing_identity=present
+BLOCKED: Apple Developer Program License Agreement not accepted (Account Holder must accept in App Store Connect)
+upload_error=Couldn’t access your iCloud account. The iCloud servers might be unreachable or your settings might be incorrect.
+upload_error_domain=NSCocoaErrorDomain
+upload_error_code=4355
+BLOCKED: iCloud Drive upload was not confirmed (exit 3)
+peer_evidence=not-provided
+ICLOUD_PRECHECK_BLOCKED

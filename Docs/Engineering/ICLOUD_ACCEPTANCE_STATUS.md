@@ -22,7 +22,15 @@
 
 结论：本机连“单机真实 iCloud 上传”都未通过，双机验收不具备执行条件。
 
-## 2. 已执行的真实检查
+## 2. 已尝试的本机修复
+
+- 对 `bird` 发送 `SIGHUP`：无变化。
+- 终止 `bird` 并由 launchd 重启（新 PID）：无变化，仍为 `NSCocoaErrorDomain 4355`。
+- 网络检查：`www.icloud.com`、`www.apple.com` 均 200；`appleid.apple.com` 可达。
+- 时钟检查：系统 UTC 时间与 Apple HTTP `Date` 头相差约 8 分钟，不足以解释认证失败。
+- 结论：不是同步进程卡死、网络不通或时钟严重漂移；仍需用户重新认证 iCloud 账户/接受相关条款。
+
+## 3. 已执行的真实检查
 
 ```bash
 security find-identity -v -p codesigning
@@ -38,7 +46,7 @@ Scripts/icloud_preflight.sh
 `UbiquitousUploadTracker`，在 iCloud Drive 中创建唯一测试目录；失败发生在
 “等待 iCloud 确认上传”阶段，未发布 commit，未产生通过报告。
 
-## 3. 解除阻塞所需的外部操作（只能由用户/Account Holder 完成）
+## 4. 解除阻塞所需的外部操作（只能由用户/Account Holder 完成）
 
 1. 用团队 Account Holder `Guofeng Liu` 登录 App Store Connect，接受最新
    Apple Developer Program License Agreement。
@@ -60,7 +68,7 @@ Scripts/icloud_preflight.sh
    跨设备发现，并用 `Scripts/icloud_acceptance.sh prepare/verify/report` 归档
    原始 JSON 与日志。只有最终报告 `verified=true` 才能写 PASS。
 
-## 4. 不得替代的证据
+## 5. 不得替代的证据
 
 以下结果不能作为本项通过证据：
 
@@ -69,10 +77,11 @@ Scripts/icloud_preflight.sh
 - 只构建成功、只跑通测试、只有计划或模板。
 - 没有第二台 Mac 的 host 证据、或 B 侧 `verified != true`。
 
-## 5. 原始日志
+## 6. 原始日志
 
 - `Docs/Engineering/TestArtifacts/icloud-preflight-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/v3icloud-single-mac-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/betaicloud-provisioning-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/xcodebuild-automatic-signing-blocked-20261111.log`
 - `Docs/Engineering/TestArtifacts/icloud-preflight-recheck-20261111T1348Z.log`
+- `Docs/Engineering/TestArtifacts/icloud-preflight-after-bird-restart-20261111.log`（重启 bird 后仍 4355）
