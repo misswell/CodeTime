@@ -1538,5 +1538,15 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "对象/节点先于 Manifest，Manifest 先于 Commit；未变化零上传；旧版本对象不被回收"
+  },
+  {
+    "id": "CT-155",
+    "test": "testCT155_FullProjectRestoreIsBitForBit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudRestoreEngineTests.swift",
+    "purpose": "按需恢复：staging、逐文件校验、单文件/目录范围、路径穿越拒绝、失败不触碰目标",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "先 staging 后原子提交；单文件只下载自身块；目标已存在不覆盖；损坏/篡改必须中止"
   }
 ]

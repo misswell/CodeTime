@@ -313,3 +313,5 @@ public struct CloudObjectStoreV3: Sendable {
 }
 
 extension CloudObjectStoreV3: CloudObjectSink {}
+
+extension CloudObjectStoreV3: CloudObjectSource {}

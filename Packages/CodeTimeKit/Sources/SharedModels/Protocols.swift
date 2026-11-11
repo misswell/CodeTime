@@ -151,3 +151,18 @@ public protocol CloudSnapshotIndex: Sendable {
     func enqueueUploads(_ uploads: [PendingUploadV3]) async throws
     func removeUpload(_ taskID: String) async throws
 }
+
+/// Read side of Cloud Format v3, used by restore and verification.
+public protocol CloudObjectSource: Sendable {
+    func readObject(_ objectID: String) async throws -> Data
+    func readNode(_ nodeID: String) async throws -> DirectoryNode
+    func readManifestPayload(projectID: UUID, snapshotID: String) async throws -> Data
+    func readCommit(projectID: UUID, snapshotID: String) async throws -> SnapshotCommit?
+    func commits(projectID: UUID) async throws -> [SnapshotCommit]
+}
+
+/// Small bounded cache for decrypted chunks during restore.
+public protocol RestoreObjectCache: Sendable {
+    func cachedChunk(objectID: String) async throws -> Data?
+    func storeChunk(objectID: String, data: Data) async throws
+}
