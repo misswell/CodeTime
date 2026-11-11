@@ -1668,5 +1668,295 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "事件去抖；间隔内不重复触发；首次备份不因文件写入被动触发"
+  },
+  {
+    "id": "CT-168",
+    "test": "testCT168_ServiceCancellationStopsEngineBeforeCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3IntegrationTests.swift",
+    "purpose": "服务层取消传播：已开始上传后取消，不得发布 commit，任务标记 interrupted",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "Service → Adapter → Engine 全链路取消；已上传对象保留，未提交版本不可见"
+  },
+  {
+    "id": "CT-169",
+    "test": "testCT169_ResolverTrustsRemoteCommitAndNeverDowngradesLocalV3",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SnapshotFormatResolverTests.swift",
+    "purpose": "快照格式以远端 commit 为准；本地 v3 记录无 commit 时禁止降级为 Kopia",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "缺少远端 commit 必须报错；manifest 损坏报告 corrupted，不切换引擎"
+  },
+  {
+    "id": "CT-170",
+    "test": "testCT170_RemoteSnapshotIndexIsPersistentAndRebuildable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SnapshotFormatResolverTests.swift",
+    "purpose": "远端快照索引持久化与重建；索引不是存在性权威",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "删除 commit 后索引不得让快照继续可解析；重建索引反映远端真实现状"
+  },
+  {
+    "id": "CT-171",
+    "test": "testCT171_DeviceListHasTTLAndFailedRefreshKeepsLastKnownList",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SnapshotFormatResolverTests.swift",
+    "purpose": "跨设备列表 TTL、强制刷新、失败不缓存空结果",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "新设备上线后必须被发现；枚举失败不得清空上次成功列表"
+  },
+  {
+    "id": "CT-172",
+    "test": "testCT172_TwoServiceInstancesDiscoverEachOthersVersions",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CrossDeviceV3Tests.swift",
+    "purpose": "两个服务实例共享云根：互相发现、恢复并继续备份（本地镜像模拟）",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "跨设备 commit 必须被发现并可读；不是真实 iCloud 验收"
+  },
+  {
+    "id": "CT-173",
+    "test": "testCT173_EveryRelevantSettingChangesTheFingerprint",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RuntimeConfigurationTests.swift",
+    "purpose": "Runtime 配置指纹覆盖存储模式、设备、缓存/Spool 预算、书签",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "任一相关配置变化必须使旧 Runtime 实例失效"
+  },
+  {
+    "id": "CT-174",
+    "test": "testCT174_ServiceReportsNewFingerprintAfterSettingsChange",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RuntimeConfigurationTests.swift",
+    "purpose": "设置变更后服务报告新指纹并可重建 v3 Runtime",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "保存设置后旧指纹不得复用；重建后仍可使用"
+  },
+  {
+    "id": "CT-175",
+    "test": "testCT175_HashMismatchPreventsEviction",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudAccessCoordinatorTests.swift",
+    "purpose": "上传确认后回读哈希；不一致时禁止驱逐本地副本",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "哈希不符必须报错且不驱逐"
+  },
+  {
+    "id": "CT-176",
+    "test": "testCT176_NodesManifestsAndCommitsAllEvictAfterConfirmation",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudAccessCoordinatorTests.swift",
+    "purpose": "Node/Manifest/Commit 统一走确认、校验、释放本地副本",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "三类元数据均在上传确认后驱逐；失败不得静默"
+  },
+  {
+    "id": "CT-177",
+    "test": "testCT177_RetryBackoffIsDurableAcrossQueueInstances",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadQueueTests.swift",
+    "purpose": "上传失败指数退避 + 抖动持久化，重启后仍遵守",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "退避期间不得重试；失败任务与 spool 永不被删除"
+  },
+  {
+    "id": "CT-178",
+    "test": "testCT178_BaselineRegistryPersistsProjectIDAndSnapshotAcrossRuns",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/MigrationCoordinatorTests.swift",
+    "purpose": "迁移基线按项目持久化，崩溃后续用同一基线 ID",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "每个项目只创建一个基线；已完成状态可恢复"
+  },
+  {
+    "id": "CT-179",
+    "test": "testCT179_FailedDeleteKeepsIndexAndReportsFailure",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/DiskChunkCacheSafetyTests.swift",
+    "purpose": "缓存删除失败时保留索引并报告失败",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "先删文件成功后才删索引；失败不得伪装成功"
+  },
+  {
+    "id": "CT-180",
+    "test": "testCT180_ReconcileDropsMissingRowsAndRemovesOrphans",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/DiskChunkCacheSafetyTests.swift",
+    "purpose": "缓存崩溃恢复：清理缺失行与孤儿文件",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "只处理缓存根内文件；索引与磁盘重新一致"
+  },
+  {
+    "id": "CT-181",
+    "test": "testCT181_OutsideRootEntryIsNeverDeleted",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/DiskChunkCacheSafetyTests.swift",
+    "purpose": "缓存索引指向根外时拒绝删除",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "缓存清理绝不触碰 spool 或根外路径"
+  },
+  {
+    "id": "CT-182",
+    "test": "testCT182_InaccessibleCacheFileIsReportedNotTreatedAsMiss",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/DiskChunkCacheSafetyTests.swift",
+    "purpose": "缓存文件不可访问时报错并保留索引",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "不可访问不等于不存在，不得静默当作未命中"
+  },
+  {
+    "id": "CT-183",
+    "test": "testCT183_InspectReportsAbsentCorruptInaccessibleAndVerified",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteIntegrityVerifierTests.swift",
+    "purpose": "远端完整性检查区分缺失/损坏/不可访问/已验证",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "只有真实读取云端字节才能判定 verified"
+  },
+  {
+    "id": "CT-184",
+    "test": "testCT184_VerificationIgnoresCacheAndFailsOnCorruptCloudObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteIntegrityVerifierTests.swift",
+    "purpose": "云端校验绕过本地缓存；缓存正确但云端损坏必须失败",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "本地缓存不能证明远端可恢复"
+  },
+  {
+    "id": "CT-185",
+    "test": "testCT185_PackCorruptionIsDetected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteIntegrityVerifierTests.swift",
+    "purpose": "Pack 头部/索引/边界/对象解密完整校验",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "损坏 Pack 必须报告且不得返回错误字节"
+  },
+  {
+    "id": "CT-186",
+    "test": "testCT186_TruncatedStagingFileIsNeverAcceptedWhenVerifyHashesIsFalse",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RestoreSafetyTests.swift",
+    "purpose": "恢复默认校验长度与哈希，verifyHashes=false 不关闭基础保护",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "部分文件不得当作完整文件"
+  },
+  {
+    "id": "CT-187",
+    "test": "testCT187_DirectoryModeAndSymlinksAreRestoredWithoutEscaping",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RestoreSafetyTests.swift",
+    "purpose": "目录权限/mtime 与符号链接安全恢复，最后创建符号链接",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "符号链接不得逃出 staging；权限保持"
+  },
+  {
+    "id": "CT-188",
+    "test": "testCT188_SharedLeasesOverlapAndExclusiveMaintenanceIsBlocked",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/OperationLeaseTests.swift",
+    "purpose": "跨进程操作租约：共享备份/恢复可并存，GC/迁移独占",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "独占维护不得与备份/恢复并发"
+  },
+  {
+    "id": "CT-189",
+    "test": "testCT189_LeaseReleaseIsIdempotent",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/OperationLeaseTests.swift",
+    "purpose": "租约释放幂等，重复释放不破坏其他持有者",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "释放后再次释放安全"
+  },
+  {
+    "id": "CT-190",
+    "test": "testCT190_ReconcilerAdoptsValidOrphansAndQuarantinesUnknown",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadJournalReconcilerTests.swift",
+    "purpose": "Spool 孤儿恢复：合法对象收养，未知文件隔离",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "无法确认的数据不得删除"
+  },
+  {
+    "id": "CT-191",
+    "test": "testCT191_ReconcilerResolvesMissingFilesAgainstTheCloud",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadJournalReconcilerTests.swift",
+    "purpose": "Journal 有任务但 spool 缺失时以云端存在性判定",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "云端存在才清理任务；否则保留失败状态"
+  },
+  {
+    "id": "CT-192",
+    "test": "testCT192_ReconcilerCleansUploadedPendingCleanup",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadJournalReconcilerTests.swift",
+    "purpose": "已上传待清理状态的重试清理",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "清理完成前不得报告 completed"
+  },
+  {
+    "id": "CT-193",
+    "test": "testCT193_UploadQueueRefusesConcurrentWriterForSameObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadJournalReconcilerTests.swift",
+    "purpose": "同一 Object ID 的跨进程上传租约",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "两个进程不得同时写同一 spool 文件"
+  },
+  {
+    "id": "CT-194",
+    "test": "testCT194_SweepRefusesWhileDataIsStagedOrPublishing",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "有暂存上传或发布中快照时 GC 拒绝清扫",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "未确认数据存在时不得删除"
+  },
+  {
+    "id": "CT-195",
+    "test": "testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "引用图不完整时在任何删除前中止 GC",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "无法证明安全则不生成墓碑/不删除"
+  },
+  {
+    "id": "CT-196",
+    "test": "testCT196_RetentionPlannerKeepsNewestAndBuckets",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "保留策略：最新版本与时间桶保留",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "保留计划不得删除受保护版本"
   }
 ]

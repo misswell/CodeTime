@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 @testable import BackupEngine
 @testable import SharedModels
+@testable import CodeTimeCore
 
 /// CT-158: v2 → v3 migration state machine. The tests pin the ordering that
 /// matters: nothing local is released before both the old cloud copy and the new
@@ -60,6 +61,7 @@ final class MigrationCoordinatorTests: XCTestCase {
 
     final class FakeJournal: MigrationJournaling, @unchecked Sendable {
         var phases: [String] = []
+        var records: [UUID: MigrationRecordV3] = [:]
         private let lock = NSLock()
 
         func appendMigrationEvent(_ entry: MigrationJournalEntryV3) async throws {
@@ -72,6 +74,21 @@ final class MigrationCoordinatorTests: XCTestCase {
             return phases.last
         }
 
+        func upsertMigrationRecord(_ record: MigrationRecordV3) async throws {
+            lock.lock(); defer { lock.unlock() }
+            records[record.projectID] = record
+        }
+
+        func migrationRecord(projectID: UUID) async throws -> MigrationRecordV3? {
+            lock.lock(); defer { lock.unlock() }
+            return records[projectID]
+        }
+
+        func migrationRecords(limit: Int) async throws -> [MigrationRecordV3] {
+            lock.lock(); defer { lock.unlock() }
+            return Array(records.values).sorted { $0.updatedAt > $1.updatedAt }
+        }
+
         func contains(_ phase: MigrationPhase) -> Bool {
             lock.lock(); defer { lock.unlock() }
             return phases.contains(phase.rawValue)
@@ -80,6 +97,41 @@ final class MigrationCoordinatorTests: XCTestCase {
 
     private func coordinator(_ probe: FakeProbe, _ journal: FakeJournal) -> BackupMigrationCoordinator {
         BackupMigrationCoordinator(probe: probe, journal: journal)
+    }
+
+    func testCT178_BaselineRegistryPersistsProjectIDAndSnapshotAcrossRuns() async throws {
+        let journal = FakeJournal()
+        let projectID = UUID()
+        let sourceID = "kopia-repo-1"
+        let first = MigrationBaselineRegistry(journal: journal)
+        await first.ensurePending(projectID: projectID, sourceRepositoryID: sourceID)
+        var stored = try await journal.migrationRecord(projectID: projectID)
+        XCTAssertEqual(stored?.state, .pending)
+        XCTAssertNil(stored?.baselineSnapshotID)
+
+        await first.record("snap-baseline", projectID: projectID, sourceRepositoryID: sourceID)
+        stored = try await journal.migrationRecord(projectID: projectID)
+        XCTAssertEqual(stored?.state, .baselineCreated)
+        XCTAssertEqual(stored?.baselineSnapshotID, "snap-baseline")
+        XCTAssertEqual(
+            stored?.migrationID,
+            MigrationRecordV3.identifier(projectID: projectID, sourceRepositoryID: sourceID)
+        )
+
+        // A new process must reuse the persisted baseline, not invent a second
+        // migration identity.
+        let second = MigrationBaselineRegistry(journal: journal)
+        await second.ensurePending(projectID: projectID, sourceRepositoryID: sourceID)
+        let resumed = await second.record(projectID: projectID)
+        XCTAssertEqual(resumed?.baselineSnapshotID, "snap-baseline")
+        XCTAssertEqual(resumed?.state, .baselineCreated)
+
+        await second.markVerified(projectID: projectID, sourceRepositoryID: sourceID)
+        stored = try await journal.migrationRecord(projectID: projectID)
+        XCTAssertEqual(stored?.state, .baselineVerified)
+        await second.markCompleted(projectID: projectID, sourceRepositoryID: sourceID)
+        stored = try await journal.migrationRecord(projectID: projectID)
+        XCTAssertEqual(stored?.state, .completed)
     }
 
     func testCT158_NoLegacyMeansNothingToDo() async throws {

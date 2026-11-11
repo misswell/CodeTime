@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import CryptoKit
 @testable import BackupEngine
 @testable import CodeTimeSecurity
 @testable import SharedModels
@@ -168,7 +169,12 @@ final class CloudEngineV3CoreTests: XCTestCase {
         XCTAssertTrue(encoded.wasCompressed, "可压缩数据必须启用压缩")
         XCTAssertLessThan(encoded.storedSize, encoded.originalSize)
         XCTAssertEqual(encoded.payload.prefix(4), ObjectEnvelope.magic)
+        XCTAssertEqual(encoded.formatVersion, 2)
         XCTAssertEqual(try encoder.decode(encoded.payload, objectID: encoded.objectID), compressible)
+        // The plaintext SHA-256 must not be visible in the public header.
+        let publicHeader = encoded.payload.prefix(ObjectEnvelope.headerSize)
+        XCTAssertFalse(publicHeader.range(of: Data(SHA256.hash(data: compressible))) != nil,
+                       "原始 SHA-256 不得以明文出现在 Header")
         XCTAssertEqual(encoded.objectID, encoder.objectID(for: compressible))
 
         // Incompressible chunk: stored raw, still round-trips.
@@ -187,6 +193,33 @@ final class CloudEngineV3CoreTests: XCTestCase {
         XCTAssertEqual(again.objectID, encoded.objectID)
         XCTAssertNotEqual(again.payload, encoded.payload, "相同内容每次加密必须使用新 nonce")
         XCTAssertEqual(try encoder.decode(again.payload, objectID: again.objectID), compressible)
+
+        // Legacy v1 headers are still decodable, but new writes use v2.
+        let legacy = try encoder.encode(chunk: compressible, formatVersion: 1)
+        XCTAssertEqual(legacy.formatVersion, 1)
+        XCTAssertEqual(legacy.formatVersion, 1)
+        XCTAssertGreaterThanOrEqual(legacy.payload.count, ObjectEnvelope.legacyHeaderSize + 16)
+        XCTAssertEqual(try encoder.decode(legacy.payload, objectID: legacy.objectID), compressible)
+    }
+
+    func testCT149_KeyVersionParticipatesInHKDFAndDecodesByStoredVersion() throws {
+        let master = Data("key-version-master".utf8)
+        let chunk = pseudoRandomData(count: 8 * 1024)
+        let v2 = ObjectEncoder(masterKey: master, keyVersion: 2)
+        let encoded = try v2.encode(chunk: chunk)
+        XCTAssertEqual(encoded.keyVersion, 2)
+        XCTAssertEqual(try ObjectEncoder(masterKey: master).decode(
+            encoded.payload, objectID: encoded.objectID
+        ), chunk, "解码必须使用对象头中的 keyVersion 派生密钥")
+        // Decoding is bound to the stored key version; a tampered version byte
+        // changes the derived key and fails authentication.
+        var tampered = encoded.payload
+        tampered[tampered.startIndex + 6] = 0
+        tampered[tampered.startIndex + 7] = 3
+        XCTAssertThrowsError(try ObjectEncoder(masterKey: master).decode(
+            tampered, objectID: encoded.objectID
+        ))
+        XCTAssertNotEqual(v2.objectID(for: chunk), ObjectEncoder(masterKey: Data("other".utf8)).objectID(for: chunk))
     }
 
     func testCT149_TamperingAndWrongKeysAreRejected() throws {

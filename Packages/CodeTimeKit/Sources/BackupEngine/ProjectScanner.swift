@@ -5,22 +5,6 @@ import SharedModels
 /// trustworthy (a restore can set mtime old, a `touch` changes it with identical
 /// content), so the scanner records device + inode + size + mtime together and
 /// the engine re-checks content when the identity looks suspicious.
-public struct FileIdentity: Codable, Hashable, Sendable {
-    public var device: UInt64
-    public var inode: UInt64
-    public var size: Int64
-    public var modified: Double
-
-    public init(device: UInt64, inode: UInt64, size: Int64, modified: Double) {
-        self.device = device
-        self.inode = inode
-        self.size = size
-        self.modified = modified
-    }
-
-    public var isZero: Bool { device == 0 && inode == 0 && size == 0 && modified == 0 }
-}
-
 public struct ScannedEntry: Sendable, Hashable {
     public var path: String
     public var kind: NodeKind
@@ -56,6 +40,9 @@ public struct ScanResult: Sendable {
     /// Paths the process could not read. A project with permission errors must be
     /// reported as incomplete, never silently treated as fully backed up.
     public var permissionErrors: [String]
+    /// Special files that were intentionally skipped (never read as regular data).
+    public var unsupportedCount: Int
+    public var unsupportedFiles: [String]
     public var isComplete: Bool
     public var truncatedReason: String?
 
@@ -64,6 +51,8 @@ public struct ScanResult: Sendable {
         excludedCount: Int = 0,
         excludedBytes: Int64 = 0,
         permissionErrors: [String] = [],
+        unsupportedCount: Int = 0,
+        unsupportedFiles: [String] = [],
         isComplete: Bool = true,
         truncatedReason: String? = nil
     ) {
@@ -71,6 +60,8 @@ public struct ScanResult: Sendable {
         self.excludedCount = excludedCount
         self.excludedBytes = excludedBytes
         self.permissionErrors = permissionErrors
+        self.unsupportedCount = unsupportedCount
+        self.unsupportedFiles = unsupportedFiles
         self.isComplete = isComplete
         self.truncatedReason = truncatedReason
     }
@@ -106,7 +97,10 @@ public struct ProjectScanner: Sendable {
         self.options = options
     }
 
-    public func scan(root: URL) -> ScanResult {
+    public func scan(
+        root: URL,
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> ScanResult {
         let standardizedRoot = root.standardizedFileURL
         let rootPath = standardizedRoot.path
         let keys: Set<URLResourceKey> = [
@@ -118,7 +112,9 @@ public struct ProjectScanner: Sendable {
         guard let enumerator = FileManager.default.enumerator(
             at: standardizedRoot,
             includingPropertiesForKeys: Array(keys),
-            options: [.skipsPackageDescendants],
+            // Packages (.xcodeproj/.xcworkspace) must be scanned: they are real
+            // project data. Exclusion is the matcher's decision, not the walker's.
+            options: [],
             errorHandler: { url, _ in
                 result.permissionErrors.append(url.path)
                 result.isComplete = false
@@ -133,6 +129,13 @@ public struct ProjectScanner: Sendable {
 
         var visited = 0
         while let object = enumerator.nextObject() {
+            // Scanning a million-file project can take minutes; cancellation must
+            // stop scheduling new work instead of running to completion.
+            if isCancelled() {
+                result.isComplete = false
+                result.truncatedReason = "扫描已取消"
+                break
+            }
             if visited >= options.maxFiles {
                 result.isComplete = false
                 result.truncatedReason = "已扫描 \(options.maxFiles) 项，扫描不完整"
@@ -173,7 +176,15 @@ public struct ProjectScanner: Sendable {
             let modified = values.contentModificationDate
 
             if isSymlink {
-                let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) ?? ""
+                let target: String
+                do {
+                    target = try FileManager.default.destinationOfSymbolicLink(atPath: url.path)
+                } catch {
+                    // Never synthesize an empty link target.
+                    result.permissionErrors.append(url.path)
+                    result.isComplete = false
+                    continue
+                }
                 let (rawIdentity, mode) = metadata(url: url, size: Int64(target.utf8.count), modified: nil)
                 // A symlink's content IS its target string: mtime/size of whatever
                 // it points at must not make it look "changed".
@@ -194,6 +205,17 @@ public struct ProjectScanner: Sendable {
                         identity: linkIdentity
                     )
                 )
+                continue
+            }
+
+            let isRegular = values.isRegularFile ?? false
+            if !isDirectory && !isRegular {
+                // FIFO/socket/device: reading these as ordinary files can block
+                // forever or produce meaningless data. Skip and report.
+                result.unsupportedCount += 1
+                if result.unsupportedFiles.count < 100 {
+                    result.unsupportedFiles.append(path)
+                }
                 continue
             }
 
@@ -236,24 +258,32 @@ public struct ProjectScanner: Sendable {
     /// One stat per entry: identity (for change detection) plus POSIX mode (for
     /// a bit-for-bit restore).
     private func metadata(url: URL, size: Int64, modified: Date?) -> (FileIdentity, UInt16?) {
-        var device: UInt64 = 0
-        var inode: UInt64 = 0
-        var mode: UInt16?
-        if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) {
-            device = (attributes[.systemNumber] as? NSNumber)?.uint64Value ?? 0
-            inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
-            mode = (attributes[.posixPermissions] as? NSNumber)
-                .map { UInt16(truncatingIfNeeded: $0.uint16Value) }
-        }
-        return (
-            FileIdentity(
-                device: device,
-                inode: inode,
+        var info = stat()
+        let identity: FileIdentity
+        let mode: UInt16?
+        if lstat(url.path, &info) == 0 {
+            identity = FileIdentity(
+                device: UInt64(info.st_dev),
+                inode: UInt64(info.st_ino),
                 size: size,
+                modifiedNanos: Self.nanos(info.st_mtimespec),
+                changedNanos: Self.nanos(info.st_ctimespec),
+                resourceIdentifier: try? url.resourceValues(forKeys: [.fileResourceIdentifierKey])
+                    .fileResourceIdentifier.map { "\($0)" }
+            )
+            mode = UInt16(truncatingIfNeeded: info.st_mode & 0o7777)
+        } else {
+            identity = FileIdentity(
+                device: 0, inode: 0, size: size,
                 modified: modified?.timeIntervalSince1970 ?? 0
-            ),
-            mode
-        )
+            )
+            mode = nil
+        }
+        return (identity, mode)
+    }
+
+    static func nanos(_ time: timespec) -> Int64 {
+        Int64(time.tv_sec) * 1_000_000_000 + Int64(time.tv_nsec)
     }
 
     // MARK: - Incremental
@@ -301,16 +331,33 @@ public struct ProjectScanner: Sendable {
     /// be trusted (the file changed while we streamed it) and the chunk set must
     /// be discarded rather than published as a consistent snapshot.
     public static func identity(of url: URL) -> FileIdentity? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
-            return nil
-        }
-        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return nil }
+        let values = try? url.resourceValues(forKeys: [
+            .fileSizeKey, .fileResourceIdentifierKey,
+        ])
         return FileIdentity(
-            device: (attributes[.systemNumber] as? NSNumber)?.uint64Value ?? 0,
-            inode: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0,
-            size: size,
-            modified: modified
+            device: UInt64(info.st_dev),
+            inode: UInt64(info.st_ino),
+            size: Int64(info.st_size),
+            modifiedNanos: nanos(info.st_mtimespec),
+            changedNanos: nanos(info.st_ctimespec),
+            resourceIdentifier: values?.fileResourceIdentifier.map { "\($0)" }
+        )
+    }
+
+    /// Identity from an already-open descriptor, so a path replacement cannot
+    /// make us believe the bytes came from the file we opened.
+    public static func identity(descriptor: Int32) -> FileIdentity? {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { return nil }
+        return FileIdentity(
+            device: UInt64(info.st_dev),
+            inode: UInt64(info.st_ino),
+            size: Int64(info.st_size),
+            modifiedNanos: nanos(info.st_mtimespec),
+            changedNanos: nanos(info.st_ctimespec),
+            resourceIdentifier: nil
         )
     }
 }

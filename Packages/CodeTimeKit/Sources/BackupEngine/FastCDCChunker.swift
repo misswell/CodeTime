@@ -135,6 +135,15 @@ public struct FastCDCChunker: Sendable {
         })
     }
 
+    /// Iterates an already-open descriptor. The caller owns the handle, so the
+    /// bytes read are from the same file identity that was fstat'ed.
+    public func makeIterator(handle: FileHandle) -> ChunkIterator {
+        ChunkIterator(chunker: self, reader: {
+            do { return try handle.read(upToCount: 1 << 20) ?? Data() }
+            catch { throw ChunkerError.readFailed(error.localizedDescription) }
+        })
+    }
+
     /// Core loop for callers that already have a byte source. `reader` returns
     /// empty data at EOF.
     public func forEachChunk(

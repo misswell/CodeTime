@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-167）
+# 回归测试矩阵（CT-001 … CT-196）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -40,14 +40,14 @@
 | CT-034 | `testCT034_FreshSandboxBootstrap` | 第一/二轮可靠性回归 | 是 | 否 |
 | CT-035 | `testCT035_MissingRepositoryIsNotAutoCreated` | 第二轮可靠性回归 | 是 | 否 |
 | CT-036 | `testCT036_HundredThousandFilesPreview` | 环境相关回归（允许真机跳过） | 是 | 否 |
-| CT-037 | `testCT037_MillionFilesBoundedByLimit` | 环境相关回归（允许真机跳过） | 否 | 是（百万文件规模测试（Stress），由 Scripts/benchmark.sh stress 或夜间任务执行；不在 CI 常规门禁内） |
+| CT-037 | `testCT037_MillionFilesBoundedByLimit` | 环境相关回归（允许真机跳过）（百万文件规模测试（Stress），由 Scripts/benchmark.sh stress 或夜间任务执行；不在 CI 常规门禁内） | 否 | 是 |
 | CT-038 | `testCT038_LargeFileHashStreamsInChunks` | 第二轮可靠性回归 | 是 | 否 |
 | CT-039 | `testCT039_SearchTruncationIsExplicit` | 第二轮可靠性回归 | 是 | 否 |
 | CT-040 | `testCT040_LargeFilePreviewDegradesExplicitly` | 第二轮可靠性回归 | 是 | 否 |
 | CT-041 | `testCT041_RetryBackoffAndClassification` | 第二轮可靠性回归 | 是 | 否 |
 | CT-042 | `testCT042_LogRotationIsBounded` | 第二轮可靠性回归 | 是 | 否 |
 | CT-043 | `testCT043_CacheAndActivityTablesArePruned` | 第二轮可靠性回归 | 是 | 否 |
-| CT-044 | `testCT044_DiskFullLeavesRepositoryUntouched` | 环境相关回归（允许真机跳过） | 否 | 是（需要可控小容量卷注入 ENOSPC，由真机验收清单覆盖） |
+| CT-044 | `testCT044_DiskFullLeavesRepositoryUntouched` | 环境相关回归（允许真机跳过）（需要可控小容量卷注入 ENOSPC，由真机验收清单覆盖） | 否 | 是 |
 | CT-045 | `testCT045_InitializedReleaseCanRequestMigration` | 第三轮可靠性回归 | 是 | 否 |
 | CT-046 | `testCT046_EmptyTargetDirectoriesDoNotBlockMigration` | 第三轮可靠性回归 | 是 | 否 |
 | CT-047 | `testCT047_HiddenRepositoryFilesAreMigrated` | 第三轮可靠性回归 | 是 | 否 |
@@ -149,34 +149,54 @@
 | CT-143 | `testCT143_ICloudBetaUsesDedicatedConfiguration` | iCloud 验收构建使用专用配置，避免命令行污染 SwiftPM 目标 | 是 | 否 |
 | CT-144 | `testCT144_DoctorReportsStructuredBlockers` | 发布前置自检报告结构化且可操作 | 是 | 否 |
 | CT-145 | `testCT145_DiagnosesOffScreenAppWindow` | 窗口保存位置在屏幕外时必须可诊断并给出修复命令 | 是 | 否 |
-| CT-146 | `testCT146_ProjectDiscoverySkipsTCCProtectedFolders` | 首启向导的项目发现不得自动扫描 TCC 保护目录 | 是 | 否 |
+| CT-146 | `testCT146_ProjectDiscoverySkipsTCCProtectedFolders` | 首启向导的项目发现不得自动扫描 TCC 保护目录（文稿/桌面/下载） | 是 | 否 |
 | CT-147 | `testCT147_ChunkerIsContentDefinedAndStable` | 内容定义分块稳定、追加不改已有块、插入可复用 | 是 | 否 |
 | CT-148 | `testCT148_ObjectIdentityIsStableAndKeyScoped` | 对象 ID 由 HMAC 派生且按仓库密钥隔离 | 是 | 否 |
 | CT-149 | `testCT149_EncryptedObjectRoundTrip` | 对象信封压缩+AEAD 往返与防篡改 | 是 | 否 |
 | CT-150 | `testCT150_TreeIsDeterministicAndOrderIndependent` | Merkle 树身份确定且变更只沿路径传播 | 是 | 否 |
 | CT-151 | `testCT151_CommitRequiresManifestAndMatchingHash` | v3 云存储发布顺序与幂等 | 是 | 否 |
-| CT-152 | `testCT152_FileIndexReplacementLeavesNoGhosts` | v3 本地索引语义（替换无残留/重试计数/缓存 pin） | 是 | 否 |
-| CT-153 | `testCT153_ScanAppliesExclusionsAndKeepsStructure` | 项目扫描排除/链接/增量/不完整上报 | 是 | 否 |
-| CT-154 | `testCT154_FirstBackupPublishesInOrderAndIsReadable` | 云优先引擎端到端（顺序/复用/去重/历史） | 是 | 否 |
-| CT-155 | `testCT155_FullProjectRestoreIsBitForBit` | 按需恢复（staging/校验/范围/路径安全/不覆盖） | 是 | 否 |
-| CT-156 | `testCT156_CacheStoresReadsAndEvictsLRUWithinBudget` | 缓存预算/固定项/越界拒绝与本地副本驱逐 | 是 | 否 |
-| CT-157 | `testCT157_PackFormatRoundTripsEveryObject` | 对象包格式与引擎/恢复集成 | 是 | 否 |
-| CT-158 | `testCT158_HappyPathWithConsentReleasesLegacyLast` | v2→v3 迁移状态机（顺序/阻塞/续跑/同意） | 是 | 否 |
-| CT-159 | `testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes` | 持久化待上传队列（失败保留/软上限/续传） | 是 | 否 |
-| CT-160 | `testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter` | BackupEngine v3 适配层（浏览/Diff/恢复/校验） | 是 | 否 |
-| CT-161 | `testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace` | 服务层 v3 引擎集成与空间统计 | 是 | 否 |
-| CT-162 | `testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory` | 服务层 v2→v3 迁移与旧历史保留 | 是 | 否 |
-| CT-163 | `testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData` | v3 两阶段云端 GC 与安全中止 | 是 | 否 |
-| CT-164 | `testCT164_NewMacDiscoversAndRestoresV3Project` | 新 Mac v3 发现与按需恢复 | 是 | 否 |
-| CT-165 | `testCT165_OnboardingStartsFreshInstallOnV3` | 全新安装默认引擎选择 | 是 | 否 |
-| CT-166 | `testCT166_InterruptedRestoreResumesStagedFiles` | v3 恢复中断与续传 | 是 | 否 |
-| CT-167 | `testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval` | FSEvents 变化监听与节流 | 是 | 否 |
-
-## 门禁规则（CT-114 / CT-138）
-
-- 索引必须恰好登记 CT-001…CT-167，编号与测试名唯一，且每个测试都能在测试源码中找到。
-- `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
-- 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
-- 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。
-- 常规 CI 只启用 `CODETIME_SCALE_TESTS=1`；百万文件压力需 `CODETIME_STRESS_TESTS=1`。
-- 门禁同时执行 `Scripts/check_test_report.py`：工程文档统计必须与 TEST_REPORT 机器可读块一致。
+| CT-152 | `testCT152_FileIndexReplacementLeavesNoGhosts` | v3 本地索引：扫描替换无残留、块索引、快照状态、待上传计数、缓存与迁移日志 | 是 | 否 |
+| CT-153 | `testCT153_ScanAppliesExclusionsAndKeepsStructure` | 项目扫描：排除规则、符号链接不跟随、增量变化集、不可读子树如实标记 | 是 | 否 |
+| CT-154 | `testCT154_FirstBackupPublishesInOrderAndIsReadable` | 云优先引擎端到端：发布顺序、增量复用、历史不可变、跨文件去重 | 是 | 否 |
+| CT-155 | `testCT155_FullProjectRestoreIsBitForBit` | 按需恢复：staging、逐文件校验、单文件/目录范围、路径穿越拒绝、失败不触碰目标 | 是 | 否 |
+| CT-156 | `testCT156_CacheStoresReadsAndEvictsLRUWithinBudget` | 缓存预算/固定条目/越界拒绝 + iCloud 本地副本驱逐的确认与失败上报 | 是 | 否 |
+| CT-157 | `testCT157_PackFormatRoundTripsEveryObject` | 不可变对象包：格式往返、越界/重复/截断拒绝、引擎打包并恢复 | 是 | 否 |
+| CT-158 | `testCT158_HappyPathWithConsentReleasesLegacyLast` | v2→v3 迁移状态机：顺序、失败阻塞、崩溃续跑、释放旧仓库需显式同意 | 是 | 否 |
+| CT-159 | `testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes` | 持久化待上传队列：失败保留加密数据、软上限暂停、崩溃续传、引擎离线后恢复 | 是 | 否 |
+| CT-160 | `testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter` | BackupEngine v3 适配层：备份/列表/浏览/读取/Diff/单文件恢复/全量校验 | 是 | 否 |
+| CT-161 | `testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace` | 服务层真正走 v3 引擎：设置切换、快照、浏览、恢复、空间统计 | 是 | 否 |
+| CT-162 | `testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory` | 服务层 v2→v3 迁移：基线验证、显式同意后才释放旧仓库、旧历史保留 | 是 | 否 |
+| CT-163 | `testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData` | v3 两阶段云端 GC：先墓碑、引用重算、宽限期后只删除无引用对象/版本 | 是 | 否 |
+| CT-164 | `testCT164_NewMacDiscoversAndRestoresV3Project` | 新 Mac：发现 v3 项目、用恢复密钥恢复版本、注册项目并继续浏览历史 | 是 | 否 |
+| CT-165 | `testCT165_OnboardingStartsFreshInstallOnV3` | 全新安装且云端可用时默认启用 v3；已有快照的安装保持旧引擎直到迁移 | 是 | 否 |
+| CT-166 | `testCT166_InterruptedRestoreResumesStagedFiles` | v3 恢复中断后从确定性 staging 续传，已校验文件不重复下载 | 是 | 否 |
+| CT-167 | `testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval` | FSEvents 变化监听与最小变化间隔；FSEvents 仅作优化，完整扫描仍兜底 | 是 | 否 |
+| CT-168 | `testCT168_ServiceCancellationStopsEngineBeforeCommit` | 服务层取消传播：已开始上传后取消，不得发布 commit，任务标记 interrupted | 是 | 否 |
+| CT-169 | `testCT169_ResolverTrustsRemoteCommitAndNeverDowngradesLocalV3` | 快照格式以远端 commit 为准；本地 v3 记录无 commit 时禁止降级为 Kopia | 是 | 否 |
+| CT-170 | `testCT170_RemoteSnapshotIndexIsPersistentAndRebuildable` | 远端快照索引持久化与重建；索引不是存在性权威 | 是 | 否 |
+| CT-171 | `testCT171_DeviceListHasTTLAndFailedRefreshKeepsLastKnownList` | 跨设备列表 TTL、强制刷新、失败不缓存空结果 | 是 | 否 |
+| CT-172 | `testCT172_TwoServiceInstancesDiscoverEachOthersVersions` | 两个服务实例共享云根：互相发现、恢复并继续备份（本地镜像模拟） | 是 | 否 |
+| CT-173 | `testCT173_EveryRelevantSettingChangesTheFingerprint` | Runtime 配置指纹覆盖存储模式、设备、缓存/Spool 预算、书签 | 是 | 否 |
+| CT-174 | `testCT174_ServiceReportsNewFingerprintAfterSettingsChange` | 设置变更后服务报告新指纹并可重建 v3 Runtime | 是 | 否 |
+| CT-175 | `testCT175_HashMismatchPreventsEviction` | 上传确认后回读哈希；不一致时禁止驱逐本地副本 | 是 | 否 |
+| CT-176 | `testCT176_NodesManifestsAndCommitsAllEvictAfterConfirmation` | Node/Manifest/Commit 统一走确认、校验、释放本地副本 | 是 | 否 |
+| CT-177 | `testCT177_RetryBackoffIsDurableAcrossQueueInstances` | 上传失败指数退避 + 抖动持久化，重启后仍遵守 | 是 | 否 |
+| CT-178 | `testCT178_BaselineRegistryPersistsProjectIDAndSnapshotAcrossRuns` | 迁移基线按项目持久化，崩溃后续用同一基线 ID | 是 | 否 |
+| CT-179 | `testCT179_FailedDeleteKeepsIndexAndReportsFailure` | 缓存删除失败时保留索引并报告失败 | 是 | 否 |
+| CT-180 | `testCT180_ReconcileDropsMissingRowsAndRemovesOrphans` | 缓存崩溃恢复：清理缺失行与孤儿文件 | 是 | 否 |
+| CT-181 | `testCT181_OutsideRootEntryIsNeverDeleted` | 缓存索引指向根外时拒绝删除 | 是 | 否 |
+| CT-182 | `testCT182_InaccessibleCacheFileIsReportedNotTreatedAsMiss` | 缓存文件不可访问时报错并保留索引 | 是 | 否 |
+| CT-183 | `testCT183_InspectReportsAbsentCorruptInaccessibleAndVerified` | 远端完整性检查区分缺失/损坏/不可访问/已验证 | 是 | 否 |
+| CT-184 | `testCT184_VerificationIgnoresCacheAndFailsOnCorruptCloudObject` | 云端校验绕过本地缓存；缓存正确但云端损坏必须失败 | 是 | 否 |
+| CT-185 | `testCT185_PackCorruptionIsDetected` | Pack 头部/索引/边界/对象解密完整校验 | 是 | 否 |
+| CT-186 | `testCT186_TruncatedStagingFileIsNeverAcceptedWhenVerifyHashesIsFalse` | 恢复默认校验长度与哈希，verifyHashes=false 不关闭基础保护 | 是 | 否 |
+| CT-187 | `testCT187_DirectoryModeAndSymlinksAreRestoredWithoutEscaping` | 目录权限/mtime 与符号链接安全恢复，最后创建符号链接 | 是 | 否 |
+| CT-188 | `testCT188_SharedLeasesOverlapAndExclusiveMaintenanceIsBlocked` | 跨进程操作租约：共享备份/恢复可并存，GC/迁移独占 | 是 | 否 |
+| CT-189 | `testCT189_LeaseReleaseIsIdempotent` | 租约释放幂等，重复释放不破坏其他持有者 | 是 | 否 |
+| CT-190 | `testCT190_ReconcilerAdoptsValidOrphansAndQuarantinesUnknown` | Spool 孤儿恢复：合法对象收养，未知文件隔离 | 是 | 否 |
+| CT-191 | `testCT191_ReconcilerResolvesMissingFilesAgainstTheCloud` | Journal 有任务但 spool 缺失时以云端存在性判定 | 是 | 否 |
+| CT-192 | `testCT192_ReconcilerCleansUploadedPendingCleanup` | 已上传待清理状态的重试清理 | 是 | 否 |
+| CT-193 | `testCT193_UploadQueueRefusesConcurrentWriterForSameObject` | 同一 Object ID 的跨进程上传租约 | 是 | 否 |
+| CT-194 | `testCT194_SweepRefusesWhileDataIsStagedOrPublishing` | 有暂存上传或发布中快照时 GC 拒绝清扫 | 是 | 否 |
+| CT-195 | `testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone` | 引用图不完整时在任何删除前中止 GC | 是 | 否 |
+| CT-196 | `testCT196_RetentionPlannerKeepsNewestAndBuckets` | 保留策略：最新版本与时间桶保留 | 是 | 否 |

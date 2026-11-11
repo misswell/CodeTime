@@ -1,0 +1,761 @@
+Building for debugging...
+[Computing dependencies]
+[1 / 36]
+Build complete! (0.59秒)
+Test Suite 'All tests' started at 2026-11-11 21:36:22.190.
+Test Suite 'CodeTimeKitTests.xctest' started at 2026-11-11 21:36:22.191.
+Test Suite 'CloudAccessCoordinatorTests' started at 2026-11-11 21:36:22.191.
+Test Case '-[CodeTimeKitTests.CloudAccessCoordinatorTests testCT175_HashMismatchPreventsEviction]' started.
+Test Case '-[CodeTimeKitTests.CloudAccessCoordinatorTests testCT175_HashMismatchPreventsEviction]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.CloudAccessCoordinatorTests testCT176_NodesManifestsAndCommitsAllEvictAfterConfirmation]' started.
+Test Case '-[CodeTimeKitTests.CloudAccessCoordinatorTests testCT176_NodesManifestsAndCommitsAllEvictAfterConfirmation]' passed (0.005 seconds).
+Test Suite 'CloudAccessCoordinatorTests' passed at 2026-11-11 21:36:22.199.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+Test Suite 'CloudEngineV3CoreTests' started at 2026-11-11 21:36:22.199.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_ChunkerHandlesEdgeCasesAndCancellation]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_ChunkerHandlesEdgeCasesAndCancellation]' passed (0.006 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_ChunkerIsContentDefinedAndStable]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_ChunkerIsContentDefinedAndStable]' passed (0.195 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_CompressibleAndRepetitiveContentStillChunks]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_CompressibleAndRepetitiveContentStillChunks]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_StreamingFileMatchesInMemoryChunking]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT147_StreamingFileMatchesInMemoryChunking]' passed (0.057 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT148_ObjectIdentityIsStableAndKeyScoped]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT148_ObjectIdentityIsStableAndKeyScoped]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_EncryptedObjectRoundTrip]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_EncryptedObjectRoundTrip]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_KeyVersionParticipatesInHKDFAndDecodesByStoredVersion]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_KeyVersionParticipatesInHKDFAndDecodesByStoredVersion]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_TamperingAndWrongKeysAreRejected]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT149_TamperingAndWrongKeysAreRejected]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_AddingADeepFileTouchesOnlyItsAncestors]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_AddingADeepFileTouchesOnlyItsAncestors]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_ChangePropagatesOnlyAlongThePath]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_ChangePropagatesOnlyAlongThePath]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_TreeIsDeterministicAndOrderIndependent]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3CoreTests testCT150_TreeIsDeterministicAndOrderIndependent]' passed (0.001 seconds).
+Test Suite 'CloudEngineV3CoreTests' passed at 2026-11-11 21:36:22.483.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.283 (0.284) seconds
+Test Suite 'CloudEngineV3StoreTests' started at 2026-11-11 21:36:22.483.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_CommitRequiresManifestAndMatchingHash]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_CommitRequiresManifestAndMatchingHash]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_NodesAreContentAddressedAndIdempotent]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_NodesAreContentAddressedAndIdempotent]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_ObjectsAreIdempotentAndReadable]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_ObjectsAreIdempotentAndReadable]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_OnlyCommittedSnapshotsAreVisible]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_OnlyCommittedSnapshotsAreVisible]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_PacksRoundTrip]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_PacksRoundTrip]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_PrepareIsIdempotentAndNeverReinitialises]' started.
+Test Case '-[CodeTimeKitTests.CloudEngineV3StoreTests testCT151_PrepareIsIdempotentAndNeverReinitialises]' passed (0.002 seconds).
+Test Suite 'CloudEngineV3StoreTests' passed at 2026-11-11 21:36:22.500.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.017 (0.017) seconds
+Test Suite 'CloudFirstBackupEngineTests' started at 2026-11-11 21:36:22.500.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_CancellationStopsBeforePublishing]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_CancellationStopsBeforePublishing]' passed (0.040 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_DeletingAFileKeepsHistoryAndUpdatesTree]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_DeletingAFileKeepsHistoryAndUpdatesTree]' passed (0.135 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_EditingOneFileUploadsOnlyNewChunks]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_EditingOneFileUploadsOnlyNewChunks]' passed (0.227 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_FirstBackupPublishesInOrderAndIsReadable]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_FirstBackupPublishesInOrderAndIsReadable]' passed (0.183 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_IdenticalContentAcrossFilesIsStoredOnce]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_IdenticalContentAcrossFilesIsStoredOnce]' passed (0.261 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_IncompleteScanRefusesToPublish]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_IncompleteScanRefusesToPublish]' passed (0.038 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_SecondRunReusesEverythingWhenNothingChanged]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstBackupEngineTests testCT154_SecondRunReusesEverythingWhenNothingChanged]' passed (0.249 seconds).
+Test Suite 'CloudFirstBackupEngineTests' passed at 2026-11-11 21:36:23.634.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 1.133 (1.134) seconds
+Test Suite 'CloudFirstEngineAdapterTests' started at 2026-11-11 21:36:23.634.
+Test Case '-[CodeTimeKitTests.CloudFirstEngineAdapterTests testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstEngineAdapterTests testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.CloudFirstEngineAdapterTests testCT160_UnknownSnapshotIsRejected]' started.
+Test Case '-[CodeTimeKitTests.CloudFirstEngineAdapterTests testCT160_UnknownSnapshotIsRejected]' passed (0.002 seconds).
+Test Suite 'CloudFirstEngineAdapterTests' passed at 2026-11-11 21:36:23.651.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.017 (0.017) seconds
+Test Suite 'CloudGarbageCollectorTests' started at 2026-11-11 21:36:23.651.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData]' passed (0.032 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT194_SweepRefusesWhileDataIsStagedOrPublishing]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT194_SweepRefusesWhileDataIsStagedOrPublishing]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT196_RetentionPlannerKeepsNewestAndBuckets]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testCT196_RetentionPlannerKeepsNewestAndBuckets]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCDepletionFailureKeepsEpochRetryableAndDataOnDisk]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCDepletionFailureKeepsEpochRetryableAndDataOnDisk]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCEnumerationFailureAbortsWithoutTombstonesOrDeletion]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCEnumerationFailureAbortsWithoutTombstonesOrDeletion]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCResumesFromPersistedEpochAfterCrash]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCResumesFromPersistedEpochAfterCrash]' passed (0.006 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCSweepProtectsObjectsReferencedByASnapshotCreatedAfterPlanning]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCSweepProtectsObjectsReferencedByASnapshotCreatedAfterPlanning]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCWaitsForEveryActiveDeviceAndOfflineDeviceBlocksDeletion]' started.
+Test Case '-[CodeTimeKitTests.CloudGarbageCollectorTests testGCWaitsForEveryActiveDeviceAndOfflineDeviceBlocksDeletion]' passed (0.007 seconds).
+Test Suite 'CloudGarbageCollectorTests' passed at 2026-11-11 21:36:23.732.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.080 (0.081) seconds
+Test Suite 'CloudIndexV3Tests' started at 2026-11-11 21:36:23.732.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_CacheIndexTracksPinnedAndSizes]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_CacheIndexTracksPinnedAndSizes]' passed (0.024 seconds).
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_ChunkIndexAnswersWhatIsAlreadyKnown]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_ChunkIndexAnswersWhatIsAlreadyKnown]' passed (0.009 seconds).
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_FileIndexReplacementLeavesNoGhosts]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_FileIndexReplacementLeavesNoGhosts]' passed (0.009 seconds).
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_MigrationJournalKeepsLatestPhase]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_MigrationJournalKeepsLatestPhase]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_PendingUploadsAreDurableAndCounted]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_PendingUploadsAreDurableAndCounted]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_SnapshotRecordsAreOrderedAndMutable]' started.
+Test Case '-[CodeTimeKitTests.CloudIndexV3Tests testCT152_SnapshotRecordsAreOrderedAndMutable]' passed (0.009 seconds).
+Test Suite 'CloudIndexV3Tests' passed at 2026-11-11 21:36:23.803.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.070 (0.070) seconds
+Test Suite 'CloudMirrorRegressionTests' started at 2026-11-11 21:36:23.803.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT001_UnreadableManifestAbortsCleanup]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT001_UnreadableManifestAbortsCleanup]' passed (0.030 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT002_InterruptedGarbageCollectionResumes]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT002_InterruptedGarbageCollectionResumes]' passed (0.023 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT003_ManifestDeletionWaitsForGrace]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT003_ManifestDeletionWaitsForGrace]' passed (0.017 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT004_SameSizeDifferentContentFailsVerification]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT004_SameSizeDifferentContentFailsVerification]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT005_UnconfirmedUploadProducesNoGeneration]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT005_UnconfirmedUploadProducesNoGeneration]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT006_MetadataFailureIsNotTreatedAsUploaded]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT006_MetadataFailureIsNotTreatedAsUploaded]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT007_UnreadableCloudFileFailsClosed]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT007_UnreadableCloudFileFailsClosed]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT008_ConcurrentPublisherOfSameObjectKeepsOneVerifiedCopy]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT008_ConcurrentPublisherOfSameObjectKeepsOneVerifiedCopy]' passed (0.222 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT009_FailedManifestPublishLeavesOldGenerationIntact]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT009_FailedManifestPublishLeavesOldGenerationIntact]' passed (0.020 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT010_InvalidHashCacheIsRecomputed]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT010_InvalidHashCacheIsRecomputed]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT011_TwoDevicesPublishIndependentGenerations]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT011_TwoDevicesPublishIndependentGenerations]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT012_NewGenerationDuringCleanupIsPreserved]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorRegressionTests testCT012_NewGenerationDuringCleanupIsPreserved]' passed (0.027 seconds).
+Test Suite 'CloudMirrorRegressionTests' passed at 2026-11-11 21:36:24.189.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.385 (0.387) seconds
+Test Suite 'CloudMirrorStoreTests' started at 2026-11-11 21:36:24.189.
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testCleanupRetainsReferencedObjects]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testCleanupRetainsReferencedObjects]' passed (0.209 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testMissingObjectIsDetected]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testMissingObjectIsDetected]' passed (0.017 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testObjectsRemainImmutableAcrossGenerations]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testObjectsRemainImmutableAcrossGenerations]' passed (1.168 seconds).
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testPublishRestoreVerifyAndRecovery]' started.
+Test Case '-[CodeTimeKitTests.CloudMirrorStoreTests testPublishRestoreVerifyAndRecovery]' passed (0.032 seconds).
+Test Suite 'CloudMirrorStoreTests' passed at 2026-11-11 21:36:25.616.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.426 (1.427) seconds
+Test Suite 'CloudRestoreEngineTests' started at 2026-11-11 21:36:25.616.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_CorruptedObjectAbortsWithoutTouchingDestination]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_CorruptedObjectAbortsWithoutTouchingDestination]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_DirectoryRestoreSkipsSiblings]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_DirectoryRestoreSkipsSiblings]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_ExistingDestinationIsNeverClobbered]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_ExistingDestinationIsNeverClobbered]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_FullProjectRestoreIsBitForBit]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_FullProjectRestoreIsBitForBit]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_MissingCommitMeansVersionDoesNotExist]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_MissingCommitMeansVersionDoesNotExist]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_PathTraversalIsRejected]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_PathTraversalIsRejected]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_SingleFileRestoreDownloadsOnlyItsChunks]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_SingleFileRestoreDownloadsOnlyItsChunks]' passed (0.009 seconds).
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_TamperedManifestIsRejected]' started.
+Test Case '-[CodeTimeKitTests.CloudRestoreEngineTests testCT155_TamperedManifestIsRejected]' passed (0.007 seconds).
+Test Suite 'CloudRestoreEngineTests' passed at 2026-11-11 21:36:25.695.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.078 (0.079) seconds
+Test Suite 'CloudSetupRegressionTests' started at 2026-11-11 21:36:25.695.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT129_BuildCapabilityDecidesICloudAvailability]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT129_BuildCapabilityDecidesICloudAvailability]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT130_EnvironmentMatrixIsExplicit]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT130_EnvironmentMatrixIsExplicit]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT130_NotWritableContainerIsReported]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT130_NotWritableContainerIsReported]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT131_EnablingICloudOnUnsupportedBuildDoesNotMutateSettings]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT131_EnablingICloudOnUnsupportedBuildDoesNotMutateSettings]' passed (1.729 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT131_StorageModeDerivationMatchesLegacySettings]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT131_StorageModeDerivationMatchesLegacySettings]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT132_CloudStateMachineForbidsFalseSuccess]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT132_CloudStateMachineForbidsFalseSuccess]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT133_ProjectSyncDisplaySeparatesLocalUploadAndFailure]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT133_ProjectSyncDisplaySeparatesLocalUploadAndFailure]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT134_CloudFailureKeepsLocalSnapshotAndReportsHonestly]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT134_CloudFailureKeepsLocalSnapshotAndReportsHonestly]' passed (2.449 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT134_FirstBackupPublishesBeforeReportingSynced]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT134_FirstBackupPublishesBeforeReportingSynced]' passed (2.702 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT135_RetryPendingPublishesIsIdempotentAndKeepsSyncedProjectsAlone]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT135_RetryPendingPublishesIsIdempotentAndKeepsSyncedProjectsAlone]' passed (2.584 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT136_RecoveryAutoDetectsContainerStorageRoot]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT136_RecoveryAutoDetectsContainerStorageRoot]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT137_ReleaseValidationChecksTheSignedProduct]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT137_ReleaseValidationChecksTheSignedProduct]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT138_StressTestIsOptInSeparatelyFromScale]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT138_StressTestIsOptInSeparatelyFromScale]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT139_RecoveryCandidateListsProjectsBeforeDownload]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT139_RecoveryCandidateListsProjectsBeforeDownload]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT140_ICloudBetaBuildIsOptInAndRequiresProfile]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT140_ICloudBetaBuildIsOptInAndRequiresProfile]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT141_AcceptanceHarnessDetectsMismatchAndRefusesFakeReport]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT141_AcceptanceHarnessDetectsMismatchAndRefusesFakeReport]' passed (0.575 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT142_LaunchSmokeDetectsCrashAndHangFreeSuccess]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT142_LaunchSmokeDetectsCrashAndHangFreeSuccess]' passed (0.404 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT143_ICloudBetaUsesDedicatedConfiguration]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT143_ICloudBetaUsesDedicatedConfiguration]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT144_DoctorReportsStructuredBlockers]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT144_DoctorReportsStructuredBlockers]' passed (3.771 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT145_DiagnosesOffScreenAppWindow]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT145_DiagnosesOffScreenAppWindow]' passed (3.643 seconds).
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT146_ProjectDiscoverySkipsTCCProtectedFolders]' started.
+Test Case '-[CodeTimeKitTests.CloudSetupRegressionTests testCT146_ProjectDiscoverySkipsTCCProtectedFolders]' passed (0.006 seconds).
+Test Suite 'CloudSetupRegressionTests' passed at 2026-11-11 21:36:43.612.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 17.914 (17.917) seconds
+Test Suite 'ConcurrencyPersistenceRegressionTests' started at 2026-11-11 21:36:43.612.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT021_DeletedProjectIsNotResurrectedByRuntimeUpdate]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT021_DeletedProjectIsNotResurrectedByRuntimeUpdate]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT022_PauseIsNotOverwrittenByRuntimeUpdate]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT022_PauseIsNotOverwrittenByRuntimeUpdate]' passed (0.006 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT023_LeaseBlocksSecondExecutor]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT023_LeaseBlocksSecondExecutor]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT024_SettingsPropagationUsesRevision]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT024_SettingsPropagationUsesRevision]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT025_PauseClosesSchedulingGate]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT025_PauseClosesSchedulingGate]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT026_TwoAgentsElectSingleLeader]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT026_TwoAgentsElectSingleLeader]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT027_CrashLeavesInterruptedJobsRetryable]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT027_CrashLeavesInterruptedJobsRetryable]' passed (0.006 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT028_PIDReuseIsNotTreatedAsAliveOwner]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT028_PIDReuseIsNotTreatedAsAliveOwner]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT041_RetryBackoffAndClassification]' started.
+Test Case '-[CodeTimeKitTests.ConcurrencyPersistenceRegressionTests testCT041_RetryBackoffAndClassification]' passed (0.001 seconds).
+Test Suite 'ConcurrencyPersistenceRegressionTests' passed at 2026-11-11 21:36:43.651.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.038 (0.039) seconds
+Test Suite 'CrossDeviceV3Tests' started at 2026-11-11 21:36:43.651.
+Test Case '-[CodeTimeKitTests.CrossDeviceV3Tests testCT172_TwoServiceInstancesDiscoverEachOthersVersions]' started.
+Test Case '-[CodeTimeKitTests.CrossDeviceV3Tests testCT172_TwoServiceInstancesDiscoverEachOthersVersions]' passed (2.710 seconds).
+Test Suite 'CrossDeviceV3Tests' passed at 2026-11-11 21:36:46.361.
+	 Executed 1 test, with 0 failures (0 unexpected) in 2.710 (2.710) seconds
+Test Suite 'DiskChunkCacheSafetyTests' started at 2026-11-11 21:36:46.361.
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT179_FailedDeleteKeepsIndexAndReportsFailure]' started.
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT179_FailedDeleteKeepsIndexAndReportsFailure]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT180_ReconcileDropsMissingRowsAndRemovesOrphans]' started.
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT180_ReconcileDropsMissingRowsAndRemovesOrphans]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT181_OutsideRootEntryIsNeverDeleted]' started.
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT181_OutsideRootEntryIsNeverDeleted]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT182_InaccessibleCacheFileIsReportedNotTreatedAsMiss]' started.
+Test Case '-[CodeTimeKitTests.DiskChunkCacheSafetyTests testCT182_InaccessibleCacheFileIsReportedNotTreatedAsMiss]' passed (0.002 seconds).
+Test Suite 'DiskChunkCacheSafetyTests' passed at 2026-11-11 21:36:46.367.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'ExclusionMatcherTests' started at 2026-11-11 21:36:46.367.
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testDefaultDeveloperRules]' started.
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testDefaultDeveloperRules]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testGitDirectoryCanBeExcluded]' started.
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testGitDirectoryCanBeExcluded]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testNegationIsNotSupportedToMatchKopia]' started.
+Test Case '-[CodeTimeKitTests.ExclusionMatcherTests testNegationIsNotSupportedToMatchKopia]' passed (0.000 seconds).
+Test Suite 'ExclusionMatcherTests' passed at 2026-11-11 21:36:46.369.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'FifthRoundRegressionTests' started at 2026-11-11 21:36:46.369.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT077_CandidateArtifactSHA256Verification]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT077_CandidateArtifactSHA256Verification]' passed (0.414 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT079_ManualReleaseTagMustExistAndPointAtBuildCommit]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT079_ManualReleaseTagMustExistAndPointAtBuildCommit]' passed (1.065 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT081_UnreadableStatesClassifiedByProductionListing]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT081_UnreadableStatesClassifiedByProductionListing]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT082_CandidatePackagingDoesNotRequireAcceptanceReport]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT082_CandidatePackagingDoesNotRequireAcceptanceReport]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT083_AcceptanceReportMustBindImmutableArtifact]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT083_AcceptanceReportMustBindImmutableArtifact]' passed (0.482 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT084_SharedLocksCoexistExclusiveBlocksAndDeathReleases]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT084_SharedLocksCoexistExclusiveBlocksAndDeathReleases]' passed (1.594 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT085_MigrationWaitsForAgentExitAndRefusesStuckAgent]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT085_MigrationWaitsForAgentExitAndRefusesStuckAgent]' passed (2.066 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT086_SafePathRejectsTraversalSymlinkAndPrefixSiblings]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT086_SafePathRejectsTraversalSymlinkAndPrefixSiblings]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT087_CloudRestoreLeaseIsCrossProcessExclusive]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT087_CloudRestoreLeaseIsCrossProcessExclusive]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT088_GCFailsClosedWhenDeviceDirectoryUnreadable]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT088_GCFailsClosedWhenDeviceDirectoryUnreadable]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT089_DeviceRegistryRecordedAndMultiDeviceGCStaysBlocked]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT089_DeviceRegistryRecordedAndMultiDeviceGCStaysBlocked]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT090_MigrationIsIdempotentAndResidualRequestNeverReplacesAgain]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT090_MigrationIsIdempotentAndResidualRequestNeverReplacesAgain]' passed (0.028 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT091_StatusRecomputeFollowsNewestSnapshotNotLateUpload]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT091_StatusRecomputeFollowsNewestSnapshotNotLateUpload]' passed (0.014 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT092_RegressionGateCoversAllRequiredTests]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT092_RegressionGateCoversAllRequiredTests]' passed (1.406 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT093_CoordinatorsDriveRealServiceAPIs]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT093_CoordinatorsDriveRealServiceAPIs]' passed (2.783 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT094_BenchmarkRunsInIsolatedChildWithRealMetrics]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT094_BenchmarkRunsInIsolatedChildWithRealMetrics]' passed (3.788 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT095_MediumScaleBenchmarkCompletes]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT095_MediumScaleBenchmarkCompletes]' passed (83.488 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT096_RepositoryUsageFailsClosedAndCountsHiddenFiles]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT096_RepositoryUsageFailsClosedAndCountsHiddenFiles]' passed (1.134 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT097_UploadJobLeaseRequiresHeartbeatAndStaleOwnerCannotFinish]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT097_UploadJobLeaseRequiresHeartbeatAndStaleOwnerCannotFinish]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT098_MigrationSurvivesRealSIGKILLAtEveryPhase]' started.
+Test Case '-[CodeTimeKitTests.FifthRoundRegressionTests testCT098_MigrationSurvivesRealSIGKILLAtEveryPhase]' passed (0.505 seconds).
+Test Suite 'FifthRoundRegressionTests' passed at 2026-11-11 21:38:25.220.
+	 Executed 20 tests, with 0 failures (0 unexpected) in 98.847 (98.851) seconds
+Test Suite 'FourthRoundRegressionTests' started at 2026-11-11 21:38:25.220.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT070_ManifestAggregateFieldTamperingIsDetected]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT070_ManifestAggregateFieldTamperingIsDetected]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT071_GCRunsWhenSingleDevice]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT071_GCRunsWhenSingleDevice]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT071_GCSkippedWhenOtherDevicesExist]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT071_GCSkippedWhenOtherDevicesExist]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_ExclusiveLockBlocksSharedAndExclusive]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_ExclusiveLockBlocksSharedAndExclusive]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_LifecycleLocksAreOutsideReplaceableRoot]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_LifecycleLocksAreOutsideReplaceableRoot]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_LifecycleLockSurvivesRootReplacement]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_LifecycleLockSurvivesRootReplacement]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_MigrationExclusiveBlocksAgentShared]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_MigrationExclusiveBlocksAgentShared]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_MigrationLockBlocksSQLiteAccess]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_MigrationLockBlocksSQLiteAccess]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_SharedLocksAllowMultipleHolders]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT072_SharedLocksAllowMultipleHolders]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT073_OldUploadCompletionDoesNotOverrideNewSnapshotStatus]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT073_OldUploadCompletionDoesNotOverrideNewSnapshotStatus]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT074_RestoreJobWrongGenerationIDThrows]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT074_RestoreJobWrongGenerationIDThrows]' passed (0.526 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT074_RestoreJobWrongRepositoryIDThrows]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT074_RestoreJobWrongRepositoryIDThrows]' passed (0.447 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_CrashDuringInstallingJournalPreservesStaging]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_CrashDuringInstallingJournalPreservesStaging]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_CrashDuringInstallingPhaseLeavesRecoverableState]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_CrashDuringInstallingPhaseLeavesRecoverableState]' passed (0.023 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_JournalSurvivesStagingReclaim]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_JournalSurvivesStagingReclaim]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_SimulatedCrashDuringMigrationIsRecoverable]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT075_SimulatedCrashDuringMigrationIsRecoverable]' passed (0.023 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT076_WorkflowUsesTargetCommitForRelease]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT076_WorkflowUsesTargetCommitForRelease]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT078_AcceptanceGateRejectsSubstringTag]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT078_AcceptanceGateRejectsSubstringTag]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT080_ClaimBackupJobRejectsNonBackupType]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCT080_ClaimBackupJobRejectsNonBackupType]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCTPerf_LargeFileSetBackupRestore]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCTPerf_LargeFileSetBackupRestore]' passed (3.597 seconds).
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCTPerf_LargeScaleWithMetrics]' started.
+Test Case '-[CodeTimeKitTests.FourthRoundRegressionTests testCTPerf_LargeScaleWithMetrics]' passed (4.466 seconds).
+Test Suite 'FourthRoundRegressionTests' passed at 2026-11-11 21:38:34.413.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 9.186 (9.193) seconds
+Test Suite 'ICloudAcceptanceTests' started at 2026-11-11 21:38:34.413.
+Test Case '-[CodeTimeKitTests.ICloudAcceptanceTests testSingleMacICloudRoundTrip]' started.
+/Users/guofeng/Code/solo/CodeTime/Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift:506: -[CodeTimeKitTests.ICloudAcceptanceTests testSingleMacICloudRoundTrip] : Test skipped - NOT RUN: 设置 CODETIME_ICLOUD_TESTS=1 和 CODETIME_ICLOUD_CONTAINER 后执行单机 iCloud 往返
+Test Case '-[CodeTimeKitTests.ICloudAcceptanceTests testSingleMacICloudRoundTrip]' skipped (0.004 seconds).
+Test Suite 'ICloudAcceptanceTests' passed at 2026-11-11 21:38:34.418.
+	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'KopiaEngineIntegrationTests' started at 2026-11-11 21:38:34.418.
+Test Case '-[CodeTimeKitTests.KopiaEngineIntegrationTests testRestoreRefusesOverwriteByDefault]' started.
+Test Case '-[CodeTimeKitTests.KopiaEngineIntegrationTests testRestoreRefusesOverwriteByDefault]' passed (1.825 seconds).
+Test Case '-[CodeTimeKitTests.KopiaEngineIntegrationTests testSnapshotBrowseRestoreAndVerify]' started.
+Test Case '-[CodeTimeKitTests.KopiaEngineIntegrationTests testSnapshotBrowseRestoreAndVerify]' passed (4.501 seconds).
+Test Suite 'KopiaEngineIntegrationTests' passed at 2026-11-11 21:38:40.745.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 6.327 (6.327) seconds
+Test Suite 'MigrationCoordinatorTests' started at 2026-11-11 21:38:40.745.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_BaselineFailureBlocksAndKeepsLegacy]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_BaselineFailureBlocksAndKeepsLegacy]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_CleanupFailureIsBlockedNotReportedAsComplete]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_CleanupFailureIsBlockedNotReportedAsComplete]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_HappyPathWithConsentReleasesLegacyLast]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_HappyPathWithConsentReleasesLegacyLast]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_NoLegacyMeansNothingToDo]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_NoLegacyMeansNothingToDo]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_PublishFailureBlocksBeforeTouchingAnythingLocal]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_PublishFailureBlocksBeforeTouchingAnythingLocal]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_ResumesAfterCrashInsteadOfReuploading]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_ResumesAfterCrashInsteadOfReuploading]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_StatusReflectsPendingCleanupWithoutRunningWork]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_StatusReflectsPendingCleanupWithoutRunningWork]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_WithoutConsentLegacyStaysOnDisk]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT158_WithoutConsentLegacyStaysOnDisk]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT178_BaselineRegistryPersistsProjectIDAndSnapshotAcrossRuns]' started.
+Test Case '-[CodeTimeKitTests.MigrationCoordinatorTests testCT178_BaselineRegistryPersistsProjectIDAndSnapshotAcrossRuns]' passed (0.000 seconds).
+Test Suite 'MigrationCoordinatorTests' passed at 2026-11-11 21:38:40.748.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'ObjectPackTests' started at 2026-11-11 21:38:40.748.
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_EnginePacksSmallFilesAndRestoresThem]' started.
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_EnginePacksSmallFilesAndRestoresThem]' passed (0.024 seconds).
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_PackFormatRoundTripsEveryObject]' started.
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_PackFormatRoundTripsEveryObject]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_PackRejectsBadInputAndCorruptReads]' started.
+Test Case '-[CodeTimeKitTests.ObjectPackTests testCT157_PackRejectsBadInputAndCorruptReads]' passed (0.001 seconds).
+Test Suite 'ObjectPackTests' passed at 2026-11-11 21:38:40.775.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.027 (0.027) seconds
+Test Suite 'OperationLeaseTests' started at 2026-11-11 21:38:40.775.
+Test Case '-[CodeTimeKitTests.OperationLeaseTests testCT188_SharedLeasesOverlapAndExclusiveMaintenanceIsBlocked]' started.
+Test Case '-[CodeTimeKitTests.OperationLeaseTests testCT188_SharedLeasesOverlapAndExclusiveMaintenanceIsBlocked]' passed (0.215 seconds).
+Test Case '-[CodeTimeKitTests.OperationLeaseTests testCT189_LeaseReleaseIsIdempotent]' started.
+Test Case '-[CodeTimeKitTests.OperationLeaseTests testCT189_LeaseReleaseIsIdempotent]' passed (0.001 seconds).
+Test Suite 'OperationLeaseTests' passed at 2026-11-11 21:38:40.991.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.216 (0.216) seconds
+Test Suite 'ProcessRunnerTests' started at 2026-11-11 21:38:40.991.
+Test Case '-[CodeTimeKitTests.ProcessRunnerTests testVersionCommand]' started.
+Test Case '-[CodeTimeKitTests.ProcessRunnerTests testVersionCommand]' passed (0.083 seconds).
+Test Suite 'ProcessRunnerTests' passed at 2026-11-11 21:38:41.075.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.083 (0.084) seconds
+Test Suite 'ProjectChangeMonitorTests' started at 2026-11-11 21:38:41.075.
+Test Case '-[CodeTimeKitTests.ProjectChangeMonitorTests testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval]' started.
+Test Case '-[CodeTimeKitTests.ProjectChangeMonitorTests testCT167_FSEventsDeliverChangeAndGateRespectsMinimumInterval]' passed (0.012 seconds).
+Test Suite 'ProjectChangeMonitorTests' passed at 2026-11-11 21:38:41.087.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.012 (0.013) seconds
+Test Suite 'ProjectScannerTests' started at 2026-11-11 21:38:41.087.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_IdentityIsStableForUntouchedFileAndChangesOnEdit]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_IdentityIsStableForUntouchedFileAndChangesOnEdit]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_IncrementalChangeSetDetectsEditsAndDeletions]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_IncrementalChangeSetDetectsEditsAndDeletions]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_MaxFilesTruncatesAndSaysSo]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_MaxFilesTruncatesAndSaysSo]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_ScanAppliesExclusionsAndKeepsStructure]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_ScanAppliesExclusionsAndKeepsStructure]' passed (0.006 seconds).
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_SymlinksAreRecordedNotFollowed]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_SymlinksAreRecordedNotFollowed]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_UnreadableDirectoryMarksScanIncomplete]' started.
+Test Case '-[CodeTimeKitTests.ProjectScannerTests testCT153_UnreadableDirectoryMarksScanIncomplete]' passed (0.005 seconds).
+Test Suite 'ProjectScannerTests' passed at 2026-11-11 21:38:41.121.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.032 (0.033) seconds
+Test Suite 'RecoveryRegressionTests' started at 2026-11-11 21:38:41.121.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT013_InterruptedRestoreResumesVerifiedObjects]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT013_InterruptedRestoreResumesVerifiedObjects]' passed (0.017 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT014_RestoreCopyFailureLeavesRepositoryUntouched]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT014_RestoreCopyFailureLeavesRepositoryUntouched]' passed (0.035 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT015_RestoreFailsOnObjectHashMismatch]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT015_RestoreFailsOnObjectHashMismatch]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT016_MultiDeviceCandidatesReportKeyMismatch]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT016_MultiDeviceCandidatesReportKeyMismatch]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT017_MismatchedFirstCandidateDoesNotAbortRecovery]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT017_MismatchedFirstCandidateDoesNotAbortRecovery]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT018_RestoreReportRequiresRepositoryAndSnapshotChecks]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT018_RestoreReportRequiresRepositoryAndSnapshotChecks]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT019_CloudRestoreJobSurvivesRestart]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT019_CloudRestoreJobSurvivesRestart]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT020_DuplicateRestoreIsSafe]' started.
+Test Case '-[CodeTimeKitTests.RecoveryRegressionTests testCT020_DuplicateRestoreIsSafe]' passed (0.017 seconds).
+Test Suite 'RecoveryRegressionTests' passed at 2026-11-11 21:38:41.243.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.121 (0.122) seconds
+Test Suite 'RemoteIntegrityVerifierTests' started at 2026-11-11 21:38:41.243.
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT183_InspectReportsAbsentCorruptInaccessibleAndVerified]' started.
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT183_InspectReportsAbsentCorruptInaccessibleAndVerified]' passed (0.331 seconds).
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT184_VerificationIgnoresCacheAndFailsOnCorruptCloudObject]' started.
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT184_VerificationIgnoresCacheAndFailsOnCorruptCloudObject]' passed (0.425 seconds).
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT185_PackCorruptionIsDetected]' started.
+Test Case '-[CodeTimeKitTests.RemoteIntegrityVerifierTests testCT185_PackCorruptionIsDetected]' passed (0.322 seconds).
+Test Suite 'RemoteIntegrityVerifierTests' passed at 2026-11-11 21:38:42.322.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 1.079 (1.079) seconds
+Test Suite 'RepositoryReplicationTests' started at 2026-11-11 21:38:42.322.
+Test Case '-[CodeTimeKitTests.RepositoryReplicationTests testRepositoryRoundTripsThroughCloudStore]' started.
+Test Case '-[CodeTimeKitTests.RepositoryReplicationTests testRepositoryRoundTripsThroughCloudStore]' passed (2.732 seconds).
+Test Suite 'RepositoryReplicationTests' passed at 2026-11-11 21:38:45.054.
+	 Executed 1 test, with 0 failures (0 unexpected) in 2.732 (2.732) seconds
+Test Suite 'RestoreResumeTests' started at 2026-11-11 21:38:45.054.
+Test Case '-[CodeTimeKitTests.RestoreResumeTests testCT166_InterruptedRestoreResumesStagedFiles]' started.
+Test Case '-[CodeTimeKitTests.RestoreResumeTests testCT166_InterruptedRestoreResumesStagedFiles]' passed (0.009 seconds).
+Test Suite 'RestoreResumeTests' passed at 2026-11-11 21:38:45.063.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+Test Suite 'RestoreSafetyTests' started at 2026-11-11 21:38:45.063.
+Test Case '-[CodeTimeKitTests.RestoreSafetyTests testCT186_TruncatedStagingFileIsNeverAcceptedWhenVerifyHashesIsFalse]' started.
+Test Case '-[CodeTimeKitTests.RestoreSafetyTests testCT186_TruncatedStagingFileIsNeverAcceptedWhenVerifyHashesIsFalse]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.RestoreSafetyTests testCT187_DirectoryModeAndSymlinksAreRestoredWithoutEscaping]' started.
+Test Case '-[CodeTimeKitTests.RestoreSafetyTests testCT187_DirectoryModeAndSymlinksAreRestoredWithoutEscaping]' passed (0.007 seconds).
+Test Suite 'RestoreSafetyTests' passed at 2026-11-11 21:38:45.075.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.012 (0.012) seconds
+Test Suite 'RuntimeConfigurationTests' started at 2026-11-11 21:38:45.076.
+Test Case '-[CodeTimeKitTests.RuntimeConfigurationTests testCT173_EveryRelevantSettingChangesTheFingerprint]' started.
+Test Case '-[CodeTimeKitTests.RuntimeConfigurationTests testCT173_EveryRelevantSettingChangesTheFingerprint]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.RuntimeConfigurationTests testCT174_ServiceReportsNewFingerprintAfterSettingsChange]' started.
+Test Case '-[CodeTimeKitTests.RuntimeConfigurationTests testCT174_ServiceReportsNewFingerprintAfterSettingsChange]' passed (1.578 seconds).
+Test Suite 'RuntimeConfigurationTests' passed at 2026-11-11 21:38:46.659.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1.583 (1.583) seconds
+Test Suite 'SQLiteStoreTests' started at 2026-11-11 21:38:46.659.
+Test Case '-[CodeTimeKitTests.SQLiteStoreTests testProjectAndSnapshotRoundTrip]' started.
+Test Case '-[CodeTimeKitTests.SQLiteStoreTests testProjectAndSnapshotRoundTrip]' passed (0.010 seconds).
+Test Suite 'SQLiteStoreTests' passed at 2026-11-11 21:38:46.669.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.010 (0.010) seconds
+Test Suite 'SandboxMigrationRegressionTests' started at 2026-11-11 21:38:46.669.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT029_BetaToReleaseMigrationIsLosslessAndNonDestructive]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT029_BetaToReleaseMigrationIsLosslessAndNonDestructive]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT030_ExternalProjectAllowedButRecursiveRootsRejected]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT030_ExternalProjectAllowedButRecursiveRootsRejected]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT031_ExternalMirrorBookmarkSurvivesEncoding]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT031_ExternalMirrorBookmarkSurvivesEncoding]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT032_StaleBookmarkFailsExplicitly]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT032_StaleBookmarkFailsExplicitly]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT033_ProjectBookmarkIsSharedWithAgentConnection]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT033_ProjectBookmarkIsSharedWithAgentConnection]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT034_FreshSandboxBootstrap]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT034_FreshSandboxBootstrap]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT035_MissingRepositoryIsNotAutoCreated]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT035_MissingRepositoryIsNotAutoCreated]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT036_HundredThousandFilesPreview]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT036_HundredThousandFilesPreview]' passed (33.901 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT037_MillionFilesBoundedByLimit]' started.
+/Users/guofeng/Code/solo/CodeTime/Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift:291: -[CodeTimeKitTests.SandboxMigrationRegressionTests testCT037_MillionFilesBoundedByLimit] : Test skipped - NOT RUN: 百万文件压力测试需设置 CODETIME_STRESS_TESTS=1（夜间/手动）
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT037_MillionFilesBoundedByLimit]' skipped (0.000 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT038_LargeFileHashStreamsInChunks]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT038_LargeFileHashStreamsInChunks]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT039_SearchTruncationIsExplicit]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT039_SearchTruncationIsExplicit]' passed (2.304 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT040_LargeFilePreviewDegradesExplicitly]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT040_LargeFilePreviewDegradesExplicitly]' passed (1.924 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT042_LogRotationIsBounded]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT042_LogRotationIsBounded]' passed (0.074 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT043_CacheAndActivityTablesArePruned]' started.
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT043_CacheAndActivityTablesArePruned]' passed (0.025 seconds).
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT044_DiskFullLeavesRepositoryUntouched]' started.
+/Users/guofeng/Code/solo/CodeTime/Packages/CodeTimeKit/Tests/CodeTimeKitTests/SandboxPerformanceRegressionTests.swift:471: -[CodeTimeKitTests.SandboxMigrationRegressionTests testCT044_DiskFullLeavesRepositoryUntouched] : Test skipped - NOT RUN: 需要可控的小容量卷注入 ENOSPC；由 §16.6 真机验收覆盖
+Test Case '-[CodeTimeKitTests.SandboxMigrationRegressionTests testCT044_DiskFullLeavesRepositoryUntouched]' skipped (0.000 seconds).
+Test Suite 'SandboxMigrationRegressionTests' passed at 2026-11-11 21:39:24.956.
+	 Executed 15 tests, with 2 tests skipped and 0 failures (0 unexpected) in 38.285 (38.287) seconds
+Test Suite 'SchemaMigrationTests' started at 2026-11-11 21:39:24.956.
+Test Case '-[CodeTimeKitTests.SchemaMigrationTests testMIG001_V1DatabaseUpgradesAdditivelyAndIdempotently]' started.
+Test Case '-[CodeTimeKitTests.SchemaMigrationTests testMIG001_V1DatabaseUpgradesAdditivelyAndIdempotently]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.SchemaMigrationTests testMIG002_PartialV2MigrationIsRepaired]' started.
+Test Case '-[CodeTimeKitTests.SchemaMigrationTests testMIG002_PartialV2MigrationIsRepaired]' passed (0.014 seconds).
+Test Suite 'SchemaMigrationTests' passed at 2026-11-11 21:39:24.986.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.030 (0.030) seconds
+Test Suite 'SecondRoundRegressionTests' started at 2026-11-11 21:39:24.986.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT045_InitializedReleaseCanRequestMigration]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT045_InitializedReleaseCanRequestMigration]' passed (0.030 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT046_EmptyTargetDirectoriesDoNotBlockMigration]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT046_EmptyTargetDirectoriesDoNotBlockMigration]' passed (0.030 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT047_HiddenRepositoryFilesAreMigrated]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT047_HiddenRepositoryFilesAreMigrated]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT048_InterruptedMigrationLeavesTargetRetryable]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT048_InterruptedMigrationLeavesTargetRetryable]' passed (0.033 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT049_PartialRestoreFileIsReplaced]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT049_PartialRestoreFileIsReplaced]' passed (0.014 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT050_CommittingRestoreIsResumable]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT050_CommittingRestoreIsResumable]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT051_SelectedDeviceIsBoundToRecovery]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT051_SelectedDeviceIsBoundToRecovery]' passed (0.014 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT052_MissingObjectMakesCandidateNonRestorable]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT052_MissingObjectMakesCandidateNonRestorable]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT053_FailedVerificationDoesNotRemainVerified]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT053_FailedVerificationDoesNotRemainVerified]' passed (2.407 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT054_AbortedTombstoneDoesNotDeleteObjects]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT054_AbortedTombstoneDoesNotDeleteObjects]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT055_TwoConnectionsCompeteForOneLease]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT055_TwoConnectionsCompeteForOneLease]' passed (0.012 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT056_LocalRepositoryIsRediscoveredWithoutDatabase]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT056_LocalRepositoryIsRediscoveredWithoutDatabase]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT057_ICloudMirrorPathIsRejected]' started.
+Test Case '-[CodeTimeKitTests.SecondRoundRegressionTests testCT057_ICloudMirrorPathIsRejected]' passed (0.001 seconds).
+Test Suite 'SecondRoundRegressionTests' passed at 2026-11-11 21:39:27.581.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 2.594 (2.595) seconds
+Test Suite 'ServiceEndToEndTests' started at 2026-11-11 21:39:27.581.
+Test Case '-[CodeTimeKitTests.ServiceEndToEndTests testBackupPublishVerifyRestore]' started.
+Test Case '-[CodeTimeKitTests.ServiceEndToEndTests testBackupPublishVerifyRestore]' passed (8.044 seconds).
+Test Suite 'ServiceEndToEndTests' passed at 2026-11-11 21:39:35.625.
+	 Executed 1 test, with 0 failures (0 unexpected) in 8.044 (8.044) seconds
+Test Suite 'ServiceMigrationIntegrationTests' started at 2026-11-11 21:39:35.625.
+Test Case '-[CodeTimeKitTests.ServiceMigrationIntegrationTests testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory]' started.
+Test Case '-[CodeTimeKitTests.ServiceMigrationIntegrationTests testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory]' passed (3.411 seconds).
+Test Suite 'ServiceMigrationIntegrationTests' passed at 2026-11-11 21:39:39.036.
+	 Executed 1 test, with 0 failures (0 unexpected) in 3.411 (3.411) seconds
+Test Suite 'ServiceV3IntegrationTests' started at 2026-11-11 21:39:39.036.
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace]' started.
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace]' passed (1.476 seconds).
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT165_OnboardingStartsFreshInstallOnV3]' started.
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT165_OnboardingStartsFreshInstallOnV3]' passed (1.648 seconds).
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT168_ServiceCancellationStopsEngineBeforeCommit]' started.
+Test Case '-[CodeTimeKitTests.ServiceV3IntegrationTests testCT168_ServiceCancellationStopsEngineBeforeCommit]' passed (1.675 seconds).
+Test Suite 'ServiceV3IntegrationTests' passed at 2026-11-11 21:39:43.836.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 4.799 (4.799) seconds
+Test Suite 'ServiceV3RecoveryTests' started at 2026-11-11 21:39:43.836.
+Test Case '-[CodeTimeKitTests.ServiceV3RecoveryTests testCT164_NewMacDiscoversAndRestoresV3Project]' started.
+Test Case '-[CodeTimeKitTests.ServiceV3RecoveryTests testCT164_NewMacDiscoversAndRestoresV3Project]' passed (3.210 seconds).
+Test Suite 'ServiceV3RecoveryTests' passed at 2026-11-11 21:39:47.046.
+	 Executed 1 test, with 0 failures (0 unexpected) in 3.210 (3.210) seconds
+Test Suite 'SeventhRoundRegressionTests' started at 2026-11-11 21:39:47.046.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT117_OversizedFileProtectionCopySurvivesItsOwnPrune]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT117_OversizedFileProtectionCopySurvivesItsOwnPrune]' passed (7.786 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT118_OversizedDirectoryProtectionKeptWithOverBudgetStatus]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT118_OversizedDirectoryProtectionKeptWithOverBudgetStatus]' passed (0.024 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT119_SourceMutatedDuringCopyAbortsInsteadOfFakeProtection]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT119_SourceMutatedDuringCopyAbortsInsteadOfFakeProtection]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT120_TamperedProtectionCopyFailsVerificationAndListing]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT120_TamperedProtectionCopyFailsVerificationAndListing]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT121_PruneNeverDeletesNewestOrActiveCopies]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT121_PruneNeverDeletesNewestOrActiveCopies]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT122_ActiveRestoreCopyProtectedFromPrune]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT122_ActiveRestoreCopyProtectedFromPrune]' passed (0.008 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT123_DuplicateObjectsVerifiedOncePerUniqueHash]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT123_DuplicateObjectsVerifiedOncePerUniqueHash]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT124_ClonedDatabaseOnNewMacMintsNewDeviceIdentity]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT124_ClonedDatabaseOnNewMacMintsNewDeviceIdentity]' passed (3.802 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT125_TwoMacsPublishingConcurrentlyKeepIndependentGenerations]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT125_TwoMacsPublishingConcurrentlyKeepIndependentGenerations]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT126_GCOnOneMacNeverDeletesOtherMacsCommittedObjects]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT126_GCOnOneMacNeverDeletesOtherMacsCommittedObjects]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT127_TestReportBindingMismatchFailsConsistencyCheck]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT127_TestReportBindingMismatchFailsConsistencyCheck]' passed (0.311 seconds).
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT128_SkippedTestsCountedAsPassedFailTheCheck]' started.
+Test Case '-[CodeTimeKitTests.SeventhRoundRegressionTests testCT128_SkippedTestsCountedAsPassedFailTheCheck]' passed (0.225 seconds).
+Test Suite 'SeventhRoundRegressionTests' passed at 2026-11-11 21:39:59.288.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 12.240 (12.241) seconds
+Test Suite 'SixthRoundRegressionTests' started at 2026-11-11 21:39:59.288.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT099_AcceptanceGateIsInsulatedFromCIEnvironment]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT099_AcceptanceGateIsInsulatedFromCIEnvironment]' passed (0.307 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT100_PublishStableChecksOutReleaseNotes]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT100_PublishStableChecksOutReleaseNotes]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT101_CancellingWorkTerminatesAndReapsChild]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT101_CancellingWorkTerminatesAndReapsChild]' passed (1.547 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT101_DrainWaitsForRegisteredWork]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT101_DrainWaitsForRegisteredWork]' passed (1.594 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT102_CommitPositionCoversEveryCrashPoint]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT102_CommitPositionCoversEveryCrashPoint]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT103_FailedIsRetryableAndPermanentlyFailedIsNot]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT103_FailedIsRetryableAndPermanentlyFailedIsNot]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT104_RepositoryLockIsExclusiveAcrossHandles]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT104_RepositoryLockIsExclusiveAcrossHandles]' passed (1.039 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT105_CoordinatedStoreNeverDeletesWithoutExplicitConsent]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT105_CoordinatedStoreNeverDeletesWithoutExplicitConsent]' passed (0.092 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT105_ExplicitDeviceRetirementIsRequiredForGCToIgnoreIt]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT105_ExplicitDeviceRetirementIsRequiredForGCToIgnoreIt]' passed (0.040 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT106_TamperedMigrationJournalNeverDeletesArbitraryPaths]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT106_TamperedMigrationJournalNeverDeletesArbitraryPaths]' passed (0.005 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT107_SymlinkStagingIsRejectedBeforeAnyWrite]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT107_SymlinkStagingIsRejectedBeforeAnyWrite]' passed (0.013 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT108_JanitorSkipsSymlinkedRepositoryDirectory]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT108_JanitorSkipsSymlinkedRepositoryDirectory]' passed (1.383 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT109_NewMigrationRequestFromSameSourceRunsAgain]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT109_NewMigrationRequestFromSameSourceRunsAgain]' passed (0.040 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT110_StoreLevelRecomputeIsAtomicAndFollowsNewestSnapshot]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT110_StoreLevelRecomputeIsAtomicAndFollowsNewestSnapshot]' passed (0.010 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT111_LocalRestoreTargetLockRejectsConcurrentWriter]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT111_LocalRestoreTargetLockRejectsConcurrentWriter]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT112_LiveRestoreJobIsNotReclaimedByAnotherBootstrap]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT112_LiveRestoreJobIsNotReclaimedByAnotherBootstrap]' passed (0.009 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT113_BackupCoordinatorReportsPerProjectOutcomes]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT113_BackupCoordinatorReportsPerProjectOutcomes]' passed (2.256 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT113_RestoreCoordinatorDecidesResumePlanFromState]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT113_RestoreCoordinatorDecidesResumePlanFromState]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT114_IndexForbidsRequiredSkippableAndGateBuildsCrashChild]' passed (0.004 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT115_BenchmarkVerifiesContentAndHasBaseline]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT115_BenchmarkVerifiesContentAndHasBaseline]' passed (5.373 seconds).
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT116_TestReportBindsCommitRunAndGateResult]' started.
+Test Case '-[CodeTimeKitTests.SixthRoundRegressionTests testCT116_TestReportBindsCommitRunAndGateResult]' passed (0.003 seconds).
+Test Suite 'SixthRoundRegressionTests' passed at 2026-11-11 21:40:13.041.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 13.751 (13.754) seconds
+Test Suite 'SmokeTests' started at 2026-11-11 21:40:13.042.
+Test Case '-[CodeTimeKitTests.SmokeTests testCryptoBoxRoundTrip]' started.
+Test Case '-[CodeTimeKitTests.SmokeTests testCryptoBoxRoundTrip]' passed (0.000 seconds).
+Test Case '-[CodeTimeKitTests.SmokeTests testKeychainRefusesCreationWhenRepositoryExists]' started.
+Test Case '-[CodeTimeKitTests.SmokeTests testKeychainRefusesCreationWhenRepositoryExists]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.SmokeTests testRecoveryKeyBodyMayContainPrefix]' started.
+Test Case '-[CodeTimeKitTests.SmokeTests testRecoveryKeyBodyMayContainPrefix]' passed (0.015 seconds).
+Test Case '-[CodeTimeKitTests.SmokeTests testRecoveryKeyRoundTrip]' started.
+Test Case '-[CodeTimeKitTests.SmokeTests testRecoveryKeyRoundTrip]' passed (0.000 seconds).
+Test Suite 'SmokeTests' passed at 2026-11-11 21:40:13.058.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.016 (0.017) seconds
+Test Suite 'SnapshotFormatResolverTests' started at 2026-11-11 21:40:13.058.
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT169_ResolverTrustsRemoteCommitAndNeverDowngradesLocalV3]' started.
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT169_ResolverTrustsRemoteCommitAndNeverDowngradesLocalV3]' passed (0.021 seconds).
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT170_RemoteSnapshotIndexIsPersistentAndRebuildable]' started.
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT170_RemoteSnapshotIndexIsPersistentAndRebuildable]' passed (0.024 seconds).
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT171_DeviceListHasTTLAndFailedRefreshKeepsLastKnownList]' started.
+Test Case '-[CodeTimeKitTests.SnapshotFormatResolverTests testCT171_DeviceListHasTTLAndFailedRefreshKeepsLastKnownList]' passed (0.088 seconds).
+Test Suite 'SnapshotFormatResolverTests' passed at 2026-11-11 21:40:13.192.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.133 (0.133) seconds
+Test Suite 'SpaceManagementTests' started at 2026-11-11 21:40:13.192.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_CacheNeverTouchesFilesOutsideItsRoot]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_CacheNeverTouchesFilesOutsideItsRoot]' passed (0.007 seconds).
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_CacheStoresReadsAndEvictsLRUWithinBudget]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_CacheStoresReadsAndEvictsLRUWithinBudget]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_EvictionFailureIsReportedNotSwallowed]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_EvictionFailureIsReportedNotSwallowed]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_EvictionRequiresConfirmedUpload]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_EvictionRequiresConfirmedUpload]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_MissingFileIsForgottenNotReportedAsCached]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_MissingFileIsForgottenNotReportedAsCached]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_PinnedEntriesSurviveBudgetPressure]' started.
+Test Case '-[CodeTimeKitTests.SpaceManagementTests testCT156_PinnedEntriesSurviveBudgetPressure]' passed (0.003 seconds).
+Test Suite 'SpaceManagementTests' passed at 2026-11-11 21:40:13.212.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.020 (0.021) seconds
+Test Suite 'ThirdRoundRegressionTests' started at 2026-11-11 21:40:13.212.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT058_AcceptanceGateAcceptsCompletePassReport]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT058_AcceptanceGateAcceptsCompletePassReport]' passed (0.148 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT058_AcceptanceGateRejectsTemplateAndIncompleteReports]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT058_AcceptanceGateRejectsTemplateAndIncompleteReports]' passed (0.467 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT059_LostDatabaseAndKeychainFailsClosed]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT059_LostDatabaseAndKeychainFailsClosed]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT059_SelectPrefersRegisteredRepositoryAmongDiscovered]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT059_SelectPrefersRegisteredRepositoryAmongDiscovered]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT060_MigrationBlocksWhileBetaAgentLockIsHeld]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT060_MigrationBlocksWhileBetaAgentLockIsHeld]' passed (2.054 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT061_PendingMigrationRequestLifecycle]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT061_PendingMigrationRequestLifecycle]' passed (0.036 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT062_KeychainRepairFromCloudRestoresAccess]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT062_KeychainRepairFromCloudRestoresAccess]' passed (2.837 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT063_LeaseClaimAndOwnerChecksAreAtomic]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT063_LeaseClaimAndOwnerChecksAreAtomic]' passed (0.018 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT063_TwoServicesProduceExactlyOneSnapshot]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT063_TwoServicesProduceExactlyOneSnapshot]' passed (3.041 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT064_VerifyCloudClearsStaleVerifiedOnUnreadableNewest]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT064_VerifyCloudClearsStaleVerifiedOnUnreadableNewest]' passed (0.457 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT065_ProjectStatusFollowsNewestSnapshot]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT065_ProjectStatusFollowsNewestSnapshot]' passed (0.016 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT066_GCPublishDoNotHoldRepositoryLock]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT066_GCPublishDoNotHoldRepositoryLock]' passed (0.011 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT067_InterruptedMigrationStagingIsReclaimed]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT067_InterruptedMigrationStagingIsReclaimed]' passed (0.025 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT068_ManualDispatchPublishesRelease]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT068_ManualDispatchPublishesRelease]' passed (0.217 seconds).
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT069_GateRejectsMissingTestsAndUnexpectedSkips]' started.
+Test Case '-[CodeTimeKitTests.ThirdRoundRegressionTests testCT069_GateRejectsMissingTestsAndUnexpectedSkips]' passed (4.360 seconds).
+Test Suite 'ThirdRoundRegressionTests' passed at 2026-11-11 21:40:26.921.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 13.707 (13.709) seconds
+Test Suite 'UploadJournalReconcilerTests' started at 2026-11-11 21:40:26.921.
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT190_ReconcilerAdoptsValidOrphansAndQuarantinesUnknown]' started.
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT190_ReconcilerAdoptsValidOrphansAndQuarantinesUnknown]' passed (0.003 seconds).
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT191_ReconcilerResolvesMissingFilesAgainstTheCloud]' started.
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT191_ReconcilerResolvesMissingFilesAgainstTheCloud]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT192_ReconcilerCleansUploadedPendingCleanup]' started.
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT192_ReconcilerCleansUploadedPendingCleanup]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT193_UploadQueueRefusesConcurrentWriterForSameObject]' started.
+Test Case '-[CodeTimeKitTests.UploadJournalReconcilerTests testCT193_UploadQueueRefusesConcurrentWriterForSameObject]' passed (0.106 seconds).
+Test Suite 'UploadJournalReconcilerTests' passed at 2026-11-11 21:40:27.033.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.112 (0.112) seconds
+Test Suite 'UploadQueueTests' started at 2026-11-11 21:40:27.034.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' passed (0.029 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' passed (0.277 seconds).
+Test Suite 'UploadQueueTests' passed at 2026-11-11 21:40:27.344.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.310 (0.310) seconds
+Test Suite 'CodeTimeKitTests.xctest' passed at 2026-11-11 21:40:27.344.
+	 Executed 295 tests, with 3 tests skipped and 0 failures (0 unexpected) in 245.111 (245.153) seconds
+Test Suite 'All tests' passed at 2026-11-11 21:40:27.344.
+	 Executed 295 tests, with 3 tests skipped and 0 failures (0 unexpected) in 245.111 (245.154) seconds
+PERF: files=200 backup=1864ms restore=1601ms
+PERF_METRICS:
+  files: 300
+  totalBytes: 259000
+  backupDurationMs: 1869
+  restoreDurationMs: 2419
+  peakMemoryMB: 150.4
+  cpuUserSec: 5.68
+  cpuSysSec: 3.42
+  cpuPercent: 486.9
+  concurrencyBackup: 2
+  concurrentTasks: 1
+  verifyFiles: 300 (all content-verified)
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

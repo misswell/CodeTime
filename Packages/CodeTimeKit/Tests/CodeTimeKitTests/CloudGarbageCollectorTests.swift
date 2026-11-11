@@ -144,7 +144,7 @@ final class CloudGarbageCollectorTests: XCTestCase {
         )
     }
 
-    func testCT163_SweepRefusesWhileDataIsStagedOrPublishing() async throws {
+    func testCT194_SweepRefusesWhileDataIsStagedOrPublishing() async throws {
         let cloud = InMemoryCloud()
         let index = InMemoryIndex()
         _ = try await makeSnapshots(count: 3, cloud: cloud, index: index)
@@ -172,7 +172,7 @@ final class CloudGarbageCollectorTests: XCTestCase {
         }
     }
 
-    func testCT163_MissingReferencedObjectAbortsBeforeAnyTombstone() async throws {
+    func testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone() async throws {
         let cloud = InMemoryCloud()
         let index = InMemoryIndex()
         _ = try await makeSnapshots(count: 2, cloud: cloud, index: index)
@@ -196,7 +196,7 @@ final class CloudGarbageCollectorTests: XCTestCase {
         XCTAssertTrue(cloud.tombstones.isEmpty, "中止时不得留下墓碑")
     }
 
-    func testCT163_RetentionPlannerKeepsNewestAndBuckets() {
+    func testCT196_RetentionPlannerKeepsNewestAndBuckets() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let commits = (0..<40).map { index in
             SnapshotCommit(
@@ -221,5 +221,163 @@ final class CloudGarbageCollectorTests: XCTestCase {
         XCTAssertTrue(retained.contains("s2"))
         XCTAssertFalse(retained.contains("s39"), "超过窗口的旧版本应被淘汰")
         XCTAssertGreaterThan(retained.count, 3)
+    }
+}
+
+// MARK: - P0 GC safety (epochs, device acks, fail-closed enumeration)
+
+extension CloudGarbageCollectorTests {
+    private func makeCollector(
+        _ cloud: InMemoryCloud,
+        _ index: InMemoryIndex,
+        at date: Date,
+        graceDays: Double = 30
+    ) -> CloudGarbageCollector {
+        CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            gracePeriod: graceDays * 86_400,
+            clock: { date }
+        )
+    }
+
+    func testGCEnumerationFailureAbortsWithoutTombstonesOrDeletion() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let collector = makeCollector(cloud, index, at: snapshots.last!.date)
+        cloud.failEnumeration = true
+        do {
+            _ = try await collector.createTombstones(policies: [projectID: policy])
+            XCTFail("枚举失败必须中止 GC")
+        } catch {
+            // expected
+        }
+        XCTAssertTrue(cloud.tombstones.isEmpty, "枚举失败不得写墓碑")
+        XCTAssertEqual(cloud.commits.count, 4)
+        XCTAssertEqual(cloud.objects.count > 0, true)
+    }
+
+    func testGCWaitsForEveryActiveDeviceAndOfflineDeviceBlocksDeletion() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let now = snapshots.last!.date
+        try await cloud.writeDeviceRecord(GCDeviceRecord(
+            deviceID: "device-B", name: "Mac B", createdAt: now, lastSeenAt: now
+        ))
+        let collector = makeCollector(cloud, index, at: now)
+        let planned = try await collector.createTombstones(policies: [projectID: policy])
+        XCTAssertEqual(planned.epochState, .awaitsDeviceAcks)
+        XCTAssertEqual(planned.awaitingDevices, ["device-B"])
+
+        let later = now.addingTimeInterval(31 * 86_400)
+        let blocked = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(blocked.epochState, .awaitsDeviceAcks)
+        XCTAssertEqual(blocked.deletedObjects, 0)
+        XCTAssertEqual(blocked.hiddenSnapshots, 0)
+        XCTAssertEqual(cloud.commits.count, 4, "未知设备未确认时不得删除任何版本")
+
+        // The other device confirms; the initiator may then delete its own data.
+        try await cloud.writeEpochAck(GCEpochAck(
+            epochID: try XCTUnwrap(planned.epochID), deviceID: "device-B", acknowledgedAt: later
+        ))
+        let swept = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(swept.epochState, .completed)
+        XCTAssertEqual(swept.deletedSnapshots, 2)
+        XCTAssertEqual(cloud.commits.count, 2)
+    }
+
+    func testGCSweepProtectsObjectsReferencedByASnapshotCreatedAfterPlanning() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let now = snapshots.last!.date
+        let collector = makeCollector(cloud, index, at: now)
+        _ = try await collector.createTombstones(policies: [projectID: policy])
+
+        // Revive the content of the oldest snapshot after the plan was frozen.
+        try write(0, at: now.addingTimeInterval(-3 * 86_400))
+        let revivedEngine = makeEngine(
+            cloud: cloud, index: index, snapshotID: "revived", at: now
+        )
+        let revived = try await revivedEngine.run(
+            projectID: projectID, root: root,
+            matcher: ExclusionMatcher(rules: []), snapshotID: "revived"
+        )
+        XCTAssertTrue(revived.committed)
+
+        let later = now.addingTimeInterval(31 * 86_400)
+        _ = try await collector.sweep(policies: [projectID: policy], now: later)
+
+        // The revived snapshot must still restore after GC.
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gc-revive-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        _ = try await restore.restore(
+            projectID: projectID, snapshotID: "revived",
+            target: .project, destination: destination
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: destination.appendingPathComponent("data.txt")),
+            try Data(contentsOf: root.appendingPathComponent("data.txt"))
+        )
+    }
+
+    func testGCDepletionFailureKeepsEpochRetryableAndDataOnDisk() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let now = snapshots.last!.date
+        let collector = makeCollector(cloud, index, at: now)
+        _ = try await collector.createTombstones(policies: [projectID: policy])
+        cloud.failDeletes = true
+        let later = now.addingTimeInterval(31 * 86_400)
+        let report = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(report.epochState, .failed)
+        XCTAssertFalse(report.failures.isEmpty)
+        XCTAssertEqual(cloud.commits.count, 2, "提交已隐藏，但数据删除失败时 epoch 必须可重试")
+        XCTAssertGreaterThan(cloud.objects.count, 0)
+
+        cloud.failDeletes = false
+        let retried = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(retried.epochState, .completed)
+    }
+
+    func testGCResumesFromPersistedEpochAfterCrash() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let now = snapshots.last!.date
+        let collector = makeCollector(cloud, index, at: now)
+        let planned = try await collector.createTombstones(policies: [projectID: policy])
+        let epochID = try XCTUnwrap(planned.epochID)
+
+        // Simulate a crash after hiding commits: persist that exact phase.
+        var epoch = try XCTUnwrap(cloud.epochs[epochID])
+        for snapshot in epoch.candidates.snapshots {
+            try await cloud.hideCommit(
+                projectID: snapshot.projectID,
+                snapshotID: snapshot.snapshotID,
+                epochID: epochID
+            )
+        }
+        epoch.state = .commitsHidden
+        try await cloud.writeEpoch(epoch)
+
+        let later = now.addingTimeInterval(31 * 86_400)
+        let resumed = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(resumed.epochState, .completed)
+        XCTAssertEqual(resumed.deletedSnapshots, 2)
+        XCTAssertEqual(cloud.commits.count, 2)
+        XCTAssertTrue(cloud.hiddenCommits[epochID]?.isEmpty ?? true)
     }
 }

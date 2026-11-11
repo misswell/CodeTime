@@ -30,6 +30,16 @@ public enum CloudRestoreError: Error, Sendable, Equatable {
     }
 }
 
+/// How object bytes are sourced during restore/verification.
+public enum ObjectReadPolicy: String, Sendable, Equatable {
+    /// Normal restore: a verified cached chunk is acceptable.
+    case cachePreferred
+    /// Ignore cached bytes but still populate the cache with fetched data.
+    case remoteOnly
+    /// Never read or write the cache; every byte must come from the remote store.
+    case verifyRemote
+}
+
 public enum RestoreTarget: Sendable, Equatable {
     case project
     case directory(path: String)
@@ -44,15 +54,18 @@ public struct RestoreOptions: Sendable {
     public var verifyHashes: Bool
     /// Bounded chunk cache; nil disables caching (every chunk downloaded).
     public var cache: RestoreObjectCache?
+    public var readPolicy: ObjectReadPolicy
 
     public init(
         overwriteDestination: Bool = false,
         verifyHashes: Bool = true,
-        cache: RestoreObjectCache? = nil
+        cache: RestoreObjectCache? = nil,
+        readPolicy: ObjectReadPolicy = .cachePreferred
     ) {
         self.overwriteDestination = overwriteDestination
         self.verifyHashes = verifyHashes
         self.cache = cache
+        self.readPolicy = readPolicy
     }
 
     public static let `default` = RestoreOptions()
@@ -175,6 +188,10 @@ public struct CloudRestoreEngine: Sendable {
         // and is removed by the successful atomic move.
         let staging = Self.stagingURL(for: destination, snapshotID: snapshotID)
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        let journalURL = staging.deletingLastPathComponent()
+            .appendingPathComponent(".\(staging.lastPathComponent)-journal.jsonl")
+        let journal = try RestoreJournal(url: journalURL)
+        defer { journal.close() }
 
         // Resolve target → the directory node to walk and an optional single file.
         let startNode: DirectoryNode
@@ -206,26 +223,54 @@ public struct CloudRestoreEngine: Sendable {
                 into: staging,
                 report: &report,
                 packCache: packCache,
+                journal: journal,
                 isCancelled: isCancelled
             )
         } else {
+            var symlinks: [FileNode] = []
             try await restoreDirectory(
                 startNode,
                 basePath: startNode.path,
                 into: staging,
                 report: &report,
                 packCache: packCache,
+                journal: journal,
+                symlinks: &symlinks,
                 isCancelled: isCancelled
             )
+            // Symlinks are created last: no later write can be redirected through
+            // a symlink planted by the version being restored.
+            for link in symlinks {
+                if isCancelled() { throw CloudRestoreError.cancelled }
+                try await restoreSymlink(link, into: staging, report: &report, journal: journal)
+            }
         }
 
-        // Commit: nothing user-visible happens until every byte is written and
-        // (optionally) re-hashed.
+        journal.flush()
+        journal.close()
+        try? fm.removeItem(at: journalURL)
+
+        // Commit with rollback: an existing destination is moved aside, never
+        // deleted before the new tree is in place.
+        let backup = destination.deletingLastPathComponent()
+            .appendingPathComponent(".codetime-backup-\(UUID().uuidString)", isDirectory: true)
+        var movedAside = false
         if destinationExists {
-            var trashed: NSURL?
-            try fm.trashItem(at: destination, resultingItemURL: &trashed)
+            try fm.moveItem(at: destination, to: backup)
+            movedAside = true
         }
-        try fm.moveItem(at: staging, to: destination)
+        do {
+            try fm.moveItem(at: staging, to: destination)
+        } catch {
+            if movedAside {
+                try? fm.moveItem(at: backup, to: destination)
+            }
+            throw error
+        }
+        if movedAside {
+            var trashed: NSURL?
+            try? fm.trashItem(at: backup, resultingItemURL: &trashed)
+        }
         report.commited = true
         return report
     }
@@ -252,6 +297,8 @@ public struct CloudRestoreEngine: Sendable {
         into staging: URL,
         report: inout CloudRestoreReport,
         packCache: PackCache,
+        journal: RestoreJournal,
+        symlinks: inout [FileNode],
         isCancelled: @Sendable () -> Bool
     ) async throws {
         let fm = FileManager.default
@@ -261,11 +308,14 @@ public struct CloudRestoreEngine: Sendable {
             report.directoriesCreated += 1
         }
 
-        for file in node.files {
+        // Regular files first, then subdirectories, then symlinks (collected for
+        // a final pass). This ordering prevents writes through restored links.
+        for file in node.files where file.kind != .symlink {
             if isCancelled() { throw CloudRestoreError.cancelled }
             try await restoreFile(
                 file, writingTo: file.path, into: staging,
-                report: &report, packCache: packCache, isCancelled: isCancelled
+                report: &report, packCache: packCache, journal: journal,
+                isCancelled: isCancelled
             )
         }
         for directory in node.directories {
@@ -277,8 +327,21 @@ public struct CloudRestoreEngine: Sendable {
                 into: staging,
                 report: &report,
                 packCache: packCache,
+                journal: journal,
+                symlinks: &symlinks,
                 isCancelled: isCancelled
             )
+        }
+        for file in node.files where file.kind == .symlink {
+            symlinks.append(file)
+        }
+        // Directory metadata is applied after children exist, otherwise writing a
+        // child would change the timestamps again.
+        if let mode = node.mode {
+            try? fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: target.path)
+        }
+        if let modified = node.modifiedAt {
+            try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
         }
     }
 
@@ -288,6 +351,7 @@ public struct CloudRestoreEngine: Sendable {
         into staging: URL,
         report: inout CloudRestoreReport,
         packCache: PackCache,
+        journal: RestoreJournal,
         isCancelled: @Sendable () -> Bool
     ) async throws {
         let fm = FileManager.default
@@ -300,31 +364,41 @@ public struct CloudRestoreEngine: Sendable {
                 try fm.createDirectory(at: target, withIntermediateDirectories: true)
                 report.directoriesCreated += 1
             }
+            if let mode = file.mode {
+                try? fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: target.path)
+            }
+            if let modified = file.modifiedAt {
+                try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
+            }
             return
         case .symlink:
-            if fm.fileExists(atPath: target.path) {
-                report.filesSkippedExisting += 1
-                return
-            }
-            let linkTarget = file.linkTarget ?? ""
-            guard !linkTarget.isEmpty else { throw CloudRestoreError.fileHashMismatch(path: relative) }
-            try fm.createSymbolicLink(atPath: target.path, withDestinationPath: linkTarget)
-            report.symlinksRestored += 1
+            try await restoreSymlink(file, into: staging, report: &report, journal: journal)
             return
         case .file:
             break
         }
 
-        // Resume: a staged file that already hashes correctly is kept.
-        if fm.fileExists(atPath: target.path),
+        // Resume only a file that proves it is complete: size and hash must match.
+        if let existingSize = (try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil,
+           Int64(existingSize) == file.size,
+           let expected = file.contentHash,
            let existing = try? Data(contentsOf: target),
-           options.verifyHashes == false || CanonicalHashing.sha256Hex(existing) == file.contentHash {
+           CanonicalHashing.sha256Hex(existing) == expected {
             report.filesSkippedExisting += 1
+            try journal.append(RestoreJournalEntry(
+                snapshotID: report.snapshotID,
+                path: relative,
+                expectedSize: file.size,
+                expectedHash: expected,
+                restoredSize: Int64(existing.count),
+                completed: true
+            ))
             return
         }
 
-        fm.createFile(atPath: target.path, contents: nil)
-        guard let handle = try? FileHandle(forWritingTo: target) else {
+        let partial = target.appendingPathExtension("partial")
+        try? fm.removeItem(at: partial)
+        guard let handle = openNoFollow(partial) else {
             throw CloudRestoreError.fileHashMismatch(path: relative)
         }
         var hasher = SHA256()
@@ -333,10 +407,12 @@ public struct CloudRestoreEngine: Sendable {
             for chunk in file.chunks {
                 if isCancelled() {
                     try? handle.close()
+                    try? fm.removeItem(at: partial)
                     throw CloudRestoreError.cancelled
                 }
                 let data: Data
-                if let cache = options.cache,
+                if options.readPolicy == .cachePreferred,
+                   let cache = options.cache,
                    let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
                     data = cached
                     report.chunksFromCache += 1
@@ -360,7 +436,7 @@ public struct CloudRestoreEngine: Sendable {
                         objectID: chunk.objectID,
                         expectingSize: Int(chunk.plaintextSize)
                     )
-                    if let cache = options.cache {
+                    if options.readPolicy != .verifyRemote, let cache = options.cache {
                         try await cache.storeChunk(objectID: chunk.objectID, data: data)
                     }
                     report.chunksDownloaded += 1
@@ -369,30 +445,82 @@ public struct CloudRestoreEngine: Sendable {
                 try handle.write(contentsOf: data)
                 written += Int64(data.count)
             }
+            try handle.synchronize()
             try handle.close()
         } catch {
             try? handle.close()
+            try? fm.removeItem(at: partial)
             throw error
         }
 
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        if options.verifyHashes, let expected = file.contentHash, digest != expected {
-            try? fm.removeItem(at: target)
+        // Basic correctness cannot be disabled: length and full-file SHA-256 are
+        // always checked before the file becomes visible.
+        guard written == file.size else {
+            try? fm.removeItem(at: partial)
             throw CloudRestoreError.fileHashMismatch(path: relative)
         }
-        if let mode = file.mode {
-            try? fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: target.path)
+        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        if let expected = file.contentHash, digest != expected {
+            try? fm.removeItem(at: partial)
+            throw CloudRestoreError.fileHashMismatch(path: relative)
         }
-        if let modified = file.modifiedAt {
-            try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
+        if file.mode != nil || file.modifiedAt != nil {
+            var attributes: [FileAttributeKey: Any] = [:]
+            if let mode = file.mode {
+                attributes[.posixPermissions] = NSNumber(value: mode)
+            }
+            if let modified = file.modifiedAt {
+                attributes[.modificationDate] = modified
+            }
+            try? fm.setAttributes(attributes, ofItemAtPath: partial.path)
         }
-        // Bound the cache to roughly one file's worth of overshoot. Pinned entries
-        // still win, and a failure to enforce never affects the restored file.
-        if let cache = options.cache as? DiskChunkCache {
-            _ = try? await cache.enforceBudget()
+        if fm.fileExists(atPath: target.path) {
+            try fm.removeItem(at: target)
         }
+        try fm.moveItem(at: partial, to: target)
+        try journal.append(RestoreJournalEntry(
+            snapshotID: report.snapshotID,
+            path: relative,
+            expectedSize: file.size,
+            expectedHash: file.contentHash,
+            restoredSize: written,
+            completed: true
+        ))
         report.filesRestored += 1
         report.bytesWritten += written
+    }
+
+    private func restoreSymlink(
+        _ file: FileNode,
+        into staging: URL,
+        report: inout CloudRestoreReport,
+        journal: RestoreJournal
+    ) async throws {
+        let fm = FileManager.default
+        let target = try safeURL(for: file.path, in: staging)
+        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let linkTarget = file.linkTarget ?? ""
+        guard !linkTarget.isEmpty else { throw CloudRestoreError.fileHashMismatch(path: file.path) }
+        if fm.fileExists(atPath: target.path) {
+            // Resume is only safe if the existing link points at the same target;
+            // an unrelated symlink must never be silently accepted.
+            if let existing = try? fm.destinationOfSymbolicLink(atPath: target.path),
+               existing == linkTarget {
+                report.filesSkippedExisting += 1
+                return
+            }
+            throw CloudRestoreError.invalidPath(file.path)
+        }
+        try fm.createSymbolicLink(atPath: target.path, withDestinationPath: linkTarget)
+        try journal.append(RestoreJournalEntry(
+            snapshotID: report.snapshotID,
+            path: file.path,
+            expectedSize: file.size,
+            expectedHash: file.contentHash,
+            restoredSize: 0,
+            completed: true
+        ))
+        report.symlinksRestored += 1
     }
 
     // MARK: - Browsing / single-file read
@@ -465,20 +593,16 @@ public struct CloudRestoreEngine: Sendable {
                 throw CloudRestoreError.fileTooLarge(path: path, size: file.size, limit: maxBytes)
             }
         }
-        if options.verifyHashes, let expected = file.contentHash {
+        if let expected = file.contentHash {
             guard CanonicalHashing.sha256Hex(data) == expected else {
                 throw CloudRestoreError.fileHashMismatch(path: path)
             }
-        }
-        if let cache = options.cache as? DiskChunkCache {
-            _ = try? await cache.enforceBudget()
         }
         return data
     }
 
     func directoryNode(at path: String, rootNodeID: String) async throws -> DirectoryNode {
         let resolved = try await node(at: path, rootNodeID: rootNodeID)
-        // A path that names a file is not a directory.
         if path.isEmpty { return resolved }
         let parentPath = MerkleTreeBuilder.parentPath(of: path)
         let parent = parentPath.isEmpty
@@ -505,7 +629,9 @@ public struct CloudRestoreEngine: Sendable {
     /// One chunk: cache → pack → standalone object, then decrypt and check the
     /// plaintext size. Never trusts the local index over the actual bytes.
     func decodedChunk(_ chunk: ChunkRef, packCache: PackCache) async throws -> Data {
-        if let cache = options.cache, let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
+        if options.readPolicy == .cachePreferred,
+           let cache = options.cache,
+           let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
             return cached
         }
         let payload: Data
@@ -526,7 +652,7 @@ public struct CloudRestoreEngine: Sendable {
             objectID: chunk.objectID,
             expectingSize: Int(chunk.plaintextSize)
         )
-        if let cache = options.cache {
+        if options.readPolicy != .verifyRemote, let cache = options.cache {
             try await cache.storeChunk(objectID: chunk.objectID, data: data)
         }
         return data
@@ -543,6 +669,16 @@ public struct CloudRestoreEngine: Sendable {
                 ".codetime-restore-\(snapshotID.prefix(8))-\(String(hash, radix: 16))",
                 isDirectory: true
             )
+    }
+
+    private func openNoFollow(_ url: URL) -> FileHandle? {
+        let descriptor = open(
+            url.path,
+            O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC,
+            0o600
+        )
+        guard descriptor >= 0 else { return nil }
+        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
 
     // MARK: - Path safety
@@ -566,6 +702,49 @@ public struct CloudRestoreEngine: Sendable {
             throw CloudRestoreError.invalidPath(relativePath)
         }
         return candidate
+    }
+}
+
+/// Append-only restore journal. It is diagnostic/audit state kept outside the
+/// staging tree; completeness is always re-proved from the file bytes.
+struct RestoreJournalEntry: Codable, Sendable {
+    var snapshotID: String
+    var path: String
+    var expectedSize: Int64
+    var expectedHash: String?
+    var restoredSize: Int64
+    var completed: Bool
+}
+
+final class RestoreJournal: @unchecked Sendable {
+    private let handle: FileHandle?
+    private let lock = NSLock()
+
+    init(url: URL) throws {
+        _ = FileManager.default.createFile(atPath: url.path, contents: nil)
+        handle = try? FileHandle(forWritingTo: url)
+        handle?.seekToEndOfFile()
+        if handle == nil {
+            throw CloudRestoreError.invalidPath("无法写入恢复日志：\(url.lastPathComponent)")
+        }
+    }
+
+    func append(_ entry: RestoreJournalEntry) throws {
+        guard let handle else { throw CloudRestoreError.invalidPath("恢复日志不可写") }
+        var data = try JSONEncoder().encode(entry)
+        data.append(0x0A)
+        lock.lock(); defer { lock.unlock() }
+        try handle.write(contentsOf: data)
+    }
+
+    func flush() {
+        lock.lock(); defer { lock.unlock() }
+        try? handle?.synchronize()
+    }
+
+    func close() {
+        lock.lock(); defer { lock.unlock() }
+        try? handle?.close()
     }
 }
 

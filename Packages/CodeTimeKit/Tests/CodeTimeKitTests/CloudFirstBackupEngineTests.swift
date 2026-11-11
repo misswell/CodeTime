@@ -130,6 +130,14 @@ final class CloudFirstBackupEngineTests: XCTestCase {
             for chunk in newChunks { chunks[chunk.objectID] = chunk }
         }
 
+        func markChunkVerified(_ objectID: String, at date: Date) async throws {
+            lock.lock(); defer { lock.unlock() }
+            if var record = chunks[objectID] {
+                record.verifiedAt = date
+                chunks[objectID] = record
+            }
+        }
+
         func upsertSnapshot(_ record: SnapshotRecordV3) async throws {
             lock.lock(); defer { lock.unlock() }
             if let index = snapshots.firstIndex(where: { $0.snapshotID == record.snapshotID }) {

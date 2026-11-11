@@ -23,6 +23,16 @@ final class RestoreResumeTests: XCTestCase {
             try await base.readPack(packID)
         }
 
+        func readObjectIfPresent(_ objectID: String) async throws -> Data? {
+            lock.lock(); let failing = failingObjectID; lock.unlock()
+            if failing == objectID { throw Failure.injected }
+            return try await base.readObjectIfPresent(objectID)
+        }
+
+        func readPackIfPresent(_ packID: String) async throws -> Data? {
+            try await base.readPackIfPresent(packID)
+        }
+
         func readNode(_ nodeID: String) async throws -> DirectoryNode {
             try await base.readNode(nodeID)
         }

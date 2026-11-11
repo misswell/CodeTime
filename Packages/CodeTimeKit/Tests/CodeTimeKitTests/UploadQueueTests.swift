@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 @testable import BackupEngine
 @testable import SharedModels
+@testable import Persistence
 
 /// CT-159: the durable upload queue. Un-uploaded encrypted data must survive a
 /// failure, never be evicted to free space, and must resume without re-encoding.
@@ -79,7 +80,7 @@ final class UploadQueueTests: XCTestCase {
         let queue = UploadQueue(
             base: cloud,
             index: index,
-            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20, uploadConcurrency: 2)
+            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20, uploadConcurrency: 2, retryBaseDelay: 0)
         )
 
         let payload = Data(repeating: 0xAB, count: 4096)
@@ -121,7 +122,7 @@ final class UploadQueueTests: XCTestCase {
         let queue = UploadQueue(
             base: cloud,
             index: index,
-            configuration: .init(spoolRoot: spool, softLimitBytes: 5000)
+            configuration: .init(spoolRoot: spool, softLimitBytes: 5000, retryBaseDelay: 0)
         )
 
         let first = Data(repeating: 1, count: 4000)
@@ -177,7 +178,7 @@ final class UploadQueueTests: XCTestCase {
         let queue = UploadQueue(
             base: cloud,
             index: index,
-            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20)
+            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20, retryBaseDelay: 0)
         )
         let report = await queue.resumePending()
         XCTAssertEqual(report.alreadyPresent, 1)
@@ -185,6 +186,63 @@ final class UploadQueueTests: XCTestCase {
         XCTAssertTrue(spoolFiles(spool).isEmpty)
         let remaining = try await index.pendingUploads(state: nil, limit: 10)
         XCTAssertEqual(remaining.count, 0)
+    }
+
+    func testCT177_RetryBackoffIsDurableAcrossQueueInstances() async throws {
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("upload-backoff-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let spool = work.appendingPathComponent("spool", isDirectory: true)
+        let database = try SQLiteStore(path: work.appendingPathComponent("meta.sqlite").path)
+        let cloud = GatedCloud(base: InMemoryCloud())
+        cloud.offline = true
+
+        let firstQueue = UploadQueue(
+            base: cloud,
+            index: database,
+            configuration: .init(
+                spoolRoot: spool,
+                softLimitBytes: 1 << 20,
+                retryBaseDelay: 0.15,
+                retryMaxDelay: 0.15,
+                retryJitterFraction: 0
+            )
+        )
+        let payload = Data(repeating: 0x5A, count: 2048)
+        _ = try? await firstQueue.putObject(payload, objectID: objectID)
+
+        let stored = try await database.pendingUploads(state: .failed, limit: 10)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored.first?.retryCount, 1)
+        let nextAttempt = try XCTUnwrap(stored.first?.nextAttemptAt)
+        XCTAssertGreaterThan(nextAttempt, Date(), "失败任务必须持久化退避时间")
+
+        // A second process/launch must not ignore the backoff.
+        cloud.offline = false
+        let secondQueue = UploadQueue(
+            base: cloud,
+            index: database,
+            configuration: .init(
+                spoolRoot: spool,
+                softLimitBytes: 1 << 20,
+                retryBaseDelay: 0.15,
+                retryMaxDelay: 0.15,
+                retryJitterFraction: 0
+            )
+        )
+        let deferred = await secondQueue.resumePending()
+        XCTAssertEqual(deferred.deferred, 1)
+        XCTAssertEqual(deferred.uploaded, 0)
+        XCTAssertEqual(cloud.attempts, 1, "退避期间不得再次尝试上传")
+
+        try await Task.sleep(nanoseconds: 250_000_000)
+        let resumed = await secondQueue.resumePending()
+        XCTAssertEqual(resumed.uploaded, 1)
+        XCTAssertEqual(cloud.attempts, 2)
+        let remaining = try await database.pendingUploads(state: nil, limit: 10)
+        XCTAssertTrue(remaining.isEmpty)
+        await database.close()
     }
 
     func testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume() async throws {
@@ -203,7 +261,7 @@ final class UploadQueueTests: XCTestCase {
         let queue = UploadQueue(
             base: cloud,
             index: index,
-            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20)
+            configuration: .init(spoolRoot: spool, softLimitBytes: 1 << 20, retryBaseDelay: 0)
         )
         let projectID = UUID()
         let masterKey = Data("queue-test-key".utf8)

@@ -150,7 +150,7 @@ extension SQLiteStore {
         return found
     }
 
-    public func markChunkVerified(_ objectID: String, at date: Date = Date()) throws {
+    public func recordChunkVerified(_ objectID: String, at date: Date = Date()) throws {
         // Rewrite the whole record: the column and the JSON payload must agree,
         // otherwise a decode of the payload reports the chunk as unverified.
         guard var record = try chunkRecord(objectID) else { return }
@@ -333,6 +333,28 @@ extension SQLiteStore {
         try upsert("DELETE FROM v3_pending_uploads WHERE task_id = ?", [.text(taskID)])
     }
 
+    /// Persists the next retry time in the journal payload. No schema change is
+    /// needed: the payload is the durable record.
+    public func setUploadBackoff(
+        _ taskID: String,
+        state: UploadTaskState,
+        bumpRetry: Bool,
+        nextAttemptAt: Date?
+    ) throws {
+        try setUploadTaskState(taskID, state: state, bumpRetry: bumpRetry)
+        guard var record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) else {
+            return
+        }
+        record.nextAttemptAt = nextAttemptAt
+        record.state = state
+        if let payload = try? encode(record) {
+            try upsert(
+                "UPDATE v3_pending_uploads SET payload = ? WHERE task_id = ?",
+                [.blob(payload), .text(taskID)]
+            )
+        }
+    }
+
     public func pendingUploadCount() throws -> Int {
         try scalarInt("SELECT COUNT(*) FROM v3_pending_uploads;")
     }
@@ -451,6 +473,136 @@ extension SQLiteStore {
     public func latestMigrationPhase() throws -> String? {
         try migrationEvents(limit: 1).first?.phase
     }
+
+    // MARK: - Remote snapshot discovery cache
+
+    public func storeRemoteSnapshotRecords(_ records: [RemoteSnapshotRecord]) throws {
+        guard !records.isEmpty else { return }
+        try transaction {
+            for record in records {
+                let payload = try encode(record)
+                try upsert(
+                    """
+                    INSERT INTO v3_remote_snapshot_index
+                        (snapshot_id, project_id, device_id, format_version, commit_hash,
+                         manifest_hash, root_node_id, created_at, discovery_status,
+                         last_verified_at, payload)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(snapshot_id) DO UPDATE SET
+                        device_id=excluded.device_id,
+                        format_version=excluded.format_version,
+                        commit_hash=excluded.commit_hash,
+                        manifest_hash=excluded.manifest_hash,
+                        root_node_id=excluded.root_node_id,
+                        created_at=excluded.created_at,
+                        discovery_status=excluded.discovery_status,
+                        last_verified_at=excluded.last_verified_at,
+                        payload=excluded.payload
+                    """,
+                    [
+                        .text(record.snapshotID),
+                        .text(record.projectID.uuidString),
+                        .text(record.deviceID),
+                        .int(Int64(record.formatVersion)),
+                        .text(record.commitHash),
+                        .text(record.manifestHash),
+                        .text(record.rootNodeID),
+                        .double(record.createdAt.timeIntervalSince1970),
+                        .text(record.discoveryStatus.rawValue),
+                        record.lastVerifiedAt.map { .double($0.timeIntervalSince1970) } ?? .null,
+                        .blob(payload),
+                    ]
+                )
+            }
+        }
+    }
+
+    public func loadRemoteSnapshots(projectID: UUID, limit: Int = 1000) throws -> [RemoteSnapshotRecord] {
+        let rows = try query(
+            """
+            SELECT payload FROM v3_remote_snapshot_index
+            WHERE project_id = ? ORDER BY created_at DESC LIMIT ?
+            """,
+            [.text(projectID.uuidString), .int(Int64(limit))]
+        )
+        return try rows.compactMap { row in
+            guard case .blob(let data) = row[0] else { return nil }
+            return try decode(RemoteSnapshotRecord.self, from: data)
+        }
+    }
+
+    public func markRemoteSnapshot(_ snapshotID: String, status: RemoteSnapshotDiscoveryStatus) throws {
+        guard var record = try storedRemoteSnapshot(snapshotID) else { return }
+        record.discoveryStatus = status
+        try storeRemoteSnapshotRecords([record])
+    }
+
+    public func storedRemoteSnapshot(_ snapshotID: String) throws -> RemoteSnapshotRecord? {
+        let rows = try query(
+            "SELECT payload FROM v3_remote_snapshot_index WHERE snapshot_id = ?",
+            [.text(snapshotID)]
+        )
+        guard case .blob(let data)? = rows.first?.first else { return nil }
+        return try decode(RemoteSnapshotRecord.self, from: data)
+    }
+
+    public func deleteRemoteSnapshot(_ snapshotID: String) throws {
+        try upsert(
+            "DELETE FROM v3_remote_snapshot_index WHERE snapshot_id = ?",
+            [.text(snapshotID)]
+        )
+    }
+
+    // MARK: - Per-project migration records
+
+    public func upsertMigrationRecord(_ record: MigrationRecordV3) throws {
+        let payload = try encode(record)
+        try upsert(
+            """
+            INSERT INTO v3_migration_records
+                (migration_id, project_id, source_repository_id, baseline_snapshot_id,
+                 state, updated_at, payload)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(migration_id) DO UPDATE SET
+                baseline_snapshot_id=excluded.baseline_snapshot_id,
+                state=excluded.state,
+                updated_at=excluded.updated_at,
+                payload=excluded.payload
+            """,
+            [
+                .text(record.migrationID),
+                .text(record.projectID.uuidString),
+                .text(record.sourceRepositoryID),
+                record.baselineSnapshotID.map { .text($0) } ?? .null,
+                .text(record.state.rawValue),
+                .double(record.updatedAt.timeIntervalSince1970),
+                .blob(payload),
+            ]
+        )
+    }
+
+    public func migrationRecord(projectID: UUID) throws -> MigrationRecordV3? {
+        let rows = try query(
+            """
+            SELECT payload FROM v3_migration_records
+            WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1
+            """,
+            [.text(projectID.uuidString)]
+        )
+        guard case .blob(let data)? = rows.first?.first else { return nil }
+        return try decode(MigrationRecordV3.self, from: data)
+    }
+
+    public func migrationRecords(limit: Int = 100) throws -> [MigrationRecordV3] {
+        let rows = try query(
+            "SELECT payload FROM v3_migration_records ORDER BY updated_at DESC LIMIT ?",
+            [.int(Int64(limit))]
+        )
+        return try rows.compactMap { row in
+            guard case .blob(let data) = row[0] else { return nil }
+            return try decode(MigrationRecordV3.self, from: data)
+        }
+    }
 }
 
 // MARK: - Engine seam
@@ -505,8 +657,49 @@ extension SQLiteStore: CloudSnapshotIndex {
         try chunkRecords(objectIDs)
     }
 
+    public func markChunkVerified(_ objectID: String, at date: Date = Date()) async throws {
+        try recordChunkVerified(objectID, at: date)
+    }
+
     public func inFlightSnapshotCount() async throws -> Int {
         try inFlightSnapshotCount(now: Date())
+    }
+}
+
+extension SQLiteStore: RemoteSnapshotIndexing {
+    public func upsertRemoteSnapshots(_ records: [RemoteSnapshotRecord]) async throws {
+        try storeRemoteSnapshotRecords(records)
+    }
+
+    public func remoteSnapshots(projectID: UUID, limit: Int = 1000) async throws -> [RemoteSnapshotRecord] {
+        try loadRemoteSnapshots(projectID: projectID, limit: limit)
+    }
+
+    public func markRemoteSnapshotVerified(_ snapshotID: String, at date: Date = Date()) async throws {
+        guard var record = try storedRemoteSnapshot(snapshotID) else { return }
+        record.discoveryStatus = .verified
+        record.lastVerifiedAt = date
+        try storeRemoteSnapshotRecords([record])
+    }
+
+    public func removeRemoteSnapshot(_ snapshotID: String) async throws {
+        try deleteRemoteSnapshot(snapshotID)
+    }
+}
+
+extension SQLiteStore: UploadBackoffIndexing {
+    public func updateUploadBackoff(
+        _ taskID: String,
+        state: UploadTaskState,
+        bumpRetry: Bool,
+        nextAttemptAt: Date?
+    ) async throws {
+        try setUploadBackoff(
+            taskID,
+            state: state,
+            bumpRetry: bumpRetry,
+            nextAttemptAt: nextAttemptAt
+        )
     }
 }
 

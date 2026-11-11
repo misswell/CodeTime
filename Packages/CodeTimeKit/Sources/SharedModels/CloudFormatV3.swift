@@ -17,6 +17,80 @@ public enum CloudFormatV3 {
     public static let formatFile = "format.json"
 }
 
+/// Stable file identity as reported by `lstat`. ctime is included because a
+/// preserved mtime (or an atomic replacement) must still be detected; size+mtime
+/// alone is never sufficient to declare a file unchanged.
+public struct FileIdentity: Codable, Hashable, Sendable {
+    public var device: UInt64
+    public var inode: UInt64
+    public var size: Int64
+    /// Nanoseconds since 1970. Kept alongside `modified` for old call sites.
+    public var modifiedNanos: Int64
+    public var changedNanos: Int64
+    public var modified: Double
+    public var resourceIdentifier: String?
+
+    public init(
+        device: UInt64,
+        inode: UInt64,
+        size: Int64,
+        modified: Double,
+        changed: Double = 0,
+        resourceIdentifier: String? = nil
+    ) {
+        self.device = device
+        self.inode = inode
+        self.size = size
+        self.modified = modified
+        self.modifiedNanos = Int64(modified * 1_000_000_000)
+        self.changedNanos = Int64(changed * 1_000_000_000)
+        self.resourceIdentifier = resourceIdentifier
+    }
+
+    public init(
+        device: UInt64,
+        inode: UInt64,
+        size: Int64,
+        modifiedNanos: Int64,
+        changedNanos: Int64,
+        resourceIdentifier: String?
+    ) {
+        self.device = device
+        self.inode = inode
+        self.size = size
+        self.modifiedNanos = modifiedNanos
+        self.changedNanos = changedNanos
+        self.modified = Double(modifiedNanos) / 1_000_000_000
+        self.resourceIdentifier = resourceIdentifier
+    }
+
+    /// Whether two observations describe the same unchanged file.
+    ///
+    /// `resourceIdentifier` is only available from URL resource values; an
+    /// identity taken from an open descriptor or another API may legitimately
+    /// omit it. Compare it only when both sides provide one — inode, ctime, size
+    /// and mtime are the authoritative fields.
+    public func matches(
+        _ other: FileIdentity,
+        modifiedToleranceNanos: Int64 = 1_000_000_000
+    ) -> Bool {
+        guard device == other.device,
+              inode == other.inode,
+              size == other.size,
+              changedNanos == other.changedNanos,
+              abs(modifiedNanos - other.modifiedNanos) <= modifiedToleranceNanos else {
+            return false
+        }
+        if let mine = resourceIdentifier, let theirs = other.resourceIdentifier,
+           mine != theirs {
+            return false
+        }
+        return true
+    }
+
+    public var isZero: Bool { device == 0 && inode == 0 && size == 0 && modifiedNanos == 0 }
+}
+
 public enum NodeKind: String, Codable, Sendable, Hashable {
     case file
     case directory
@@ -61,6 +135,8 @@ public struct FileNode: Codable, Hashable, Sendable {
     /// SHA-256 of the whole file (plaintext), for end-to-end verification.
     public var contentHash: String?
     public var chunks: [ChunkRef]
+    /// Stable identity (dev/inode/size/mtime/ctime) used for incremental reuse.
+    public var identity: FileIdentity?
     public var nodeID: String
 
     public init(
@@ -72,6 +148,7 @@ public struct FileNode: Codable, Hashable, Sendable {
         linkTarget: String? = nil,
         contentHash: String? = nil,
         chunks: [ChunkRef] = [],
+        identity: FileIdentity? = nil,
         nodeID: String = ""
     ) {
         self.path = path
@@ -82,6 +159,7 @@ public struct FileNode: Codable, Hashable, Sendable {
         self.linkTarget = linkTarget
         self.contentHash = contentHash
         self.chunks = chunks
+        self.identity = identity
         self.nodeID = nodeID
     }
 
@@ -119,12 +197,24 @@ public struct DirectoryNode: Codable, Hashable, Sendable {
     public var path: String
     public var files: [FileNode]
     public var directories: [DirectoryEntry]
+    /// POSIX permission bits. Optional so existing nodes remain decodable.
+    public var mode: UInt16?
+    public var modifiedAt: Date?
     public var nodeID: String
 
-    public init(path: String, files: [FileNode], directories: [DirectoryEntry], nodeID: String = "") {
+    public init(
+        path: String,
+        files: [FileNode],
+        directories: [DirectoryEntry],
+        mode: UInt16? = nil,
+        modifiedAt: Date? = nil,
+        nodeID: String = ""
+    ) {
         self.path = path
         self.files = files
         self.directories = directories
+        self.mode = mode
+        self.modifiedAt = modifiedAt
         self.nodeID = nodeID
     }
 
@@ -150,6 +240,20 @@ public struct DirectoryNode: Codable, Hashable, Sendable {
 }
 
 /// Encrypted, uploaded as an object; referenced by its commit marker.
+/// Directory permissions/timestamps captured by the scanner and carried by the
+/// Merkle node so restore can reproduce Xcode-required modes.
+public struct DirectoryMetadata: Codable, Hashable, Sendable {
+    public var path: String
+    public var mode: UInt16?
+    public var modifiedAt: Date?
+
+    public init(path: String, mode: UInt16? = nil, modifiedAt: Date? = nil) {
+        self.path = path
+        self.mode = mode
+        self.modifiedAt = modifiedAt
+    }
+}
+
 public struct SnapshotManifest: Codable, Hashable, Sendable {
     public var snapshotID: String
     public var projectID: UUID
@@ -297,7 +401,12 @@ public enum CanonicalHashing {
 public enum UploadTaskState: String, Codable, Sendable, Hashable {
     case pending
     case uploading
+    /// Cloud confirmed the upload, but the staged file or journal row could not
+    /// be removed yet. A reconciler retries; it is not reported as complete.
+    case uploadedPendingCleanup
+    /// Cloud confirmed and local cleanup finished; the row is normally deleted.
     case uploaded
+    case completed
     case failed
 }
 
@@ -399,6 +508,9 @@ public struct PendingUploadV3: Codable, Hashable, Sendable {
     public var state: UploadTaskState
     public var retryCount: Int
     public var createdAt: Date
+    /// Earliest time a failed task may be retried. Persisted in the journal so a
+    /// relaunch cannot turn exponential backoff into a tight retry loop.
+    public var nextAttemptAt: Date?
 
     public init(
         taskID: String,
@@ -408,7 +520,8 @@ public struct PendingUploadV3: Codable, Hashable, Sendable {
         fileSize: Int64,
         state: UploadTaskState = .pending,
         retryCount: Int = 0,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        nextAttemptAt: Date? = nil
     ) {
         self.taskID = taskID
         self.objectID = objectID
@@ -418,6 +531,7 @@ public struct PendingUploadV3: Codable, Hashable, Sendable {
         self.state = state
         self.retryCount = retryCount
         self.createdAt = createdAt
+        self.nextAttemptAt = nextAttemptAt
     }
 }
 

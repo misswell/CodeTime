@@ -7,9 +7,86 @@ import CloudMirrorStore
 /// verification step proves exactly those versions instead of guessing.
 public actor MigrationBaselineRegistry {
     private var ids: [String] = []
-    public init() {}
-    public func record(_ snapshotID: String) { ids.append(snapshotID) }
+    private var records: [UUID: MigrationRecordV3] = [:]
+    private let journal: (any MigrationJournaling)?
+    private let clock: @Sendable () -> Date
+
+    public init(
+        journal: (any MigrationJournaling)? = nil,
+        clock: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.journal = journal
+        self.clock = clock
+    }
+
+    /// Writes a pending record before any baseline work starts. A record that
+    /// already exists is never reset, so a crash cannot lose the baseline ID.
+    public func ensurePending(projectID: UUID, sourceRepositoryID: String) async {
+        if records[projectID] != nil { return }
+        if let existing = try? await journal?.migrationRecord(projectID: projectID) {
+            records[projectID] = existing
+            return
+        }
+        let record = MigrationRecordV3(
+            migrationID: MigrationRecordV3.identifier(
+                projectID: projectID,
+                sourceRepositoryID: sourceRepositoryID
+            ),
+            projectID: projectID,
+            sourceRepositoryID: sourceRepositoryID,
+            state: .pending,
+            startedAt: clock(),
+            updatedAt: clock()
+        )
+        records[projectID] = record
+        try? await journal?.upsertMigrationRecord(record)
+    }
+
+    public func record(
+        _ snapshotID: String,
+        projectID: UUID,
+        sourceRepositoryID: String
+    ) async {
+        ids.append(snapshotID)
+        var record = records[projectID] ?? MigrationRecordV3(
+            migrationID: MigrationRecordV3.identifier(
+                projectID: projectID,
+                sourceRepositoryID: sourceRepositoryID
+            ),
+            projectID: projectID,
+            sourceRepositoryID: sourceRepositoryID,
+            startedAt: clock(),
+            updatedAt: clock()
+        )
+        record.baselineSnapshotID = snapshotID
+        record.state = .baselineCreated
+        record.updatedAt = clock()
+        records[projectID] = record
+        try? await journal?.upsertMigrationRecord(record)
+    }
+
+    public func markVerified(projectID: UUID, sourceRepositoryID: String) async {
+        guard var record = records[projectID] else { return }
+        record.state = .baselineVerified
+        record.updatedAt = clock()
+        records[projectID] = record
+        try? await journal?.upsertMigrationRecord(record)
+    }
+
+    public func markCompleted(projectID: UUID, sourceRepositoryID: String) async {
+        guard var record = records[projectID] else { return }
+        record.state = .completed
+        record.updatedAt = clock()
+        records[projectID] = record
+        try? await journal?.upsertMigrationRecord(record)
+    }
+
+    public func record(projectID: UUID) -> MigrationRecordV3? {
+        records[projectID]
+    }
+
     public func all() -> [String] { ids }
+    public func allRecords() -> [MigrationRecordV3] { Array(records.values) }
     public func reset() { ids.removeAll() }
 }
 
@@ -207,9 +284,31 @@ public struct LegacyKopiaCoordinator: Sendable, MigrationProbing {
     public func createNativeBaseline() async throws -> Bool {
         let projects = await activeProjects()
         guard !projects.isEmpty else { return true }
+        let sourceRepositoryID = repositoryID.uuidString
         for project in projects {
+            // Journal before work: a crash between these lines leaves a durable
+            // pending/baseline record instead of an untracked baseline.
+            await baselines.ensurePending(
+                projectID: project.id,
+                sourceRepositoryID: sourceRepositoryID
+            )
+            if let existing = await baselines.record(projectID: project.id),
+               let snapshotID = existing.baselineSnapshotID,
+               try await verifyNativeSnapshot(snapshotID) {
+                // Resume: the previous baseline is still valid. Do not create a
+                // second baseline for the same project.
+                await baselines.markVerified(
+                    projectID: project.id,
+                    sourceRepositoryID: sourceRepositoryID
+                )
+                continue
+            }
             guard let snapshotID = try await makeNativeBaseline(project) else { return false }
-            await baselines.record(snapshotID)
+            await baselines.record(
+                snapshotID,
+                projectID: project.id,
+                sourceRepositoryID: sourceRepositoryID
+            )
         }
         return true
     }
@@ -217,11 +316,17 @@ public struct LegacyKopiaCoordinator: Sendable, MigrationProbing {
     /// Proves the new format is restorable by verifying each baseline snapshot's
     /// manifest and every chunk it references.
     public func verifyNativeBaseline() async throws -> Bool {
-        let ids = await baselines.all()
+        let records = await baselines.allRecords()
+        let ids = Set(records.compactMap(\.baselineSnapshotID))
         let projects = await activeProjects()
         guard !ids.isEmpty || projects.isEmpty else { return false }
-        for id in ids {
-            guard try await verifyNativeSnapshot(id) else { return false }
+        for record in records {
+            guard let snapshotID = record.baselineSnapshotID,
+                  try await verifyNativeSnapshot(snapshotID) else { return false }
+            await baselines.markVerified(
+                projectID: record.projectID,
+                sourceRepositoryID: record.sourceRepositoryID
+            )
         }
         return true
     }
@@ -244,5 +349,13 @@ public struct LegacyKopiaCoordinator: Sendable, MigrationProbing {
         try fm.moveItem(at: repositoriesRoot, to: staging)
         try fm.removeItem(at: staging)
         try fm.createDirectory(at: repositoriesRoot, withIntermediateDirectories: true)
+        // The legacy data has been released only after every earlier phase
+        // verified the v3 baselines. Mark the durable project records complete.
+        for record in await baselines.allRecords() {
+            await baselines.markCompleted(
+                projectID: record.projectID,
+                sourceRepositoryID: record.sourceRepositoryID
+            )
+        }
     }
 }

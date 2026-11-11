@@ -39,7 +39,7 @@ enum SQLValue {
 /// * User configuration is written through `updateProjectConfig`, which validates a
 ///   revision, bumps it, and never touches runtime fields.
 public actor SQLiteStore {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 4
 
     public let path: String
     private var db: OpaquePointer?
@@ -84,6 +84,12 @@ public actor SQLiteStore {
             sqlite3_close(db)
             self.db = nil
         }
+    }
+
+    /// Bounds WAL growth after bulk work (GC, migration, a large backup). The
+    /// checkpoint is passive-safe and never blocks readers.
+    public func checkpointWAL() throws {
+        try exec("PRAGMA wal_checkpoint(TRUNCATE);")
     }
 
     // MARK: - Migration
@@ -325,6 +331,46 @@ public actor SQLiteStore {
                 );
                 """)
                 try exec(db, "PRAGMA user_version=3;")
+            }
+        }
+        if version < 4 {
+            // Remote snapshot discovery cache and per-project migration records.
+            // Both are additive: deleting them costs a re-discovery/rebaseline
+            // check, never any backup data.
+            try transaction(db) {
+                try exec(db, """
+                CREATE TABLE IF NOT EXISTS v3_remote_snapshot_index (
+                    snapshot_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    format_version INTEGER NOT NULL,
+                    commit_hash TEXT NOT NULL,
+                    manifest_hash TEXT NOT NULL,
+                    root_node_id TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    discovery_status TEXT NOT NULL,
+                    last_verified_at REAL,
+                    payload BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_v3_remote_snapshot_project
+                    ON v3_remote_snapshot_index(project_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_v3_remote_snapshot_device
+                    ON v3_remote_snapshot_index(device_id, project_id);
+
+                CREATE TABLE IF NOT EXISTS v3_migration_records (
+                    migration_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    source_repository_id TEXT NOT NULL,
+                    baseline_snapshot_id TEXT,
+                    state TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    payload BLOB NOT NULL,
+                    UNIQUE(project_id, source_repository_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_v3_migration_project
+                    ON v3_migration_records(project_id, updated_at DESC);
+                """)
+                try exec(db, "PRAGMA user_version=4;")
             }
         }
     }

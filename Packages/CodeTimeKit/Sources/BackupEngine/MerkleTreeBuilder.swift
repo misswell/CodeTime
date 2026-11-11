@@ -11,6 +11,7 @@ public struct ScannedFile: Sendable, Hashable {
     public var linkTarget: String?
     public var contentHash: String?
     public var chunks: [ChunkRef]
+    public var identity: FileIdentity?
 
     public init(
         path: String,
@@ -20,7 +21,8 @@ public struct ScannedFile: Sendable, Hashable {
         mode: UInt16? = nil,
         linkTarget: String? = nil,
         contentHash: String? = nil,
-        chunks: [ChunkRef] = []
+        chunks: [ChunkRef] = [],
+        identity: FileIdentity? = nil
     ) {
         self.path = path
         self.kind = kind
@@ -30,6 +32,7 @@ public struct ScannedFile: Sendable, Hashable {
         self.linkTarget = linkTarget
         self.contentHash = contentHash
         self.chunks = chunks
+        self.identity = identity
     }
 }
 
@@ -56,57 +59,74 @@ public struct BuiltTree: Sendable {
 public struct MerkleTreeBuilder: Sendable {
     public init() {}
 
-    public func build(files: [ScannedFile]) -> BuiltTree {
-        // Deterministic order and one node per path.
-        var byPath: [String: ScannedFile] = [:]
-        for file in files where !file.path.isEmpty {
-            byPath[file.path] = file
-        }
-        let sorted = byPath.values.sorted { $0.path < $1.path }
+    public func build(
+        files: [ScannedFile],
+        directoryMetadata: [String: DirectoryMetadata] = [:]
+    ) -> BuiltTree {
+        var copy = files
+        return buildInPlace(files: &copy, directoryMetadata: directoryMetadata)
+    }
+
+    /// In-place variant used by the backup engine: sorting and consuming the
+    /// scanner output directly avoids a second full array of `ScannedFile`
+    /// values while the tree is being constructed. The input array is empty on
+    /// return; callers must not use it afterwards.
+    public func buildInPlace(
+        files: inout [ScannedFile],
+        directoryMetadata: [String: DirectoryMetadata] = [:]
+    ) -> BuiltTree {
+        // Deterministic order and one node per path. Sorting in place is the
+        // single largest memory saving for 100k+ file projects.
+        files.sort { $0.path < $1.path }
 
         // Leaf nodes first.
         var fileNodesByParent: [String: [FileNode]] = [:]
         var allFiles: [FileNode] = []
         var childDirectories: [String: Set<String>] = [:]
+        var allDirectoryPaths: Set<String> = [""]
+        var previousPath: String?
 
-        for scanned in sorted {
+        for scanned in files {
+            guard !scanned.path.isEmpty else { continue }
+            // One node per path; if a caller passes duplicates, keep the first.
+            if scanned.path == previousPath { continue }
+            previousPath = scanned.path
+
             let parent = Self.parentPath(of: scanned.path)
             if scanned.kind == .directory {
                 // An explicitly scanned directory adds no leaf, only structure.
                 childDirectories[parent, default: []].insert(Self.lastComponent(of: scanned.path))
-                continue
-            }
-            let node = FileNode(
-                path: scanned.path,
-                kind: scanned.kind,
-                size: scanned.size,
-                modifiedAt: scanned.modifiedAt,
-                mode: scanned.mode,
-                linkTarget: scanned.linkTarget,
-                contentHash: scanned.contentHash,
-                chunks: scanned.chunks
-            ).withComputedID()
-            fileNodesByParent[parent, default: []].append(node)
-            allFiles.append(node)
-        }
-
-        // Every ancestor directory must exist, even when empty.
-        var allDirectoryPaths: Set<String> = [""]
-        for scanned in sorted {
-            if scanned.kind == .directory {
-                // An empty directory has no file beneath it to introduce its path
-                // — without this it would be referenced with an empty node ID.
                 allDirectoryPaths.insert(scanned.path)
+            } else {
+                allDirectoryPaths.insert(parent)
             }
-            var parent = Self.parentPath(of: scanned.path)
+
+            var ancestor = parent
+            while !ancestor.isEmpty {
+                allDirectoryPaths.insert(ancestor)
+                ancestor = Self.parentPath(of: ancestor)
+            }
+
             if scanned.kind != .directory {
-                allDirectoryPaths.insert(parent)
-            }
-            while !parent.isEmpty {
-                allDirectoryPaths.insert(parent)
-                parent = Self.parentPath(of: parent)
+                let node = FileNode(
+                    path: scanned.path,
+                    kind: scanned.kind,
+                    size: scanned.size,
+                    modifiedAt: scanned.modifiedAt,
+                    mode: scanned.mode,
+                    linkTarget: scanned.linkTarget,
+                    contentHash: scanned.contentHash,
+                    chunks: scanned.chunks,
+                    identity: scanned.identity
+                ).withComputedID()
+                fileNodesByParent[parent, default: []].append(node)
+                allFiles.append(node)
             }
         }
+        // The tree nodes own their chunk arrays; the scanner values are no longer
+        // needed while directories are assembled.
+        files.removeAll(keepingCapacity: false)
+
         for path in allDirectoryPaths where path != "" {
             childDirectories[Self.parentPath(of: path), default: []].insert(Self.lastComponent(of: path))
         }
@@ -132,7 +152,13 @@ public struct MerkleTreeBuilder: Sendable {
                     totalBytes: child?.totalBytes ?? 0
                 )
             }
-            let node = DirectoryNode(path: path, files: files, directories: entries).withComputedID()
+            let node = DirectoryNode(
+                path: path,
+                files: files,
+                directories: entries,
+                mode: directoryMetadata[path]?.mode,
+                modifiedAt: directoryMetadata[path]?.modifiedAt
+            ).withComputedID()
             built[path] = node
         }
 

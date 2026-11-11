@@ -5,20 +5,20 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"7eb52b82bed9ab6353a55661ce68c3e2671fa2c3","run":"202611110006","executed":263,"failures":0,"skipped":3,"passed":260,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试"]}
+{"commit":"9468ebaed9e76292fc83afee38f34f040134217b","run":"202611112125","executed":295,"failures":0,"skipped":3,"passed":292,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
 -->
 
 ## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 交付 Commit SHA | `7eb52b8`（流式读取修复、§17 性能验收与报告） |
-| CI Run | `202611110006`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
+| 交付 Commit SHA | `9468eba`（可靠性加固代码基线；报告提交紧随其后） |
+| CI Run | `202611112125`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
-| 门禁结果 | `PASS`，263 tests / 0 failures / 3 skipped |
-| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-167（165 required） |
-| 运行标识 | `202611110006`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
-| 门禁日志 | `Docs/Engineering/TestArtifacts/376ff89-regression-gate.log`（原始输出归档） |
+| 门禁结果 | `PASS`，295 tests / 0 failures / 3 skipped |
+| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-196（194 required） |
+| 运行标识 | `202611112125`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
+| 门禁日志 | `Docs/Engineering/TestArtifacts/9468eba-reliability-gate.log`（原始输出归档） |
 
 ## 2. 环境
 
@@ -32,13 +32,13 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ## 3. 测试规模
 
-- **全量门禁**：263 个 XCTest，260 通过，0 失败，3 跳过。
+- **全量门禁**：295 个 XCTest，292 通过，0 失败，3 跳过。
 - 跳过项均为人工/规模验收，登记在 `REGRESSION_INDEX.json` 的
   `manualAcceptance=true`：CT-037 百万文件、CT-044 磁盘写满、单机真实 iCloud 往返。
 - 规模测试（`CODETIME_SCALE_TESTS=1`）在门禁中真实执行 CT-036/CT-117 的规模变体。
 - 计数口径：`passed = executed - failures - skipped`，跳过项不计入通过。
 
-## 4. CodeTime 2.0 / Cloud Format v3 覆盖（CT-147 … CT-164）
+## 4. CodeTime 2.0 / Cloud Format v3 覆盖（CT-147 … CT-167）
 
 | 编号 | 覆盖内容 | 关键断言 |
 |---|---|---|
@@ -64,14 +64,32 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | CT-166 | 恢复续传 | 中断保留 staging；重试复用已校验文件；成功后原子移走 |
 | CT-167 | FSEvents 变化监听 | 事件去抖；最小变化间隔生效；FSEvents 仅优化，完整扫描兜底 |
 
-## 5. 可靠性与兼容回归
+## 5. 可靠性修复与加固覆盖（CT-168 … CT-196）
+
+| 编号 | 覆盖内容 | 关键断言 |
+|---|---|---|
+| CT-168 | Service → Adapter → Engine 取消 | 已开始上传后取消，不发布 commit；任务 interrupted；已上传对象保留 |
+| CT-169–CT-171 | SnapshotFormatResolver / 远端索引 / 设备 TTL | 远端 commit 是格式权威；本地无 commit 的 v3 不得降级 Kopia；索引可重建；设备列表 TTL 与失败不清空 |
+| CT-172 | 两服务实例跨设备 | B 发现 A、恢复、继续备份；A 不重启发现 B 新版本 |
+| CT-173–CT-174 | Runtime 配置指纹 | 存储模式/设备/缓存/Spool/书签变化使旧 Runtime 失效 |
+| CT-175–CT-176 | CloudAccessCoordinator | 上传确认后回读哈希；Node/Manifest/Commit/对象/包统一释放本地副本 |
+| CT-177 | 上传退避 | 指数退避 + 抖动持久化；重启不立即重试；失败任务永不删除 |
+| CT-178 | 迁移基线 Journal | 每项目稳定 migration ID；基线 ID 持久化；崩溃复用 |
+| CT-179–CT-182 | DiskChunkCache | 删除成功后才删索引；根外拒绝；不可访问报错保留；孤儿扫描 |
+| CT-183–CT-185 | RemoteIntegrityVerifier | 真正读取云端；缓存不能证明远端；Pack 全结构校验 |
+| CT-186–CT-187 | 恢复安全 | partial 文件不得当完整；目录元数据/符号链接不越界 |
+| CT-188–CT-189 | 跨进程 OperationLease | 共享备份/恢复与独占 GC/迁移互斥；释放幂等 |
+| CT-190–CT-193 | UploadJournalReconciler / Spool 租约 | 孤儿收养或隔离；缺文件对云端判定；同 Object 唯一写者 |
+| CT-194–CT-196 | GC 失败关闭 | 暂存/发布中不清扫；引用缺失先中止；保留策略保护最新版本 |
+
+## 6. 可靠性与兼容回归
 
 - CT-001 … CT-146：v2 云端发布、GC 安全、恢复、租约、并发、迁移、Schema、发布门禁全部保持通过。
 - v2/v3 并存：按版本归属选择引擎；跨格式 Diff 明确拒绝；v2 数据不被新引擎改写。
 - 加密：所有数据块、Manifest、目录节点均为 AEAD；恢复密钥丢失无法通过哈希恢复。
 - 节点加密在本轮加入，CT-151 重新覆盖 idempotent put/read。
 
-## 6. 未执行项（NOT RUN）
+## 7. 未执行项（NOT RUN）
 
 | 项目 | 原因 | 执行方式 |
 |---|---|---|
@@ -79,22 +97,24 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | 真实 Keychain 跨签名迁移 | **NOT RUN**：需要 Developer ID/Beta→Release 真机 | 按 `RELEASE_CHECKLIST.md` |
 | CT-044 磁盘写满 | **NOT RUN**：需要可控 ENOSPC 卷 | 独立 APFS 小容量卷注入 |
 | CT-037 百万文件压力测试 | **NOT RUN**：需要百万 inode 与独立卷 | `CODETIME_STRESS_TESTS=1` |
+| v3 100 万文件全量备份 | **NOT RUN**：本轮未生成百万文件 v3 数据集 | 独立卷执行 `V3Acceptance perf small 1000000 1024` |
+| 100 GB 全随机数据 | **NOT RUN**：本机可用空间不足 | 按任务书 §17 独立卷执行 |
 | v3 iCloud 本地副本驱逐真实行为 | **NOT RUN**：本地镜像不是 ubiquitous item | 真实 iCloud 容器中观察 `evictUbiquitousItem` 与空间变化 |
 | v3 100 GB 性能验收 | **NOT RUN**：本机无 100 GB 标准数据集 | 按任务书 §17 数据集执行并记录 |
 
-## 7. 门禁输出
+## 8. 门禁输出
 
 ```
 regression gate: PASS
-  executed: 263 tests, 0 failures
+  executed: 295 tests, 0 failures
   skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
 testCT044_DiskFullLeavesRepositoryUntouched
 testSingleMacICloudRoundTrip
-  index: CT-001 … CT-167 (165 required)
+  index: CT-001 … CT-196 (194 required)
   test-report check: PASS
 ```
 
-## 8. 性能与空间（真实执行，详见 V3_ACCEPTANCE_REPORT §2.2）
+## 9. 性能与空间（真实执行，详见 V3_ACCEPTANCE_REPORT §2.2）
 
 `Packages/CodeTimeKit/Sources/V3Acceptance` 是独立的验收工具（不属于门禁测试）。在根卷
 仅 11–23 GB 可用、外接卷 ACL 不可写的环境下，使用逻辑大小达标、部分物理随机数据的稀疏
@@ -104,7 +124,7 @@ testSingleMacICloudRoundTrip
 |---|---:|---:|---:|---:|---:|---:|
 | 10 GiB 单文件（全随机） | 126.4 s / 上传 8.42 GB | 改 1 KiB → 上传 1.84 MB / 1 对象 | 477 MB | 4.97 MB | 0 | 8.42 GB |
 | 100 GiB 单文件（1 GiB 随机） | 465.8 s / 读取 100 GiB | 未执行 | 379 MB | 6.58 MB | 0 | 789 MB |
-| 100k × 1 KiB 文件 | 40.8 s / 53 packs | 重跑 0 B / 100k 复用 | 545 MB | 247 MB | 0 | 167.7 MB |
+| 100k × 1 KiB 文件（2026-11-11 复测） | 36.6 s / 49 packs | 重跑 0 B / 100k 复用 | 538 MB（目标 350 MB，未达标） | 287 MB（目标显著降低，未达标） | 0 | 181.3 MB |
 
 门禁内置 300 文件砂箱仍保留：备份 1.65 s、恢复 2.42 s、峰值 133.5 MB。
 全随机 100 GB、1000 版本、ENOSPC 与真实 iCloud 驱逐仍为 **NOT RUN**，原因见验收报告。

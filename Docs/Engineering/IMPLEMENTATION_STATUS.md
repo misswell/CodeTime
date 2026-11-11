@@ -121,19 +121,21 @@
 | V3-18 | Dashboard/设置/恢复界面 v3 空间与迁移 | `DashboardView.swift`、`SettingsView.swift`、`OnboardingView.swift` | App 构建通过；视觉验收 NOT RUN | PARTIAL |
 | V3-19 | FSEvents 变化监听（去抖 + 最小间隔） | `ProjectChangeMonitor.swift` | CT-167 | PASS |
 | V3-20 | v3 双 Mac 与 100 GB 验收 | — | 未执行 | NOT RUN |
+| V3-21 | 可靠性加固：GC Epoch/设备确认/失败关闭、真实云端校验、格式解析、取消、恢复安全、上传退避、Runtime 指纹、缓存删除顺序 | 见 `RELIABILITY_HARDENING.md` | CT-168…CT-196 | PASS（真实 iCloud/百万文件/100 GB 除外） |
 
 ## 当前测试汇总
 
 | 类别 | 数量 | 结果 |
 |---|---|---|
-| 全量测试（本机） | 263 | 0 失败，3 跳过 |
+| 全量测试（本机） | 295 | 0 失败，3 跳过 |
 | CT-001…CT-044 | 44 | 42 通过，2 跳过（单机 iCloud 验收、CT-044 磁盘满；CT-036/037 在 scale=1 下真实执行） |
 | CT-045…CT-057 | 13 | 13 通过 |
 | CT-058…CT-116 | 59 | 59 通过 |
 | CT-117…CT-128 | 12 | 12 通过（第七轮） |
 | CT-129…CT-146 | 18 | 18 通过（云端零配置与门禁） |
 | CT-147…CT-167 | 21 | 21 通过（CodeTime 2.0 / v3） |
-| Schema 迁移 | 2 | 通过（user_version 3） |
+| CT-168…CT-196 | 29 | 29 通过（可靠性修复与加固） |
+| Schema 迁移 | 2 | 通过（user_version 4） |
 | 静态发布检查 | 4 个脚本 | 通过（公证、stapling、真实 iCloud 未执行） |
 | 真实 iCloud 双 Mac / v3 100 GB | — | NOT RUN |
 

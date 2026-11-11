@@ -30,6 +30,8 @@ public struct AppPaths: Sendable {
     public let migrationRequest: URL
     /// The unified shared/exclusive lifecycle lock file path.
     public let lifecycleLockPath: URL
+    /// Shared (backup/restore) vs exclusive (GC/migration) runtime lock.
+    public let runtimeLease: URL
 
     public init(root: URL) {
         self.root = root
@@ -55,6 +57,7 @@ public struct AppPaths: Sendable {
         self.migrationLock = lifecycleDir.appendingPathComponent("migration.lock")
         self.migrationRequest = lifecycleDir.appendingPathComponent("migration-request.json")
         self.lifecycleLockPath = lifecycleDir.appendingPathComponent("lifecycle.lock")
+        self.runtimeLease = lifecycleDir.appendingPathComponent("runtime-lease.lock")
     }
 
     public static func standard() throws -> AppPaths {

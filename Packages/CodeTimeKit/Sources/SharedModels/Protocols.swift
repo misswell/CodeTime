@@ -147,6 +147,8 @@ public protocol CloudSnapshotIndex: Sendable {
     /// pack reference — the object does not exist as a standalone cloud item.
     func knownChunks(_ objectIDs: [String]) async throws -> [String: ChunkRecordV3]
     func upsertChunks(_ chunks: [ChunkRecordV3]) async throws
+    /// A chunk is marked verified only after a real remote download/decrypt.
+    func markChunkVerified(_ objectID: String, at: Date) async throws
     func upsertSnapshot(_ record: SnapshotRecordV3) async throws
     func updateSnapshot(
         _ snapshotID: String,
@@ -170,6 +172,10 @@ public protocol CloudSnapshotIndex: Sendable {
 public protocol CloudObjectSource: Sendable {
     func readObject(_ objectID: String) async throws -> Data
     func readPack(_ packID: String) async throws -> Data
+    /// Strict optional read: `nil` means the object is definitively absent.
+    /// Inaccessible/corrupt data throws instead of being reported as missing.
+    func readObjectIfPresent(_ objectID: String) async throws -> Data?
+    func readPackIfPresent(_ packID: String) async throws -> Data?
     func readNode(_ nodeID: String) async throws -> DirectoryNode
     func readManifestPayload(projectID: UUID, snapshotID: String) async throws -> Data
     func readCommit(projectID: UUID, snapshotID: String) async throws -> SnapshotCommit?
@@ -191,29 +197,70 @@ public protocol ChunkCacheIndex: Sendable {
     func cacheBytes() async throws -> Int64
 }
 
+/// Optional durable backoff metadata for pending uploads. Implementations that do
+/// not provide it still work; retries then have no persisted delay (tests).
+public protocol UploadBackoffIndexing: Sendable {
+    func updateUploadBackoff(
+        _ taskID: String,
+        state: UploadTaskState,
+        bumpRetry: Bool,
+        nextAttemptAt: Date?
+    ) async throws
+}
+
+/// Cache of versions discovered in remote commit markers, including versions
+/// written by other devices. It can be deleted and rebuilt at any time; it never
+/// decides whether a snapshot exists in the cloud.
+public protocol RemoteSnapshotIndexing: Sendable {
+    func upsertRemoteSnapshots(_ records: [RemoteSnapshotRecord]) async throws
+    func remoteSnapshots(projectID: UUID, limit: Int) async throws -> [RemoteSnapshotRecord]
+    func markRemoteSnapshotVerified(_ snapshotID: String, at: Date) async throws
+    func removeRemoteSnapshot(_ snapshotID: String) async throws
+}
+
 /// Migration journal seam (lives here so Persistence can conform without
 /// depending on the engine).
 public protocol MigrationJournaling: Sendable {
     func appendMigrationEvent(_ entry: MigrationJournalEntryV3) async throws
     func latestMigrationPhase() async throws -> String?
+    /// Stable per-project migration record, persisted before any work starts.
+    func upsertMigrationRecord(_ record: MigrationRecordV3) async throws
+    func migrationRecord(projectID: UUID) async throws -> MigrationRecordV3?
+    func migrationRecords(limit: Int) async throws -> [MigrationRecordV3]
 }
 
 /// Enumerable, deletable view of Cloud Format v3 used only by garbage
 /// collection. Kept separate from `CloudObjectSource` so a reader cannot delete.
 public protocol CloudGarbageCollectible: CloudObjectSource {
-    func projectIDs() async throws -> [UUID]
-    /// Strict enumeration: unlike `commits`, an unreadable directory or an
-    /// undecodable marker throws instead of looking like "no versions".
+    // Strict enumeration. A missing directory may be an empty namespace, but an
+    // unreadable one must throw; GC never treats an I/O failure as "no data".
+    func strictProjectIDs() async throws -> [UUID]
     func strictCommits(projectID: UUID) async throws -> [SnapshotCommit]
-    func standaloneObjectIDs() async throws -> [String]
-    func packIDs() async throws -> [String]
-    func nodeIDs() async throws -> [String]
+    func strictStandaloneObjectIDs() async throws -> [String]
+    func strictPackIDs() async throws -> [String]
+    func strictNodeIDs() async throws -> [String]
+    func strictTombstonePayloads() async throws -> [Data]
+
     func deleteObject(_ objectID: String) async throws
     func deletePack(_ packID: String) async throws
     func deleteNode(_ nodeID: String) async throws
     func deleteManifest(projectID: UUID, snapshotID: String) async throws
     func deleteCommit(projectID: UUID, snapshotID: String) async throws
-    func tombstonePayloads() async throws -> [Data]
     func putTombstone(_ payload: Data, id: String) async throws
     func deleteTombstone(id: String) async throws
+
+    // GC Epoch / device confirmation. Same-device records are written by this
+    // process; acknowledgements for other devices are only ever written by those
+    // devices. iCloud is not used as an atomic CAS lock.
+    func deviceRecordsStrict() async throws -> [GCDeviceRecord]
+    func writeDeviceRecord(_ record: GCDeviceRecord) async throws
+    func writeEpoch(_ epoch: GCEpoch) async throws
+    func epochsStrict() async throws -> [GCEpoch]
+    func writeEpochAck(_ ack: GCEpochAck) async throws
+    func epochAcks(epochID: String) async throws -> [String: Date]
+
+    /// Moves a commit marker out of the readable namespace without destroying it.
+    func hideCommit(projectID: UUID, snapshotID: String, epochID: String) async throws
+    func hiddenCommitIDs(epochID: String) async throws -> [String]
+    func deleteHiddenCommit(projectID: UUID, snapshotID: String, epochID: String) async throws
 }

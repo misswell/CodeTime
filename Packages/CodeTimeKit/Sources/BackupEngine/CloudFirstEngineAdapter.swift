@@ -114,7 +114,11 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         let report = try await coordinator.createSnapshot(
             projectID: project.id,
             root: root,
-            matcher: matcher
+            matcher: matcher,
+            // Propagate the caller's cancellation all the way to scan/chunk/
+            // upload/commit. The service cancels the work Task; `Task.isCancelled`
+            // is observed by the engine's cooperative checks.
+            isCancelled: { Task.isCancelled }
         )
         guard report.committed else {
             throw CodeTimeError.cloudPublishIncomplete("快照未提交（缺少 Commit Marker）")
@@ -254,7 +258,8 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         )
     }
 
-    public func diff(from snapshotA: String, to snapshotB: String) async throws -> SnapshotDiff {        let projectA = try await projectID(for: snapshotA)
+    public func diff(from snapshotA: String, to snapshotB: String) async throws -> SnapshotDiff {
+        let projectA = try await projectID(for: snapshotA)
         let projectB = try await projectID(for: snapshotB)
         guard projectA == projectB else {
             throw CodeTimeError.unsupported("只能比较同一项目的快照")
@@ -318,7 +323,10 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         var chunks = 0
         var files = 0
         var errors: [String] = []
-        let packCache = PackCache(limit: 4)
+        // Remote-only verification: no DiskChunkCache is passed here, and the
+        // verifier reads actual object/pack bytes. A cache hit can never prove a
+        // cloud object exists.
+        let verifier = RemoteIntegrityVerifier(masterKey: masterKey, source: source)
 
         func walk(_ node: DirectoryNode) async throws {
             for file in node.files {
@@ -329,10 +337,8 @@ public struct CloudFirstEngineAdapter: BackupEngine {
                     do {
                         var hasher = SHA256()
                         for chunk in file.chunks {
-                            let data = try await reader.decodedChunk(
-                                chunk,
-                                packCache: packCache
-                            )
+                            let data = try await verifier.verifiedChunk(chunk)
+                            try await index.markChunkVerified(chunk.objectID, at: clock())
                             hasher.update(data: data)
                             bytes += Int64(data.count)
                             chunks += 1

@@ -18,6 +18,14 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     /// read through either API behaves like one logical object store.
     private(set) var packedLocations: [String: (packID: String, offset: Int, length: Int)] = [:]
     private(set) var tombstones: [String: Data] = [:]
+    private(set) var deviceRecords: [String: GCDeviceRecord] = [:]
+    private(set) var epochs: [String: GCEpoch] = [:]
+    private(set) var epochAcksByEpoch: [String: [String: Date]] = [:]
+    private(set) var hiddenCommits: [String: [String: SnapshotCommit]] = [:]
+    /// Test hook: make every GC enumeration throw.
+    var failEnumeration = false
+    /// Test hook: make node/pack/object deletion throw.
+    var failDeletes = false
     private(set) var readPackCount = 0
     private(set) var readObjectCount = 0
     /// Optional corruption hook: objectID → replacement payload.
@@ -34,6 +42,17 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
         if objects[objectID] != nil { return false }
         objects[objectID] = payload
         return true
+    }
+
+    func readObjectIfPresent(_ objectID: String) async throws -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("remote-read") }
+        if let corrupt = corruptObjects[objectID] { return corrupt }
+        if let data = objects[objectID] { return data }
+        if let location = packedLocations[objectID], let pack = packs[location.packID] {
+            return pack.subdata(in: location.offset..<(location.offset + location.length))
+        }
+        return nil
     }
 
     func readObject(_ objectID: String) async throws -> Data {
@@ -72,6 +91,12 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     func hasPack(_ packID: String) async throws -> Bool {
         lock.lock(); defer { lock.unlock() }
         return packs[packID] != nil
+    }
+
+    func readPackIfPresent(_ packID: String) async throws -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("remote-read") }
+        return packs[packID]
     }
 
     func readPack(_ packID: String) async throws -> Data {
@@ -127,6 +152,11 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
 
     /// Corrupts the stored bytes behind an object, whether it is standalone or
     /// inside a pack. Used by restore tests to prove AEAD/hash failures abort.
+    func replacePack(_ packID: String, with payload: Data) {
+        lock.lock(); defer { lock.unlock() }
+        packs[packID] = payload
+    }
+
     func corruptObject(_ objectID: String) {
         lock.lock(); defer { lock.unlock() }
         if objects[objectID] != nil {
@@ -148,46 +178,61 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
 }
 
 extension InMemoryCloud: CloudGarbageCollectible {
-    func projectIDs() async throws -> [UUID] {
+    func strictProjectIDs() async throws -> [UUID] {
         lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("projects") }
         return Array(Set(commits.values.map(\.projectID)))
     }
 
     func strictCommits(projectID: UUID) async throws -> [SnapshotCommit] {
         lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("commits") }
         return commits.values
             .filter { $0.projectID == projectID }
             .sorted { $0.committedAt < $1.committedAt }
     }
 
-    func standaloneObjectIDs() async throws -> [String] {
+    func strictStandaloneObjectIDs() async throws -> [String] {
         lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("objects") }
         return Array(objects.keys)
     }
 
-    func packIDs() async throws -> [String] {
+    func strictPackIDs() async throws -> [String] {
         lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("packs") }
         return Array(packs.keys)
     }
 
-    func nodeIDs() async throws -> [String] {
+    func strictNodeIDs() async throws -> [String] {
         lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("nodes") }
         return Array(nodes.keys)
+    }
+
+    func strictTombstonePayloads() async throws -> [Data] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("tombstones") }
+        return Array(tombstones.values)
     }
 
     func deleteObject(_ objectID: String) async throws {
         lock.lock(); defer { lock.unlock() }
+        if failDeletes { throw Failure.objectMissing("delete-failed") }
         objects.removeValue(forKey: objectID)
+        corruptObjects.removeValue(forKey: objectID)
     }
 
     func deletePack(_ packID: String) async throws {
         lock.lock(); defer { lock.unlock() }
+        if failDeletes { throw Failure.objectMissing("delete-failed") }
         packs.removeValue(forKey: packID)
         packedLocations = packedLocations.filter { $0.value.packID != packID }
     }
 
     func deleteNode(_ nodeID: String) async throws {
         lock.lock(); defer { lock.unlock() }
+        if failDeletes { throw Failure.objectMissing("delete-failed") }
         nodes.removeValue(forKey: nodeID)
     }
 
@@ -201,11 +246,6 @@ extension InMemoryCloud: CloudGarbageCollectible {
         commits.removeValue(forKey: snapshotID)
     }
 
-    func tombstonePayloads() async throws -> [Data] {
-        lock.lock(); defer { lock.unlock() }
-        return Array(tombstones.values)
-    }
-
     func putTombstone(_ payload: Data, id: String) async throws {
         lock.lock(); defer { lock.unlock() }
         tombstones[id] = payload
@@ -214,6 +254,71 @@ extension InMemoryCloud: CloudGarbageCollectible {
     func deleteTombstone(id: String) async throws {
         lock.lock(); defer { lock.unlock() }
         tombstones.removeValue(forKey: id)
+    }
+
+    // MARK: - GC Epochs
+
+    func deviceRecordsStrict() async throws -> [GCDeviceRecord] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("devices") }
+        return Array(deviceRecords.values)
+    }
+
+    func writeDeviceRecord(_ record: GCDeviceRecord) async throws {
+        lock.lock(); defer { lock.unlock() }
+        deviceRecords[record.deviceID] = record
+    }
+
+    func writeEpoch(_ epoch: GCEpoch) async throws {
+        lock.lock(); defer { lock.unlock() }
+        if let existing = epochs[epoch.id] {
+            guard existing.candidates == epoch.candidates,
+                  existing.planDigest == epoch.planDigest,
+                  existing.retainedSnapshots == epoch.retainedSnapshots,
+                  existing.initiatorDeviceID == epoch.initiatorDeviceID else {
+                throw Failure.manifestHashMismatch
+            }
+        }
+        epochs[epoch.id] = epoch
+    }
+
+    func epochsStrict() async throws -> [GCEpoch] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("epochs") }
+        return Array(epochs.values)
+    }
+
+    func writeEpochAck(_ ack: GCEpochAck) async throws {
+        lock.lock(); defer { lock.unlock() }
+        var current = epochAcksByEpoch[ack.epochID] ?? [:]
+        if current[ack.deviceID] == nil { current[ack.deviceID] = ack.acknowledgedAt }
+        epochAcksByEpoch[ack.epochID] = current
+    }
+
+    func epochAcks(epochID: String) async throws -> [String: Date] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("acks") }
+        return epochAcksByEpoch[epochID] ?? [:]
+    }
+
+    func hideCommit(projectID: UUID, snapshotID: String, epochID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        if let commit = commits.removeValue(forKey: snapshotID) {
+            hiddenCommits[epochID, default: [:]][snapshotID] = commit
+        } else if hiddenCommits[epochID]?[snapshotID] == nil {
+            throw Failure.commitMissing(snapshotID)
+        }
+    }
+
+    func hiddenCommitIDs(epochID: String) async throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("hidden") }
+        return Array((hiddenCommits[epochID] ?? [:]).keys)
+    }
+
+    func deleteHiddenCommit(projectID: UUID, snapshotID: String, epochID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        hiddenCommits[epochID]?.removeValue(forKey: snapshotID)
     }
 }
 
@@ -254,6 +359,14 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
     func upsertChunks(_ newChunks: [ChunkRecordV3]) async throws {
         lock.lock(); defer { lock.unlock() }
         for chunk in newChunks { chunks[chunk.objectID] = chunk }
+    }
+
+    func markChunkVerified(_ objectID: String, at date: Date) async throws {
+        lock.lock(); defer { lock.unlock() }
+        if var record = chunks[objectID] {
+            record.verifiedAt = date
+            chunks[objectID] = record
+        }
     }
 
     func upsertSnapshot(_ record: SnapshotRecordV3) async throws {
@@ -322,6 +435,21 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
     func inFlightSnapshotCount() async throws -> Int {
         lock.lock(); defer { lock.unlock() }
         return snapshots.filter { !$0.isCommitted }.count
+    }
+}
+
+extension InMemoryIndex: UploadBackoffIndexing {
+    func updateUploadBackoff(
+        _ taskID: String,
+        state: UploadTaskState,
+        bumpRetry: Bool,
+        nextAttemptAt: Date?
+    ) async throws {
+        lock.lock(); defer { lock.unlock() }
+        guard let index = uploads.firstIndex(where: { $0.taskID == taskID }) else { return }
+        uploads[index].state = state
+        uploads[index].nextAttemptAt = nextAttemptAt
+        if bumpRetry { uploads[index].retryCount += 1 }
     }
 }
 

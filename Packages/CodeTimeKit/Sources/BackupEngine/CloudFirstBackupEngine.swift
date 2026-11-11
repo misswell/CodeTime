@@ -178,7 +178,8 @@ public struct CloudFirstBackupEngine: Sendable {
         if isCancelled() { throw CloudFirstEngineError.cancelled }
 
         let scanner = ProjectScanner(matcher: matcher, options: scanOptions)
-        let scan = scanner.scan(root: root)
+        var scan = scanner.scan(root: root, isCancelled: isCancelled)
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
         if !scan.isComplete && !options.allowIncompleteScan {
             throw CloudFirstEngineError.scanIncomplete(
                 reason: scan.truncatedReason ?? "项目扫描不完整",
@@ -186,8 +187,8 @@ public struct CloudFirstBackupEngine: Sendable {
             )
         }
 
-        let previousFiles = try await index.fileNodes(projectID: projectID)
-        let previousByPath = Dictionary(previousFiles.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        var previousFiles = try await index.fileNodes(projectID: projectID)
+        var previousByPath = Dictionary(previousFiles.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let parent = try await index
             .snapshotRecords(projectID: projectID, limit: 20)
             .first { $0.isCommitted }
@@ -229,6 +230,11 @@ public struct CloudFirstBackupEngine: Sendable {
         }
         report.filesRemoved = previousByPath.keys.filter { !seen.contains($0) }.count
         report.filesChanged = pending.count
+        // The reuse decision is complete. Release the previous index and path map
+        // before chunking: holding a second copy of every FileNode through the
+        // upload phase is what makes large projects exceed the memory budget.
+        previousFiles.removeAll(keepingCapacity: false)
+        previousByPath.removeAll(keepingCapacity: false)
 
         if isCancelled() { throw CloudFirstEngineError.cancelled }
 
@@ -241,6 +247,10 @@ public struct CloudFirstBackupEngine: Sendable {
                 let window = min(options.uploadConcurrency, pending.count)
 
                 func enqueue() {
+                    // Cancellation stops scheduling NEW files; files already in
+                    // flight finish uploading their current chunk and are allowed
+                    // to settle before the snapshot is abandoned.
+                    guard !isCancelled() else { return }
                     guard nextOffset < pending.count else { return }
                     let offset = nextOffset
                     let entry = pending[offset]
@@ -277,7 +287,9 @@ public struct CloudFirstBackupEngine: Sendable {
             }
         }
 
-        // Flush packs and rewrite the references that landed in one.
+        // Flush packs and rewrite the references that landed in one. A cancelled
+        // run still lets an in-progress pack finish: those bytes are safe to reuse
+        // and deleting them would only waste work; it must not publish, though.
         if let packBuffer {
             do {
                 try await packBuffer.flush()
@@ -301,19 +313,27 @@ public struct CloudFirstBackupEngine: Sendable {
             }
         }
 
-        // Structural entries (empty directories) must survive a restore.
-        var scannedFiles: [ScannedFile] = produced.map { node in
-            ScannedFile(
-                path: node.path,
-                kind: node.kind,
-                size: node.size,
-                modifiedAt: node.modifiedAt,
-                mode: node.mode,
-                linkTarget: node.linkTarget,
-                contentHash: node.contentHash,
-                chunks: node.chunks
+        // Structural entries (empty directories) must survive a restore. Build
+        // the ScannedFile array in place and release the FileNode array so the
+        // two full representations do not coexist longer than necessary.
+        var scannedFiles: [ScannedFile] = []
+        scannedFiles.reserveCapacity(produced.count + scan.entries.count)
+        for node in produced {
+            scannedFiles.append(
+                ScannedFile(
+                    path: node.path,
+                    kind: node.kind,
+                    size: node.size,
+                    modifiedAt: node.modifiedAt,
+                    mode: node.mode,
+                    linkTarget: node.linkTarget,
+                    contentHash: node.contentHash,
+                    chunks: node.chunks,
+                    identity: node.identity
+                )
             )
         }
+        produced.removeAll(keepingCapacity: false)
         for entry in scan.entries where entry.kind == .directory {
             scannedFiles.append(
                 ScannedFile(
@@ -326,18 +346,38 @@ public struct CloudFirstBackupEngine: Sendable {
             )
         }
 
-        let tree = MerkleTreeBuilder().build(files: scannedFiles)
+        var directoryMetadata: [String: DirectoryMetadata] = [:]
+        for entry in scan.entries where entry.kind == .directory {
+            directoryMetadata[entry.path] = DirectoryMetadata(
+                path: entry.path, mode: entry.mode, modifiedAt: entry.modifiedAt
+            )
+        }
+        // From here on the run publishes metadata. A cancelled run must leave the
+        // version invisible: uploaded objects stay reusable, but no nodes,
+        // manifest or commit marker are published.
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
+        let tree = MerkleTreeBuilder().buildInPlace(
+            files: &scannedFiles,
+            directoryMetadata: directoryMetadata
+        )
+        // The scanner entries are no longer needed once the tree owns the
+        // metadata; drop them before node/manifest publication.
+        directoryMetadata.removeAll(keepingCapacity: false)
+        scan.entries.removeAll(keepingCapacity: false)
 
         // Nodes are content addressed: unchanged subtrees upload nothing.
         var nodesUploaded = 0
         for node in tree.directories {
+            if isCancelled() { throw CloudFirstEngineError.cancelled }
             if try await sink.putNode(node) { nodesUploaded += 1 }
         }
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
         if try await sink.putNode(tree.root) { nodesUploaded += 1 }
         report.nodesUploaded = nodesUploaded
         report.nodeCount = tree.nodeCount
         report.totalBytes = tree.totalBytes
 
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
         let manifest = SnapshotManifest(
             snapshotID: snapshotID,
             projectID: projectID,
@@ -370,6 +410,7 @@ public struct CloudFirstBackupEngine: Sendable {
         )
         try await index.upsertSnapshot(record)
 
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
         let manifestHash = try await sink.putManifest(
             sealedManifest,
             projectID: projectID,
@@ -380,7 +421,9 @@ public struct CloudFirstBackupEngine: Sendable {
         try await index.upsertSnapshot(record)
 
         // Commit last. If this throws, the version stays invisible — the correct
-        // outcome for a half-published snapshot.
+        // outcome for a half-published snapshot. Cancellation is checked here, at
+        // the last point where publishing can still be prevented.
+        if isCancelled() { throw CloudFirstEngineError.cancelled }
         let commit = SnapshotCommit(
             snapshotID: snapshotID,
             projectID: projectID,
@@ -471,7 +514,8 @@ public struct CloudFirstBackupEngine: Sendable {
                 mode: entry.mode,
                 linkTarget: entry.linkTarget,
                 contentHash: CanonicalHashing.sha256Hex(Data((entry.linkTarget ?? "").utf8)),
-                chunks: []
+                chunks: [],
+                identity: entry.identity
             ).withComputedID()
             return (node, FileOutcome())
         case .directory:
@@ -489,14 +533,25 @@ public struct CloudFirstBackupEngine: Sendable {
         while true {
             attempt += 1
             if isCancelled() { throw CloudFirstEngineError.cancelled }
-            let before = ProjectScanner.identity(of: url)
+            // Open once and read from this descriptor. A path swap after opening
+            // cannot redirect the bytes; O_NOFOLLOW rejects a symlink planted at
+            // the final component.
+            let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            guard descriptor >= 0 else {
+                if attempt >= options.maxReadAttempts {
+                    throw CloudFirstEngineError.fileReadFailed(path: entry.path, detail: "无法打开文件")
+                }
+                continue
+            }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            let before = ProjectScanner.identity(descriptor: descriptor)
 
             var refs: [ChunkRef] = []
             var digest = SHA256()
             var outcome = FileOutcome()
 
             do {
-                var iterator = try FastCDCChunker(config: options.chunker).makeIterator(ofFile: url)
+                var iterator = FastCDCChunker(config: options.chunker).makeIterator(handle: handle)
                 while let chunk = try iterator.next(isCancelled: isCancelled) {
                     if isCancelled() { throw CloudFirstEngineError.cancelled }
                     digest.update(data: chunk.data)
@@ -562,19 +617,25 @@ public struct CloudFirstBackupEngine: Sendable {
                     )
                 }
             } catch let error as ChunkerError {
+                if case .cancelled = error {
+                    throw CloudFirstEngineError.cancelled
+                }
                 throw CloudFirstEngineError.fileReadFailed(path: entry.path, detail: "\(error)")
             } catch let error as UploadQueueError {
                 throw Self.mapUploadError(error)
             } catch let error as CloudFirstEngineError {
                 throw error
             } catch {
+                if isCancelled() || error is CancellationError {
+                    throw CloudFirstEngineError.cancelled
+                }
                 throw CloudFirstEngineError.fileReadFailed(
                     path: entry.path,
                     detail: error.localizedDescription
                 )
             }
 
-            let after = ProjectScanner.identity(of: url)
+            let after = ProjectScanner.identity(descriptor: descriptor)
             if let before, let after, before != after {
                 // The file changed while streaming: discard and retry rather than
                 // publish chunks that never existed in one consistent state.
@@ -585,14 +646,17 @@ public struct CloudFirstBackupEngine: Sendable {
             }
 
             let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
+            let modified = before.map { Date(timeIntervalSince1970: Double($0.modifiedNanos) / 1_000_000_000) }
+                ?? entry.modifiedAt
             let node = FileNode(
                 path: entry.path,
                 kind: .file,
                 size: outcome.bytesRead,
-                modifiedAt: entry.modifiedAt,
+                modifiedAt: modified,
                 mode: entry.mode,
                 contentHash: hash,
-                chunks: refs
+                chunks: refs,
+                identity: before
             ).withComputedID()
             return (node, outcome)
         }
@@ -624,10 +688,10 @@ public struct CloudFirstBackupEngine: Sendable {
             return previous.linkTarget == entry.linkTarget
         }
         guard previous.size == entry.size, previous.contentHash != nil else { return false }
-        let previousModified = previous.modifiedAt?.timeIntervalSince1970 ?? 0
-        let current = entry.modifiedAt?.timeIntervalSince1970 ?? 0
-        // Filesystems differ in sub-second precision; 1s tolerance avoids churn.
-        return abs(previousModified - current) <= 1
+        // Without a stored identity (old index) content is re-read once; a size
+        // and mtime match alone must never be treated as proof.
+        guard let previousIdentity = previous.identity else { return false }
+        return previousIdentity.matches(entry.identity)
     }
 }
 

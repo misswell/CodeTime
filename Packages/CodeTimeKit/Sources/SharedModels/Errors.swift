@@ -256,3 +256,108 @@ public enum CodeTimeError: LocalizedError, Sendable, Equatable {
         }
     }
 }
+/// Stable, user-visible error classification. Raw localized strings are for
+/// humans; these codes are for logs, support and retry decisions.
+public enum CodeTimeDiagnosticCode: String, Codable, Sendable, CaseIterable {
+    case scanFailed = "scan_failed"
+    case fileChangedDuringBackup = "file_changed_during_backup"
+    case fileTypeUnsupported = "file_type_unsupported"
+    case backupCancelled = "backup_cancelled"
+    case uploadFailed = "upload_failed"
+    case uploadRetryExhausted = "upload_retry_exhausted"
+    case spoolFull = "spool_full"
+    case iCloudUnavailable = "icloud_unavailable"
+    case iCloudUploadIncomplete = "icloud_upload_incomplete"
+    case iCloudDownloadFailed = "icloud_download_failed"
+    case remoteObjectMissing = "remote_object_missing"
+    case remoteObjectCorrupted = "remote_object_corrupted"
+    case manifestInvalid = "manifest_invalid"
+    case commitMissing = "commit_missing"
+    case snapshotFormatUnsupported = "snapshot_format_unsupported"
+    case restoreFailed = "restore_failed"
+    case restoreCancelled = "restore_cancelled"
+    case restoreIntegrityFailed = "restore_integrity_failed"
+    case gcAborted = "gc_aborted"
+    case gcReferenceIncomplete = "gc_reference_incomplete"
+    case gcLockUnavailable = "gc_lock_unavailable"
+    case migrationFailed = "migration_failed"
+    case storageFull = "storage_full"
+    case databaseCorrupted = "database_corrupted"
+    case backupEngineMissing = "backup_engine_missing"
+    case storageUnavailable = "storage_unavailable"
+    case backupFailed = "backup_failed"
+    case operationCancelled = "operation_cancelled"
+    case verificationFailed = "verification_failed"
+}
+
+public extension CodeTimeError {
+    var diagnosticCode: CodeTimeDiagnosticCode {
+        switch self {
+        case .kopiaNotFound:
+            return .backupEngineMissing
+        case .repositoryUnavailable, .repositoryBusy, .repositoryStateForbidden,
+             .repositoryIdentityMismatch, .unauthorized, .securityScopeUnavailable,
+             .bookmarkFailed:
+            return .storageUnavailable
+        case .repositoryMissing:
+            return .storageUnavailable
+        case .repositoryCorrupted, .gcJournalCorrupted:
+            return .databaseCorrupted
+        case .commandFailed, .invalidOutput, .processExecutionFailed, .outputTruncated,
+             .retryExhausted, .schedulerLeaseExpired, .leaseConflict:
+            return .backupFailed
+        case .snapshotNotFound:
+            return .commitMissing
+        case .pathOutsideProject, .destinationExists, .fileTooLarge:
+            return .restoreFailed
+        case .cloudNotConfigured, .cloudSetupUnavailable, .cloudStateUnknown,
+             .cloudContainerMismatch:
+            return .iCloudUnavailable
+        case .cloudPublishIncomplete, .cloudUploadFailed:
+            return .iCloudUploadIncomplete
+        case .integrityFailure, .objectHashMismatch, .objectQuarantined, .emptyManifest:
+            return .remoteObjectCorrupted
+        case .manifestUnreadable, .manifestNotDownloaded:
+            return .iCloudDownloadFailed
+        case .manifestCorrupted:
+            return .manifestInvalid
+        case .manifestVersionUnsupported:
+            return .snapshotFormatUnsupported
+        case .objectMissing, .generationNotFound:
+            return .remoteObjectMissing
+        case .recoveryKeyUnavailable:
+            return .restoreFailed
+        case .cancelled, .projectDeleted, .backupAlreadyRunning:
+            return .operationCancelled
+        case .unsupported:
+            return .snapshotFormatUnsupported
+        case .gcUnsafe:
+            return .gcAborted
+        case .restoreInterrupted:
+            return .restoreCancelled
+        case .restoreVerificationFailed:
+            return .restoreIntegrityFailed
+        case .restoreSourceUnavailable, .restoreKeyMismatch, .noRecoveryCandidate:
+            return .restoreFailed
+        case .migrationFailed, .migrationConflict:
+            return .migrationFailed
+        case .insufficientDiskSpace:
+            return .storageFull
+        case .pathOverlap:
+            return .scanFailed
+        case .searchTruncated, .diffUnavailable, .verificationUnavailable:
+            return .verificationFailed
+        }
+    }
+
+    /// Whether an automatic retry could plausibly succeed. Cancellation is never
+    /// retried; a local permanent conflict is not either.
+    var isRetryable: Bool {
+        switch self {
+        case .cancelled, .backupAlreadyRunning, .projectDeleted:
+            return false
+        default:
+            return !isPermanent
+        }
+    }
+}

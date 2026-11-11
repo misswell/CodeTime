@@ -196,6 +196,8 @@ public actor CodeTimeService {
     public nonisolated let keychain: KeychainStore
     public nonisolated let logger: FileLogger
     public nonisolated let gitInspector: GitInspector
+    /// Cross-process backup/restore vs maintenance exclusion.
+    public nonisolated let operationLeases: OperationLeaseManager
 
     private let kopiaBinaryURL: URL?
     private var device: DeviceIdentity?
@@ -209,6 +211,7 @@ public actor CodeTimeService {
     private var v3AdapterCache: CloudFirstEngineAdapter?
     private var v3StoreRootCache: URL?
     private var v3RestoreCache: DiskChunkCache?
+    private var v3RuntimeFingerprint: RuntimeConfigurationFingerprint?
     /// A downloaded legacy repository used to browse/restore old versions after
     /// the local Kopia repository was released (§14.4). Released when idle.
     private var legacyRecoveryEngine: KopiaBackupEngine?
@@ -250,6 +253,7 @@ public actor CodeTimeService {
         self.keychain = keychain
         self.logger = FileLogger(fileURL: paths.logs.appendingPathComponent("codetime.log"))
         self.gitInspector = GitInspector()
+        self.operationLeases = OperationLeaseManager(path: paths.runtimeLease.path)
         self.kopiaBinaryURL = kopiaBinaryURL ?? KopiaBinary.locate()
         self.hardwareUUIDProvider = hardwareUUIDProvider ?? { PlatformIdentity.currentHardwareUUID() }
     }
@@ -294,9 +298,11 @@ public actor CodeTimeService {
                 repositoryStateCache = .missing
                 await logger.error("v3 云端结构不可用：\(error.localizedDescription)")
             }
+            _ = await reconcileV3Uploads()
             if let resumed = await resumeV3Uploads(), resumed.failed > 0 {
                 await logger.warning("启动时仍有 \(resumed.failed) 个待上传任务失败，数据保留在 spool")
             }
+            _ = await processV3GCEpochs()
         } else {
         let engine = try await currentEngine()
         // Only an uninitialized repository may be created. Missing, corrupted or
@@ -575,7 +581,40 @@ public actor CodeTimeService {
         v3QueueCache = nil
         v3AdapterCache = nil
         v3StoreRootCache = nil
+        v3RuntimeFingerprint = nil
         v3RestoreCache = nil
+    }
+
+    /// A cached Store/Queue/Source/Adapter set is only valid for the exact
+    /// configuration that produced it. In-flight uploads keep their old queue
+    /// alive until they settle (the spool and journal are durable); new work gets
+    /// a fresh, internally consistent stack.
+    private func ensureV3Runtime(settings: AppSettings) async throws -> RuntimeConfigurationFingerprint {
+        let fingerprint = RuntimeConfigurationFingerprint(
+            settings: settings,
+            deviceID: try currentDevice().id.uuidString
+        )
+        if let previous = v3RuntimeFingerprint, previous != fingerprint {
+            await logger.info(
+                "运行配置已变化（\(previous.storageMode)/\(previous.engineMode) → "
+                + "\(fingerprint.storageMode)/\(fingerprint.engineMode)），重建 v3 运行实例"
+            )
+            v3StoreCache = nil
+            v3SourceCache = nil
+            v3QueueCache = nil
+            v3AdapterCache = nil
+            v3StoreRootCache = nil
+            v3RestoreCache = nil
+        }
+        v3RuntimeFingerprint = fingerprint
+        return fingerprint
+    }
+
+    /// The identity of the runtime that would serve the current settings. Used by
+    /// diagnostics and by tests that prove a settings change cannot reuse old
+    /// instances.
+    public func currentRuntimeFingerprint() async throws -> RuntimeConfigurationFingerprint {
+        try await ensureV3Runtime(settings: try await currentSettings())
     }
 
     // MARK: - Cloud-first (v3) stack
@@ -593,6 +632,7 @@ public actor CodeTimeService {
 
     func currentV3Store() async throws -> CloudObjectStoreV3 {
         let settings = try await currentSettings()
+        _ = try await ensureV3Runtime(settings: settings)
         let root = try await v3StorageRoot(settings: settings)
         if let v3StoreCache, v3StoreRootCache == root { return v3StoreCache }
 
@@ -629,6 +669,7 @@ public actor CodeTimeService {
     /// after recovery; writes always go to this Mac's namespace.
     func currentV3Source() async throws -> CloudMultiDeviceStoreV3 {
         let settings = try await currentSettings()
+        _ = try await ensureV3Runtime(settings: settings)
         let root = try await v3StorageRoot(settings: settings)
         if let v3SourceCache {
             return v3SourceCache
@@ -650,6 +691,7 @@ public actor CodeTimeService {
 
     func currentUploadQueue() async throws -> UploadQueue {
         let settings = try await currentSettings()
+        _ = try await ensureV3Runtime(settings: settings)
         let store = try await currentV3Store()
         if let v3QueueCache { return v3QueueCache }
         let encoder = ObjectEncoder(masterKey: try keychain.masterKey())
@@ -694,6 +736,7 @@ public actor CodeTimeService {
     /// The v3 engine as seen by the shared `BackupEngine` surface.
     func currentV3Engine() async throws -> CloudFirstEngineAdapter {
         let settings = try await currentSettings()
+        _ = try await ensureV3Runtime(settings: settings)
         let store = try await currentV3Store()
         let queue = try await currentUploadQueue()
         let source = try await currentV3Source()
@@ -812,13 +855,91 @@ public actor CodeTimeService {
     /// Picks the format that actually owns a snapshot. In v3 mode historical
     /// Kopia snapshots stay readable; the reverse is also true.
     private func engine(for snapshotID: String) async throws -> any BackupEngine {
-        let isV3 = ((try? await database.snapshotRecord(snapshotID)) ?? nil) != nil
-        if isV3 { return try await currentV3Engine() }
-        let local = try await currentEngine()
-        if await local.repositoryState() == .ready {
-            return local
+        let resolved = try await resolveSnapshot(snapshotID)
+        switch resolved.format {
+        case .v3:
+            guard resolved.discoveryStatus != .corrupted else {
+                throw CodeTimeError.manifestCorrupted(
+                    "快照 \(snapshotID) 的提交标记存在，但 Manifest 无法通过校验"
+                )
+            }
+            return try await currentV3Engine()
+        case .v2, .kopia:
+            let local = try await currentEngine()
+            if await local.repositoryState() == .ready {
+                return local
+            }
+            return try await legacyEngineForSnapshot(snapshotID)
+        case .unknown:
+            throw CodeTimeError.unsupported(
+                "快照 \(snapshotID) 的格式版本为 \(resolved.formatVersion)，当前版本不支持"
+            )
         }
-        return try await legacyEngineForSnapshot(snapshotID)
+    }
+
+    /// Remote commit markers are the authority for a snapshot's format. A local
+    /// SQLite row is only consulted to detect a half-published v3 snapshot (which
+    /// must fail instead of silently becoming a Kopia restore).
+    func resolveSnapshot(_ snapshotID: String) async throws -> ResolvedSnapshot {
+        let localProjectID = try await database.snapshot(id: snapshotID)?.projectID
+        let localRecord = (try? await database.snapshotRecord(snapshotID)) ?? nil
+        guard let projectID = localProjectID ?? localRecord?.projectID else {
+            throw SnapshotFormatError.snapshotNotFound(snapshotID: snapshotID)
+        }
+        let localSnapshot = try await database.snapshot(id: snapshotID)
+        let settings = try await currentSettings()
+        // In Kopia mode a legacy snapshot does not need a v3 container at all.
+        // Only take this shortcut when this device has no v3 publication row and
+        // the remote discovery cache does not know the ID; a real v3 version is
+        // still resolved through its commit marker.
+        if settings.engineMode != .cloudFirst, localRecord == nil, let localSnapshot {
+            let remoteKnown = (try? await database.remoteSnapshots(
+                projectID: projectID, limit: 5000
+            ))?.contains(where: { $0.snapshotID == snapshotID }) ?? false
+            if !remoteKnown {
+                return Self.legacyResolution(localSnapshot)
+            }
+        }
+
+        let source: CloudMultiDeviceStoreV3
+        do {
+            source = try await currentV3Source()
+        } catch CodeTimeError.cloudNotConfigured {
+            guard localRecord == nil, let localSnapshot else {
+                throw SnapshotFormatError.commitMissing(snapshotID: snapshotID)
+            }
+            return Self.legacyResolution(localSnapshot)
+        }
+        let resolver = SnapshotFormatResolver(
+            masterKey: try keychain.masterKey(),
+            source: source,
+            localSnapshotProbe: { [database] id in
+                try? await database.snapshotRecord(id)
+            },
+            legacyProbe: { [database] id, projectID in
+                guard let snapshot = try? await database.snapshot(id: id),
+                      snapshot.projectID == projectID else { return nil }
+                // A local v3 publication row is handled before this probe; reaching
+                // here means the version is genuinely legacy.
+                if (try? await database.snapshotRecord(id)) != nil { return nil }
+                return Self.legacyResolution(snapshot)
+            }
+        )
+        return try await resolver.resolve(snapshotID: snapshotID, projectID: projectID)
+    }
+
+    private static func legacyResolution(_ snapshot: Snapshot) -> ResolvedSnapshot {
+        let format: SnapshotFormat = snapshot.cloudGenerationID == nil ? .kopia : .v2
+        return ResolvedSnapshot(
+            snapshotID: snapshot.id,
+            projectID: snapshot.projectID,
+            deviceID: "",
+            formatVersion: format == .v2 ? 2 : 1,
+            rootNodeID: nil,
+            createdAt: snapshot.createdAt,
+            format: format,
+            discoveryStatus: .discovered
+        )
     }
 
     /// Old versions remain restorable after the local repository is gone: download
@@ -857,6 +978,39 @@ public actor CodeTimeService {
         legacyRecoveryEngine = nil
         legacyRecoveryLastUsedAt = nil
         await logger.info("已清理旧版临时恢复仓库")
+    }
+
+    /// Reconciles spool bytes with the upload journal after a crash. It never
+    /// deletes an unidentifiable file; those are quarantined and reported.
+    @discardableResult
+    public func reconcileV3Uploads() async -> UploadReconcileReport? {
+        do {
+            let settings = try await currentSettings()
+            guard settings.engineMode == .cloudFirst else { return nil }
+            let encoder = ObjectEncoder(masterKey: try keychain.masterKey())
+            let reconciler = UploadJournalReconciler(
+                spoolRoot: paths.spoolPending,
+                index: database,
+                cloud: try await currentV3Store(),
+                validate: { payload, id, isPack in
+                    if isPack {
+                        return (try? ObjectPackValidator.validate(payload: payload)) != nil
+                    }
+                    return (try? encoder.decode(payload, objectID: id)) != nil
+                }
+            )
+            let report = await reconciler.reconcile()
+            if !report.errors.isEmpty || !report.quarantined.isEmpty || report.failedTasks > 0 {
+                await logger.warning(
+                    "待上传日志核对：采纳 \(report.adoptedFiles)，已确认清理 \(report.removedConfirmedTasks)，"
+                    + "缺文件 \(report.missingFiles)，隔离 \(report.quarantined.count)，失败 \(report.failedTasks)"
+                )
+            }
+            return report
+        } catch {
+            await logger.warning("待上传日志核对失败：\(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Retries the durable upload queue. Called at launch once the v3 engine is
@@ -1010,6 +1164,13 @@ public actor CodeTimeService {
     /// legacy engine and its data stay exactly as they were.
     @discardableResult
     public func runBackupMigration(releaseLegacyLocalSpace: Bool = false) async -> MigrationStatus {
+        let runtimeLease: OperationLease
+        do {
+            runtimeLease = try operationLeases.acquire(.exclusive, timeout: 30)
+        } catch {
+            return MigrationStatus(phase: .blocked, detail: "备份/恢复任务正在运行，迁移稍后重试", requiresUserAction: true)
+        }
+        defer { runtimeLease.release() }
         let settings: AppSettings
         do {
             settings = try await currentSettings()
@@ -1082,10 +1243,19 @@ public actor CodeTimeService {
             legacyRoot: paths.legacyKopia,
             snapshotIDs: { [database] in
                 let all = (try? await database.snapshots(limit: 100_000)) ?? []
+                var remoteByProject: [UUID: Set<String>] = [:]
+                for projectID in Set(all.map(\.projectID)) {
+                    if let records = try? await database.remoteSnapshots(
+                        projectID: projectID, limit: 5000
+                    ) {
+                        remoteByProject[projectID] = Set(records.map(\.snapshotID))
+                    }
+                }
                 var legacy: [String] = []
                 for snapshot in all {
                     let isV3 = ((try? await database.snapshotRecord(snapshot.id)) ?? nil) != nil
-                    if !isV3 { legacy.append(snapshot.id) }
+                    let isRemoteV3 = remoteByProject[snapshot.projectID]?.contains(snapshot.id) == true
+                    if !isV3 && !isRemoteV3 { legacy.append(snapshot.id) }
                 }
                 return legacy
             },
@@ -1117,7 +1287,10 @@ public actor CodeTimeService {
                     cacheURL: root.appendingPathComponent("cache", isDirectory: true),
                     logsURL: root.appendingPathComponent("logs", isDirectory: true)
                 )
-            }
+            },
+            // The baseline registry is journal-backed: each project's baseline ID
+            // survives a crash and is reused instead of creating another version.
+            baselines: MigrationBaselineRegistry(journal: database)
         )
     }
 
@@ -1504,10 +1677,30 @@ public actor CodeTimeService {
         // may legitimately be absent after a machine migration.
         let fresh: [Snapshot]
         if settings.engineMode == .cloudFirst {
+            // Refresh the remote discovery cache first. It is only a cache; the
+            // commit marker remains the authority for what exists.
+            let source = try await currentV3Source()
+            // Another Mac may have published while this process was running. A
+            // user-visible refresh must not wait for the device-list TTL.
+            try? await source.refreshDeviceList(force: true)
+            let resolver = SnapshotFormatResolver(
+                masterKey: try keychain.masterKey(),
+                source: source,
+                localSnapshotProbe: { [database] id in try? await database.snapshotRecord(id) },
+                legacyProbe: { _, _ in nil }
+            )
+            if let remoteIndex = database as? RemoteSnapshotIndexing {
+                do {
+                    try await resolver.refreshRemoteIndex(projectID: projectID, index: remoteIndex)
+                } catch {
+                    await logger.warning("远端快照索引刷新失败：\(error.localizedDescription)")
+                }
+            }
             var v3 = try await currentV3Engine().listSnapshots(project: project)
             // Historical Kopia versions stay visible after the switch; they are
             // still restorable through the legacy coordinator.
-            var knownV3: Set<String> = []
+            var knownV3 = Set((try? await database.remoteSnapshots(projectID: projectID, limit: 5000))?
+                .map(\.snapshotID) ?? [])
             for snapshot in cached {
                 if ((try? await database.snapshotRecord(snapshot.id)) ?? nil) != nil {
                     knownV3.insert(snapshot.id)
@@ -1571,6 +1764,17 @@ public actor CodeTimeService {
         }
     }
 
+    /// Called when the app returns to the foreground or the iCloud container
+    /// changes, so a Mac that came online is discovered without a restart.
+    public func refreshCloudDeviceList() async {
+        guard let source = try? await currentV3Source() else { return }
+        do {
+            try await source.refreshDeviceList(force: true)
+        } catch {
+            await logger.warning("刷新跨设备列表失败：\(error.localizedDescription)")
+        }
+    }
+
     private func refreshRepositoryStateCache() async {
         do {
             if try await currentSettings().engineMode == .cloudFirst {
@@ -1616,6 +1820,11 @@ public actor CodeTimeService {
             backupGateClosed = false
         }
 
+        // A destructive GC/migration holds the exclusive side of this lock. No
+        // job row is created until the shared side is granted, so a busy
+        // maintenance run cannot leave behind an orphaned "running" job.
+        let runtimeLease = try operationLeases.acquire(.shared, timeout: 30)
+        defer { runtimeLease.release() }
         let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
         let leaseDuration: TimeInterval = 90
         // Check the project and claim the job in one SQLite write transaction.
@@ -1882,7 +2091,11 @@ public actor CodeTimeService {
         query: String,
         limits: SearchLimits = .default
     ) async throws -> FileSearchResult {
-        if ((try? await database.snapshotRecord(snapshotID)) ?? nil) != nil {
+        let resolved = try await resolveSnapshot(snapshotID)
+        if resolved.format == .v3 {
+            guard resolved.discoveryStatus != .corrupted else {
+                throw CodeTimeError.manifestCorrupted("快照 \(snapshotID) 的 Manifest 无法通过校验")
+            }
             return try await currentV3Engine().searchFiles(
                 snapshotID: snapshotID, query: query, limits: limits
             )
@@ -1901,14 +2114,14 @@ public actor CodeTimeService {
               try await database.snapshot(id: snapshotB)?.projectID == projectID else {
             throw CodeTimeError.unsupported("只能比较同一项目的快照")
         }
-        let aIsV3 = ((try? await database.snapshotRecord(snapshotA)) ?? nil) != nil
-        let bIsV3 = ((try? await database.snapshotRecord(snapshotB)) ?? nil) != nil
-        guard aIsV3 == bIsV3 else {
+        let resolvedA = try await resolveSnapshot(snapshotA)
+        let resolvedB = try await resolveSnapshot(snapshotB)
+        guard resolvedA.format == resolvedB.format else {
             throw CodeTimeError.unsupported("v2 与 v3 版本使用不同的存储格式，暂不支持跨格式比较")
         }
-        let engine: any BackupEngine = aIsV3
+        let engine: any BackupEngine = resolvedA.format == .v3
             ? try await currentV3Engine()
-            : try await currentEngine()
+            : try await engine(for: snapshotA)
         return try await engine.diff(from: snapshotA, to: snapshotB)
     }
 
@@ -1926,6 +2139,8 @@ public actor CodeTimeService {
 
         try beginWorkClaim()
         defer { endWorkClaim() }
+        let runtimeLease = try operationLeases.acquire(.shared, timeout: 60)
+        defer { runtimeLease.release() }
 
         var job = RestoreJob(
             projectID: request.projectID,
@@ -2172,6 +2387,8 @@ public actor CodeTimeService {
 
     @discardableResult
     public func verifySnapshot(projectID: UUID, snapshotID: String) async throws -> VerificationResult {
+        let runtimeLease = try operationLeases.acquire(.shared, timeout: 30)
+        defer { runtimeLease.release() }
         guard let project = try await database.project(id: projectID) else {
             throw CodeTimeError.repositoryUnavailable("项目不存在")
         }
@@ -2203,6 +2420,8 @@ public actor CodeTimeService {
 
     @discardableResult
     public func verifyCloud() async throws -> VerificationResult? {
+        let runtimeLease = try operationLeases.acquire(.shared, timeout: 30)
+        defer { runtimeLease.release() }
         let settings = try await currentSettings()
         if settings.engineMode == .cloudFirst {
             return try await verifyCloudV3()
@@ -2275,35 +2494,95 @@ public actor CodeTimeService {
     public func runV3GarbageCollection(applyDeletions: Bool = false) async throws -> V3GCReport? {
         let settings = try await currentSettings()
         guard settings.engineMode == .cloudFirst else { return nil }
-        let projects = try await database.projects()
-        var policies: [UUID: RetentionPolicy] = [:]
-        for project in projects {
-            policies[project.id] = (try? await database.policy(projectID: project.id))?.retention ?? .default
+        let store = try await currentV3Store()
+        let policies = try await v3RetentionPolicies()
+
+        let lease: OperationLease
+        do {
+            // Destructive maintenance must exclude backups and restores across
+            // processes. A busy system skips this pass rather than waiting.
+            lease = try operationLeases.acquire(.exclusive, timeout: 0)
+        } catch {
+            return V3GCReport(phase: "sweep", skippedReason: "备份/恢复任务正在运行，GC 已跳过")
         }
+        defer { lease.release() }
+
         let collector = CloudGarbageCollector(
-            store: try await currentV3Store(),
+            store: store,
             masterKey: try await keychain.masterKey(),
             deviceID: try await currentDevice().id.uuidString,
             index: database,
             isSafeToCollect: { [self] in await isIdleForGarbageCollection() }
         )
-        let tombstoned = try await collector.createTombstones(policies: policies)
-        var report = tombstoned
+        // Confirm other devices' epochs that are waiting for this Mac.
+        _ = try await collector.acknowledgePendingEpochs()
+
+        var report: V3GCReport
+        let existing = try await store.epochsStrict().filter { !$0.isTerminal }
         if applyDeletions {
-            do {
-                report = try await collector.sweep(policies: policies)
-                await logger.info(
-                    "v3 云端清理：删除对象 \(report.deletedObjects)、包 \(report.deletedPacks)、"
-                    + "节点 \(report.deletedNodes)、版本 \(report.deletedSnapshots)"
-                )
-            } catch {
-                // Refusing to delete is the safe outcome; keep the tombstones and
-                // report the reason instead of pretending the pass succeeded.
-                await logger.warning("v3 云端清理已跳过：\(error.localizedDescription)")
-                report.skippedReason = "\(error)"
+            report = try await collector.sweep(policies: policies)
+            await logger.info(
+                "v3 云端清理：删除对象 \(report.deletedObjects)、包 \(report.deletedPacks)、"
+                + "节点 \(report.deletedNodes)、版本 \(report.deletedSnapshots)，"
+                + "状态 \(report.epochState?.rawValue ?? "none")"
+            )
+            // Only create a new plan when there is no active epoch left; otherwise
+            // the next maintenance pass resumes the same plan.
+            if report.epochID == nil || report.epochState == .completed {
+                let planned = try await collector.createTombstones(policies: policies)
+                if report.epochID == nil { report = planned }
             }
+        } else if existing.isEmpty {
+            report = try await collector.createTombstones(policies: policies)
+        } else {
+            report = V3GCReport(
+                phase: "plan",
+                epochID: existing.first?.id,
+                epochState: existing.first?.state,
+                tombstonesPending: 0,
+                skippedReason: "已有 GC Epoch 等待确认或宽限期"
+            )
         }
+        try? await database.checkpointWAL()
         return report
+    }
+
+    /// Runs on every device so an epoch created elsewhere can be confirmed when
+    /// this Mac is idle. Acknowledgement is only a small metadata file; it never
+    /// deletes anything.
+    @discardableResult
+    public func processV3GCEpochs() async -> [String] {
+        do {
+            let settings = try await currentSettings()
+            guard settings.engineMode == .cloudFirst else { return [] }
+            guard await isIdleForGarbageCollection() else { return [] }
+            let lease = try operationLeases.acquire(.shared, timeout: 0)
+            defer { lease.release() }
+            let collector = CloudGarbageCollector(
+                store: try await currentV3Store(),
+                masterKey: try await keychain.masterKey(),
+                deviceID: try await currentDevice().id.uuidString,
+                index: database,
+                isSafeToCollect: { [self] in await isIdleForGarbageCollection() }
+            )
+            let acknowledged = try await collector.acknowledgePendingEpochs()
+            if !acknowledged.isEmpty {
+                await logger.info("已确认 \(acknowledged.count) 个 GC Epoch")
+            }
+            return acknowledged
+        } catch {
+            await logger.warning("确认 GC Epoch 失败：\(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func v3RetentionPolicies() async throws -> [UUID: RetentionPolicy] {
+        let projects = try await database.projects()
+        var policies: [UUID: RetentionPolicy] = [:]
+        for project in projects {
+            policies[project.id] = (try? await database.policy(projectID: project.id))?.retention ?? .default
+        }
+        return policies
     }
 
     private func isIdleForGarbageCollection() async -> Bool {
@@ -4034,6 +4313,35 @@ public actor CodeTimeService {
             checks.append(("待上传数据", true, CodeTimeFormat.bytes(spoolSize) + "（受保护，不随缓存清理）"))
             let cacheSize = (try? await database.cacheBytes()) ?? 0
             checks.append(("下载缓存", true, CodeTimeFormat.bytes(cacheSize)))
+            let pendingCount = (try? await database.pendingUploadCount()) ?? 0
+            let pendingBytes = (try? await database.pendingUploadBytes()) ?? 0
+            checks.append((
+                "待上传任务",
+                true,
+                "\(pendingCount) 个 · \(CodeTimeFormat.bytes(pendingBytes))"
+            ))
+            if let fingerprint = try? await currentRuntimeFingerprint() {
+                checks.append((
+                    "运行配置",
+                    true,
+                    "\(fingerprint.storageMode)/\(fingerprint.engineMode) · 设备 "
+                        + "\(fingerprint.deviceID.prefix(8))… · 缓存预算 "
+                        + "\(CodeTimeFormat.bytes(fingerprint.cacheBudget))"
+                ))
+            }
+            do {
+                let epochs = try await currentV3Store().epochsStrict()
+                let activeEpochs = epochs.filter { !$0.isTerminal }
+                checks.append((
+                    "GC 状态",
+                    activeEpochs.isEmpty,
+                    activeEpochs.isEmpty
+                        ? "没有未完成的清理计划"
+                        : "\(activeEpochs.count) 个清理计划未完成"
+                ))
+            } catch {
+                checks.append(("GC 状态", false, "无法读取清理计划：\(error.localizedDescription)"))
+            }
         } else if let repository {
             let exists = fm.fileExists(atPath: repository.path)
             let config = fm.fileExists(atPath: repository.configPath)
@@ -4047,6 +4355,18 @@ public actor CodeTimeService {
             checks.append(("任务数据库", true, "\(count) 个快照记录"))
         } catch {
             checks.append(("任务数据库", false, error.localizedDescription))
+        }
+        checks.append((
+            "活动任务",
+            true,
+            registeredWork.isEmpty ? "无" : "\(registeredWork.count) 个正在执行"
+        ))
+        if let lastError = (try? await database.projects())?
+            .compactMap(\.lastError)
+            .first(where: { !$0.isEmpty }) {
+            checks.append(("最近错误", false, lastError))
+        } else {
+            checks.append(("最近错误", true, "无"))
         }
         if settings.iCloudEnabled {
             let root = await CloudLocation.iCloudStorageRoot()
@@ -4263,6 +4583,9 @@ public actor CodeTimeService {
         if error is CancellationError { return true }
         if let code = error as? CodeTimeError {
             if case .cancelled = code { return true }
+        }
+        if let engineError = error as? CloudFirstEngineError {
+            if case .cancelled = engineError { return true }
         }
         return false
     }

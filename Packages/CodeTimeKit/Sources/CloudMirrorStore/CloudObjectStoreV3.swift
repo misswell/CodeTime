@@ -99,6 +99,34 @@ public struct CloudObjectStoreV3: Sendable {
         public var recoveryInfoURL: URL {
             deviceRoot.appendingPathComponent("recovery-info.enc")
         }
+
+        public var deviceRecordURL: URL {
+            deviceRoot.appendingPathComponent("device.json")
+        }
+
+        /// GC epochs and acks live at the container root, not inside one device
+        /// namespace: every device must be able to see the plan it has to confirm.
+        public var gcDir: URL { root.appendingPathComponent("gc", isDirectory: true) }
+        public var epochsDir: URL { gcDir.appendingPathComponent("epochs", isDirectory: true) }
+        public func epochURL(_ id: String) -> URL {
+            epochsDir.appendingPathComponent("\(id).json")
+        }
+        public func acksDir(epochID: String) -> URL {
+            epochsDir.appendingPathComponent(epochID, isDirectory: true)
+                .appendingPathComponent("acks", isDirectory: true)
+        }
+        public func ackURL(epochID: String, deviceID: String) -> URL {
+            acksDir(epochID: epochID).appendingPathComponent("\(deviceID).json")
+        }
+        public func hiddenCommitsDir(epochID: String) -> URL {
+            gcDir.appendingPathComponent("hidden", isDirectory: true)
+                .appendingPathComponent(epochID, isDirectory: true)
+        }
+        public func hiddenCommitURL(projectID: UUID, snapshotID: String, epochID: String) -> URL {
+            hiddenCommitsDir(epochID: epochID)
+                .appendingPathComponent(projectID.uuidString, isDirectory: true)
+                .appendingPathComponent("\(snapshotID).commit")
+        }
     }
 
     public struct FormatFile: Codable, Sendable, Equatable {
@@ -109,11 +137,7 @@ public struct CloudObjectStoreV3: Sendable {
     }
 
     public let layout: Layout
-    private let access: CloudFileAccess
-    private let tracker: CloudUploadTracking
-    private let uploadTimeout: TimeInterval
-    private let eviction: ICloudEvictionManager?
-    private let evictionObserver: (@Sendable (EvictionOutcome) -> Void)?
+    private let cloudAccess: CloudAccessCoordinator
     /// Nodes are plaintext file trees, so they are sealed like manifests: an
     /// iCloud file name alone must never reveal project structure.
     private let masterKey: Data
@@ -130,11 +154,13 @@ public struct CloudObjectStoreV3: Sendable {
     ) {
         self.layout = Layout(root: root, deviceID: deviceID)
         self.masterKey = masterKey
-        self.access = access
-        self.tracker = tracker
-        self.uploadTimeout = uploadTimeout
-        self.eviction = eviction
-        self.evictionObserver = evictionObserver
+        self.cloudAccess = CloudAccessCoordinator(
+            access: access,
+            tracker: tracker,
+            eviction: eviction,
+            uploadTimeout: uploadTimeout,
+            evictionObserver: evictionObserver
+        )
     }
 
     static func nodeContext(_ nodeID: String) -> String {
@@ -144,11 +170,8 @@ public struct CloudObjectStoreV3: Sendable {
     /// Confirms the upload and, when configured, releases the local iCloud copy.
     /// A failed eviction is reported to the observer — never silently treated as
     /// released space.
-    private func confirmAndRelease(_ url: URL) async throws {
-        try await tracker.waitForUpload(url, timeout: uploadTimeout)
-        guard let eviction else { return }
-        let outcome = await eviction.evictLocalCopies(of: [url])
-        evictionObserver?(outcome)
+    private func confirmAndRelease(_ url: URL, expectedHash: String? = nil) async throws {
+        try await cloudAccess.confirmAndRelease(url: url, expectedHash: expectedHash)
     }
 
     // MARK: - Format / device
@@ -157,21 +180,21 @@ public struct CloudObjectStoreV3: Sendable {
     /// rewritten: a transiently empty container must not re-initialise the store.
     @discardableResult
     public func prepare(deviceName: String, createdAt: Date = Date()) async throws -> FormatFile {
-        try await access.ensureDirectory(layout.deviceRoot)
-        try await access.ensureDirectory(
+        try await cloudAccess.ensureDirectory(layout.deviceRoot)
+        try await cloudAccess.ensureDirectory(
             layout.deviceRoot.appendingPathComponent("objects", isDirectory: true)
         )
-        try await access.ensureDirectory(
+        try await cloudAccess.ensureDirectory(
             layout.deviceRoot.appendingPathComponent("packs", isDirectory: true)
         )
-        try await access.ensureDirectory(
+        try await cloudAccess.ensureDirectory(
             layout.deviceRoot.appendingPathComponent("nodes", isDirectory: true)
         )
-        try await access.ensureDirectory(layout.tombstonesDir)
+        try await cloudAccess.ensureDirectory(layout.tombstonesDir)
 
-        let formatExists = FileManager.default.fileExists(atPath: layout.formatFile.path)
+        let formatExists = cloudAccess.exists(layout.formatFile)
         if formatExists {
-            guard let existing = try? await access.read(layout.formatFile) else {
+            guard let existing = try? await cloudAccess.read(layout.formatFile) else {
                 // Exists but unreadable (network/placeholder/corruption): never
                 // re-initialise over it.
                 throw CloudObjectStoreV3Error.notConfirmed("format.json 暂时不可读")
@@ -181,6 +204,7 @@ public struct CloudObjectStoreV3: Sendable {
                 // invitation to re-initialise the store over it.
                 throw CloudObjectStoreV3Error.notConfirmed("format.json 不可解析")
             }
+            try await registerDeviceIfNeeded(name: deviceName, at: createdAt)
             return decoded
         }
         let created = FormatFile(
@@ -190,12 +214,13 @@ public struct CloudObjectStoreV3: Sendable {
             deviceName: deviceName
         )
         let data = try JSONEncoder().encode(created)
-        try await access.writeAtomically(data, to: layout.formatFile)
+        try await cloudAccess.writeAtomically(data, to: layout.formatFile)
+        try await registerDeviceIfNeeded(name: deviceName, at: createdAt)
         return created
     }
 
     public func readFormat() async throws -> FormatFile? {
-        guard let data = try? await access.read(layout.formatFile) else { return nil }
+        guard let data = try? await cloudAccess.read(layout.formatFile) else { return nil }
         return try JSONDecoder().decode(FormatFile.self, from: data)
     }
 
@@ -203,7 +228,7 @@ public struct CloudObjectStoreV3: Sendable {
 
     public func hasObject(_ objectID: String) async throws -> Bool {
         let parent = layout.objectURL(objectID).deletingLastPathComponent()
-        guard let entries = try? await access.list(parent, keys: [.isRegularFileKey]) else {
+        guard let entries = try? await cloudAccess.list(parent, keys: [.isRegularFileKey]) else {
             return false
         }
         return entries.contains { $0.lastPathComponent == objectID }
@@ -214,7 +239,7 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putObject(_ payload: Data, objectID: String) async throws -> Bool {
         let destination = layout.objectURL(objectID)
-        if let existing = try? await access.read(destination) {
+        if let existing = try? await cloudAccess.read(destination) {
             // Same object ID must mean the same encrypted bytes. A mismatch is a
             // collision or corruption, never silently accepted.
             guard existing == payload else {
@@ -222,17 +247,24 @@ public struct CloudObjectStoreV3: Sendable {
             }
             return false
         }
-        try await access.ensureDirectory(destination.deletingLastPathComponent())
-        try await access.writeAtomically(payload, to: destination)
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.writeAtomically(payload, to: destination)
         try await confirmAndRelease(destination)
         return true
     }
 
     public func readObject(_ objectID: String) async throws -> Data {
-        guard let data = try? await access.read(layout.objectURL(objectID)) else {
+        let url = layout.objectURL(objectID)
+        guard try existsStrict(url) else {
             throw CloudObjectStoreV3Error.objectMissing(objectID)
         }
-        return data
+        return try await readStrict(url)
+    }
+
+    public func readObjectIfPresent(_ objectID: String) async throws -> Data? {
+        let url = layout.objectURL(objectID)
+        guard try existsStrict(url) else { return nil }
+        return try await readStrict(url)
     }
 
     // MARK: - Nodes
@@ -240,7 +272,7 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putNode(_ node: DirectoryNode) async throws -> Bool {
         let destination = layout.nodeURL(node.nodeID)
-        if let data = try? await access.read(destination) {
+        if let data = try? await cloudAccess.read(destination) {
             // Same identity must mean same bytes; otherwise the tree is not
             // content addressed and we refuse to continue silently. Sealed bytes
             // are randomized per nonce, so compare the decrypted node.
@@ -259,26 +291,36 @@ public struct CloudObjectStoreV3: Sendable {
             masterKey: masterKey,
             context: Self.nodeContext(node.nodeID)
         )
-        try await access.ensureDirectory(destination.deletingLastPathComponent())
-        try await access.writeAtomically(sealed, to: destination)
-        try await tracker.waitForUpload(destination, timeout: uploadTimeout)
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.writeAtomically(sealed, to: destination)
+        try await confirmAndRelease(
+            destination,
+            expectedHash: CanonicalHashing.sha256Hex(sealed)
+        )
         return true
     }
 
     public func readNode(_ nodeID: String) async throws -> DirectoryNode {
-        guard let data = try? await access.read(layout.nodeURL(nodeID)) else {
+        let url = layout.nodeURL(nodeID)
+        guard try existsStrict(url) else {
             throw CloudObjectStoreV3Error.nodeMissing(nodeID)
         }
-        let plaintext = try CryptoBox.open(
-            data,
-            masterKey: masterKey,
-            context: Self.nodeContext(nodeID)
-        )
+        let data = try await readStrict(url)
+        let plaintext: Data
+        do {
+            plaintext = try CryptoBox.open(
+                data,
+                masterKey: masterKey,
+                context: Self.nodeContext(nodeID)
+            )
+        } catch {
+            throw CloudObjectStoreV3Error.notConfirmed("节点解密失败：\(nodeID)")
+        }
         return try JSONDecoder().decode(DirectoryNode.self, from: plaintext)
     }
 
     public func hasNode(_ nodeID: String) async throws -> Bool {
-        (try? await access.read(layout.nodeURL(nodeID))) != nil
+        (try? await cloudAccess.read(layout.nodeURL(nodeID))) != nil
     }
 
     // MARK: - Manifest / Commit
@@ -292,24 +334,26 @@ public struct CloudObjectStoreV3: Sendable {
         snapshotID: String
     ) async throws -> String {
         let destination = layout.manifestURL(projectID: projectID, snapshotID: snapshotID)
-        if let existing = try? await access.read(destination), existing != payload {
+        if let existing = try? await cloudAccess.read(destination), existing != payload {
             // A published manifest is immutable; rewriting it would invalidate
             // the commit hash that points at it.
             throw CloudObjectStoreV3Error.manifestHashMismatch
         }
-        try await access.ensureDirectory(destination.deletingLastPathComponent())
-        try await access.writeAtomically(payload, to: destination)
-        try await tracker.waitForUpload(destination, timeout: uploadTimeout)
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.writeAtomically(payload, to: destination)
+        try await confirmAndRelease(
+            destination,
+            expectedHash: CanonicalHashing.sha256Hex(payload)
+        )
         return CanonicalHashing.sha256Hex(payload)
     }
 
     public func readManifestPayload(projectID: UUID, snapshotID: String) async throws -> Data {
-        guard let data = try? await access.read(
-            layout.manifestURL(projectID: projectID, snapshotID: snapshotID)
-        ) else {
+        let url = layout.manifestURL(projectID: projectID, snapshotID: snapshotID)
+        guard try existsStrict(url) else {
             throw CloudObjectStoreV3Error.manifestMissing(snapshotID)
         }
-        return data
+        return try await readStrict(url)
     }
 
     /// Publishes the snapshot: objects and nodes must already be uploaded.
@@ -327,7 +371,7 @@ public struct CloudObjectStoreV3: Sendable {
             throw CloudObjectStoreV3Error.manifestHashMismatch
         }
         let destination = layout.commitURL(projectID: commit.projectID, snapshotID: commit.snapshotID)
-        if let existing = try? await access.read(destination) {
+        if let existing = try? await cloudAccess.read(destination) {
             let decoded = try? JSONDecoder().decode(SnapshotCommit.self, from: existing)
             guard decoded == commit else {
                 // A version marker is immutable; a different commit for the same
@@ -339,22 +383,25 @@ public struct CloudObjectStoreV3: Sendable {
             }
             return
         }
-        try await access.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
         let data = try JSONEncoder().encode(commit)
-        try await access.writeAtomically(data, to: destination)
-        try await tracker.waitForUpload(destination, timeout: uploadTimeout)
+        try await cloudAccess.writeAtomically(data, to: destination)
+        try await confirmAndRelease(
+            destination,
+            expectedHash: CanonicalHashing.sha256Hex(data)
+        )
     }
 
     /// Commits are the ONLY thing a reader may enumerate to discover versions:
     /// a snapshot that died before its commit does not exist.
     public func commits(projectID: UUID) async throws -> [SnapshotCommit] {
         let directory = layout.projectDir(projectID).appendingPathComponent("snapshots", isDirectory: true)
-        guard let entries = try? await access.list(directory, keys: [.isRegularFileKey]) else {
+        guard let entries = try? await cloudAccess.list(directory, keys: [.isRegularFileKey]) else {
             return []
         }
         var result: [SnapshotCommit] = []
         for entry in entries where entry.pathExtension == "commit" {
-            guard let data = try? await access.read(entry) else { continue }
+            guard let data = try? await cloudAccess.read(entry) else { continue }
             if let commit = try? JSONDecoder().decode(SnapshotCommit.self, from: data) {
                 result.append(commit)
             }
@@ -363,10 +410,14 @@ public struct CloudObjectStoreV3: Sendable {
     }
 
     public func readCommit(projectID: UUID, snapshotID: String) async throws -> SnapshotCommit? {
-        guard let data = try? await access.read(
-            layout.commitURL(projectID: projectID, snapshotID: snapshotID)
-        ) else { return nil }
-        return try JSONDecoder().decode(SnapshotCommit.self, from: data)
+        let url = layout.commitURL(projectID: projectID, snapshotID: snapshotID)
+        guard try existsStrict(url) else { return nil }
+        let data = try await readStrict(url)
+        do {
+            return try JSONDecoder().decode(SnapshotCommit.self, from: data)
+        } catch {
+            throw CloudObjectStoreV3Error.notConfirmed("提交标记损坏：\(snapshotID)")
+        }
     }
 
     // MARK: - Packs
@@ -374,27 +425,34 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putPack(_ payload: Data, packID: String) async throws -> Bool {
         let destination = layout.packURL(packID)
-        if let existing = try? await access.read(destination) {
+        if let existing = try? await cloudAccess.read(destination) {
             guard existing == payload else {
                 throw CloudObjectStoreV3Error.objectMissing(packID)
             }
             return false
         }
-        try await access.ensureDirectory(destination.deletingLastPathComponent())
-        try await access.writeAtomically(payload, to: destination)
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.writeAtomically(payload, to: destination)
         try await confirmAndRelease(destination)
         return true
     }
 
     public func readPack(_ packID: String) async throws -> Data {
-        guard let data = try? await access.read(layout.packURL(packID)) else {
+        let url = layout.packURL(packID)
+        guard try existsStrict(url) else {
             throw CloudObjectStoreV3Error.objectMissing(packID)
         }
-        return data
+        return try await readStrict(url)
+    }
+
+    public func readPackIfPresent(_ packID: String) async throws -> Data? {
+        let url = layout.packURL(packID)
+        guard try existsStrict(url) else { return nil }
+        return try await readStrict(url)
     }
 
     public func hasPack(_ packID: String) async throws -> Bool {
-        guard let entries = try? await access.list(
+        guard let entries = try? await cloudAccess.list(
             layout.packURL(packID).deletingLastPathComponent(),
             keys: [.isRegularFileKey]
         ) else {
@@ -409,125 +467,346 @@ extension CloudObjectStoreV3: CloudObjectSink {}
 extension CloudObjectStoreV3: CloudObjectSource {}
 
 extension CloudObjectStoreV3: CloudGarbageCollectible {
-    private func fileNames(in directory: URL) async -> [String] {
-        guard let entries = try? await access.list(directory, keys: [.isRegularFileKey]) else {
-            return []
+    // MARK: - Strict filesystem enumeration
+
+    /// Distinguishes a genuinely missing path from an unreadable one. `stat`
+    /// errors other than ENOENT are surfaced, never treated as absence.
+    private func existsStrict(_ url: URL) throws -> Bool {
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return true
+        } catch let error as NSError {
+            if error.domain == NSCocoaErrorDomain,
+               error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError {
+                return false
+            }
+            if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+                return false
+            }
+            throw CloudObjectStoreV3Error.notConfirmed("无法读取 \(url.lastPathComponent)：\(error.localizedDescription)")
         }
-        return entries
-            .filter { !$0.lastPathComponent.hasPrefix(".") }
-            .map(\.lastPathComponent)
     }
 
-    public func projectIDs() async throws -> [UUID] {
+    private func listStrict(_ directory: URL, keys: [URLResourceKey]) async throws -> DirectoryEnumerationResult {
+        guard try existsStrict(directory) else { return .notFound }
+        do {
+            return .exists(try await cloudAccess.list(directory, keys: keys))
+        } catch {
+            throw CloudObjectStoreV3Error.notConfirmed("无法枚举 \(directory.lastPathComponent)：\(error)")
+        }
+    }
+
+    private func namesStrict(in directory: URL) async throws -> [String] {
+        switch try await listStrict(directory, keys: [.isRegularFileKey]) {
+        case .notFound:
+            return []
+        case .exists(let entries):
+            return entries
+                .filter { !$0.lastPathComponent.hasPrefix(".") }
+                .map(\.lastPathComponent)
+        }
+    }
+
+    private func readStrict(_ url: URL) async throws -> Data {
+        do { return try await cloudAccess.read(url) }
+        catch { throw CloudObjectStoreV3Error.notConfirmed("无法读取 \(url.lastPathComponent)：\(error)") }
+    }
+
+    // MARK: - Device registry
+
+    public func deviceRecordsStrict() async throws -> [GCDeviceRecord] {
+        let result = try await listStrict(layout.root.appendingPathComponent("devices", isDirectory: true),
+                                          keys: [.isDirectoryKey])
+        let entries: [URL]
+        switch result {
+        case .notFound:
+            // A format file without any device directory is an incomplete sync,
+            // not an empty repository.
+            if try existsStrict(layout.formatFile) {
+                throw CloudObjectStoreV3Error.notConfirmed("format.json 存在但 devices 目录缺失")
+            }
+            return []
+        case .exists(let value):
+            entries = value
+        }
+        var records: [GCDeviceRecord] = []
+        for entry in entries where !entry.lastPathComponent.hasPrefix(".") {
+            let deviceID = entry.lastPathComponent
+            let recordURL = entry.appendingPathComponent("device.json")
+            if try existsStrict(recordURL) {
+                let data = try await readStrict(recordURL)
+                do {
+                    var record = try JSONDecoder().decode(GCDeviceRecord.self, from: data)
+                    if record.deviceID != deviceID {
+                        throw CloudObjectStoreV3Error.notConfirmed("设备记录 ID 不匹配：\(deviceID)")
+                    }
+                    record.lastSeenAt = max(record.lastSeenAt, Date(timeIntervalSince1970: 0))
+                    records.append(record)
+                } catch let error as CloudObjectStoreV3Error {
+                    throw error
+                } catch {
+                    throw CloudObjectStoreV3Error.notConfirmed("设备记录损坏：\(deviceID)")
+                }
+            } else {
+                // Legacy namespace without a record: conservatively active.
+                let attrs = try? FileManager.default.attributesOfItem(atPath: entry.path)
+                let created = (attrs?[.creationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
+                records.append(GCDeviceRecord(
+                    deviceID: deviceID,
+                    name: deviceID,
+                    createdAt: created,
+                    lastSeenAt: created,
+                    state: .active
+                ))
+            }
+        }
+        return records
+    }
+
+    public func writeDeviceRecord(_ record: GCDeviceRecord) async throws {
+        try await cloudAccess.ensureDirectory(layout.deviceRoot)
+        let data = try JSONEncoder.canonical.encode(record)
+        try await cloudAccess.writeAtomically(data, to: layout.deviceRecordURL)
+    }
+
+    func registerDeviceIfNeeded(name: String, at date: Date) async throws {
+        let recordURL = layout.deviceRecordURL
+        if try existsStrict(recordURL) {
+            let data = try await readStrict(recordURL)
+            guard var record = try? JSONDecoder().decode(GCDeviceRecord.self, from: data) else {
+                throw CloudObjectStoreV3Error.notConfirmed("device.json 不可解析")
+            }
+            if record.state == .retired { return }
+            if date.timeIntervalSince(record.lastSeenAt) > 3600 {
+                record.lastSeenAt = date
+                try await writeDeviceRecord(record)
+            }
+            return
+        }
+        try await writeDeviceRecord(GCDeviceRecord(
+            deviceID: layout.deviceID,
+            name: name,
+            createdAt: date,
+            lastSeenAt: date,
+            state: .active
+        ))
+    }
+
+    // MARK: - GC epochs / acks
+
+    public func writeEpoch(_ epoch: GCEpoch) async throws {
+        try await cloudAccess.ensureDirectory(layout.epochsDir)
+        let data = try JSONEncoder.canonical.encode(epoch)
+        let url = layout.epochURL(epoch.id)
+        if try existsStrict(url) {
+            let existingData = try await readStrict(url)
+            guard let existing = try? JSONDecoder().decode(GCEpoch.self, from: existingData) else {
+                throw CloudObjectStoreV3Error.notConfirmed("GC Epoch 不可解析：\(epoch.id)")
+            }
+            // Only progress fields may change. The frozen plan and the required
+            // device set can never be rewritten by a later run.
+            guard existing.initiatorDeviceID == epoch.initiatorDeviceID,
+                  existing.candidates == epoch.candidates,
+                  existing.planDigest == epoch.planDigest,
+                  existing.retainedSnapshots == epoch.retainedSnapshots,
+                  existing.requiredDeviceIDs == epoch.requiredDeviceIDs else {
+                throw CloudObjectStoreV3Error.notConfirmed("GC Epoch 计划被改写：\(epoch.id)")
+            }
+        }
+        try await cloudAccess.writeAtomically(data, to: url)
+    }
+
+    public func epochsStrict() async throws -> [GCEpoch] {
+        let names = try await namesStrict(in: layout.epochsDir)
+        var epochs: [GCEpoch] = []
+        for name in names where name.hasSuffix(".json") {
+            let data = try await readStrict(layout.epochsDir.appendingPathComponent(name))
+            do { epochs.append(try JSONDecoder().decode(GCEpoch.self, from: data)) }
+            catch { throw CloudObjectStoreV3Error.notConfirmed("GC Epoch 损坏：\(name)") }
+        }
+        return epochs
+    }
+
+    public func writeEpochAck(_ ack: GCEpochAck) async throws {
+        let directory = layout.acksDir(epochID: ack.epochID)
+        try await cloudAccess.ensureDirectory(directory)
+        let url = layout.ackURL(epochID: ack.epochID, deviceID: ack.deviceID)
+        if try existsStrict(url) { return }
+        let data = try JSONEncoder.canonical.encode(ack)
+        try await cloudAccess.writeAtomically(data, to: url)
+    }
+
+    public func epochAcks(epochID: String) async throws -> [String: Date] {
+        let result = try await listStrict(layout.acksDir(epochID: epochID), keys: [.isRegularFileKey])
+        guard case .exists(let entries) = result else { return [:] }
+        var acks: [String: Date] = [:]
+        for entry in entries where entry.pathExtension == "json" {
+            let data = try await readStrict(entry)
+            do {
+                let ack = try JSONDecoder().decode(GCEpochAck.self, from: data)
+                acks[ack.deviceID] = ack.acknowledgedAt
+            } catch {
+                throw CloudObjectStoreV3Error.notConfirmed("GC 确认记录损坏：\(entry.lastPathComponent)")
+            }
+        }
+        return acks
+    }
+
+    // MARK: - Strict namespace enumeration
+
+    public func strictProjectIDs() async throws -> [UUID] {
         let directory = layout.deviceRoot.appendingPathComponent("projects", isDirectory: true)
-        guard let entries = try? await access.list(directory, keys: [.isDirectoryKey]) else {
-            return []
+        let result = try await listStrict(directory, keys: [.isDirectoryKey])
+        guard case .exists(let entries) = result else { return [] }
+        var ids: [UUID] = []
+        for entry in entries where !entry.lastPathComponent.hasPrefix(".") {
+            guard let id = UUID(uuidString: entry.lastPathComponent) else {
+                throw CloudObjectStoreV3Error.notConfirmed("无法识别的项目目录：\(entry.lastPathComponent)")
+            }
+            ids.append(id)
         }
-        return entries.compactMap { UUID(uuidString: $0.lastPathComponent) }
+        return ids
     }
 
-    /// Unlike `commits`, a directory that exists but cannot be listed is an error:
-    /// GC must never read an I/O failure as "this device has no versions".
     public func strictCommits(projectID: UUID) async throws -> [SnapshotCommit] {
         let directory = layout.projectDir(projectID)
             .appendingPathComponent("snapshots", isDirectory: true)
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: directory.path) else {
-            // A project with manifests but no commit markers is a half-published
-            // or partially synced version. GC must not read that as "no history".
+        let result = try await listStrict(directory, keys: [.isRegularFileKey])
+        guard case .exists(let entries) = result else {
+            // Manifests without commits mean a half-published/sync-incomplete
+            // version; that is never "no history".
             let manifests = layout.projectDir(projectID)
                 .appendingPathComponent("manifests", isDirectory: true)
-            if fm.fileExists(atPath: manifests.path),
-               ((try? fm.contentsOfDirectory(atPath: manifests.path)) ?? []).isEmpty == false {
+            if case .exists(let files) = try await listStrict(manifests, keys: [.isRegularFileKey]),
+               files.contains(where: { !$0.lastPathComponent.hasPrefix(".") }) {
                 throw CloudObjectStoreV3Error.notConfirmed(
                     "项目 \(projectID.uuidString) 有清单但没有提交标记，可能仍在发布或同步不完整"
                 )
             }
             return []
         }
-        let entries: [URL]
-        do {
-            entries = try await access.list(directory, keys: [.isRegularFileKey])
-        } catch {
-            throw CloudObjectStoreV3Error.notConfirmed("无法枚举 \(projectID.uuidString) 的提交标记：\(error)")
-        }
         var commits: [SnapshotCommit] = []
         for entry in entries where entry.pathExtension == "commit" {
-            let data: Data
-            do {
-                data = try await access.read(entry)
-            } catch {
-                throw CloudObjectStoreV3Error.notConfirmed("提交标记不可读：\(entry.lastPathComponent)")
-            }
-            do {
-                commits.append(try JSONDecoder().decode(SnapshotCommit.self, from: data))
-            } catch {
-                throw CloudObjectStoreV3Error.notConfirmed("提交标记损坏：\(entry.lastPathComponent)")
-            }
+            let data = try await readStrict(entry)
+            do { commits.append(try JSONDecoder().decode(SnapshotCommit.self, from: data)) }
+            catch { throw CloudObjectStoreV3Error.notConfirmed("提交标记损坏：\(entry.lastPathComponent)") }
         }
         return commits
     }
 
-    public func standaloneObjectIDs() async throws -> [String] {
+    public func strictStandaloneObjectIDs() async throws -> [String] {
         let root = layout.deviceRoot.appendingPathComponent("objects", isDirectory: true)
-        guard let prefixes = try? await access.list(root, keys: [.isDirectoryKey]) else {
-            return []
-        }
+        let result = try await listStrict(root, keys: [.isDirectoryKey])
+        guard case .exists(let prefixes) = result else { return [] }
         var ids: [String] = []
-        for prefix in prefixes {
-            ids.append(contentsOf: await fileNames(in: prefix))
+        for prefix in prefixes where !prefix.lastPathComponent.hasPrefix(".") {
+            guard prefix.lastPathComponent.count == 2 else {
+                throw CloudObjectStoreV3Error.notConfirmed("无法识别的对象前缀：\(prefix.lastPathComponent)")
+            }
+            for name in try await namesStrict(in: prefix) {
+                guard name.count == 64, name.allSatisfy({ $0.isHexDigit }) else {
+                    throw CloudObjectStoreV3Error.notConfirmed("无法识别的对象名：\(name)")
+                }
+                ids.append(name)
+            }
         }
         return ids
     }
 
-    public func packIDs() async throws -> [String] {
-        await fileNames(in: layout.deviceRoot.appendingPathComponent("packs", isDirectory: true))
+    public func strictPackIDs() async throws -> [String] {
+        let names = try await namesStrict(in: layout.deviceRoot.appendingPathComponent("packs", isDirectory: true))
+        for name in names where !(name.count == 64 && name.allSatisfy({ $0.isHexDigit })) {
+            throw CloudObjectStoreV3Error.notConfirmed("无法识别的 Pack 名：\(name)")
+        }
+        return names
     }
 
-    public func nodeIDs() async throws -> [String] {
-        await fileNames(in: layout.deviceRoot.appendingPathComponent("nodes", isDirectory: true))
+    public func strictNodeIDs() async throws -> [String] {
+        let names = try await namesStrict(in: layout.deviceRoot.appendingPathComponent("nodes", isDirectory: true))
+        for name in names where !(name.count == 64 && name.allSatisfy({ $0.isHexDigit })) {
+            throw CloudObjectStoreV3Error.notConfirmed("无法识别的目录节点名：\(name)")
+        }
+        return names
     }
 
-    public func deleteObject(_ objectID: String) async throws {
-        try await access.remove(layout.objectURL(objectID))
-    }
-
-    public func deletePack(_ packID: String) async throws {
-        try await access.remove(layout.packURL(packID))
-    }
-
-    public func deleteNode(_ nodeID: String) async throws {
-        try await access.remove(layout.nodeURL(nodeID))
-    }
-
-    public func deleteManifest(projectID: UUID, snapshotID: String) async throws {
-        try await access.remove(layout.manifestURL(projectID: projectID, snapshotID: snapshotID))
-    }
-
-    public func deleteCommit(projectID: UUID, snapshotID: String) async throws {
-        try await access.remove(layout.commitURL(projectID: projectID, snapshotID: snapshotID))
-    }
-
-    public func tombstonePayloads() async throws -> [Data] {
-        let names = await fileNames(in: layout.tombstonesDir)
+    public func strictTombstonePayloads() async throws -> [Data] {
+        let names = try await namesStrict(in: layout.tombstonesDir)
         var payloads: [Data] = []
         for name in names {
-            if let data = try? await access.read(layout.tombstonesDir.appendingPathComponent(name)) {
-                payloads.append(data)
-            }
+            payloads.append(try await readStrict(layout.tombstonesDir.appendingPathComponent(name)))
         }
         return payloads
     }
 
+    // MARK: - Deletion / hiding
+
+    public func deleteObject(_ objectID: String) async throws {
+        try await removeIfExists(layout.objectURL(objectID))
+    }
+
+    public func deletePack(_ packID: String) async throws {
+        try await removeIfExists(layout.packURL(packID))
+    }
+
+    public func deleteNode(_ nodeID: String) async throws {
+        try await removeIfExists(layout.nodeURL(nodeID))
+    }
+
+    public func deleteManifest(projectID: UUID, snapshotID: String) async throws {
+        try await removeIfExists(layout.manifestURL(projectID: projectID, snapshotID: snapshotID))
+    }
+
+    public func deleteCommit(projectID: UUID, snapshotID: String) async throws {
+        try await removeIfExists(layout.commitURL(projectID: projectID, snapshotID: snapshotID))
+    }
+
+    private func removeIfExists(_ url: URL) async throws {
+        guard try existsStrict(url) else { return }
+        do { try await cloudAccess.remove(url) }
+        catch { throw CloudObjectStoreV3Error.notConfirmed("无法删除 \(url.lastPathComponent)：\(error)") }
+    }
+
     public func putTombstone(_ payload: Data, id: String) async throws {
-        try await access.ensureDirectory(layout.tombstonesDir)
-        try await access.writeAtomically(
+        try await cloudAccess.ensureDirectory(layout.tombstonesDir)
+        try await cloudAccess.writeAtomically(
             payload,
             to: layout.tombstonesDir.appendingPathComponent("\(id).json")
         )
     }
 
     public func deleteTombstone(id: String) async throws {
-        try await access.remove(layout.tombstonesDir.appendingPathComponent("\(id).json"))
+        try await removeIfExists(layout.tombstonesDir.appendingPathComponent("\(id).json"))
+    }
+
+    public func hideCommit(projectID: UUID, snapshotID: String, epochID: String) async throws {
+        let source = layout.commitURL(projectID: projectID, snapshotID: snapshotID)
+        let destination = layout.hiddenCommitURL(projectID: projectID, snapshotID: snapshotID, epochID: epochID)
+        let sourceExists = try existsStrict(source)
+        let hiddenExists = try existsStrict(destination)
+        if !sourceExists {
+            if hiddenExists { return }
+            throw CloudObjectStoreV3Error.notConfirmed("提交标记缺失：\(snapshotID)")
+        }
+        try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
+        try await cloudAccess.move(source, to: destination)
+    }
+
+    public func hiddenCommitIDs(epochID: String) async throws -> [String] {
+        let root = layout.hiddenCommitsDir(epochID: epochID)
+        let result = try await listStrict(root, keys: [.isDirectoryKey])
+        guard case .exists(let projects) = result else { return [] }
+        var ids: [String] = []
+        for project in projects where !project.lastPathComponent.hasPrefix(".") {
+            for name in try await namesStrict(in: project) where name.hasSuffix(".commit") {
+                ids.append(String(name.dropLast(".commit".count)))
+            }
+        }
+        return ids
+    }
+
+    public func deleteHiddenCommit(projectID: UUID, snapshotID: String, epochID: String) async throws {
+        try await removeIfExists(layout.hiddenCommitURL(
+            projectID: projectID, snapshotID: snapshotID, epochID: epochID
+        ))
     }
 }

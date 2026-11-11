@@ -1,0 +1,2 @@
+V3PERF_RESULT {"backupSeconds":36.624974012374878,"cloudBytes":181263672,"committed":true,"createSeconds":11.790608048439026,"databaseBytes":287629480,"files":100000,"firstBytesUploaded":109488890,"firstObjectsUploaded":100000,"firstPacksUploaded":49,"logicalBytes":102400000,"peakMemoryBytes":538001408,"scenario":"many-small-files","secondBytesUploaded":0,"secondFilesReused":100000,"secondSeconds":16.528432011604309,"sourcePhysicalBytes":409600000,"spoolBytesAfter":0}
+V3PERF_WORKROOT /tmp/codetime-v3perf-100k
