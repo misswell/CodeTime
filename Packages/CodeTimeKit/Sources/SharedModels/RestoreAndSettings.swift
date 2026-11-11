@@ -208,6 +208,47 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
 }
 
 public struct AppSettings: Codable, Hashable, Sendable {
+    /// Which storage engine writes new snapshots. Existing installs stay on the
+    /// Kopia engine until migration completes; the cloud-first engine never
+    /// touches the legacy repository.
+    public enum EngineMode: String, Codable, Sendable, CaseIterable {
+        case kopia
+        case cloudFirst
+
+        public var displayName: String {
+            switch self {
+            case .kopia: return "本地仓库（兼容模式）"
+            case .cloudFirst: return "云端优先（v3）"
+            }
+        }
+    }
+
+    /// §13.2 cache presets. `custom` uses `cacheBudgetBytes`.
+    public enum CachePreset: String, Codable, Sendable, CaseIterable {
+        case minimal
+        case balanced
+        case fastRestore
+        case custom
+
+        public var displayName: String {
+            switch self {
+            case .minimal: return "极简（128 MB）"
+            case .balanced: return "平衡（256 MB）"
+            case .fastRestore: return "快速恢复（512 MB）"
+            case .custom: return "自定义"
+            }
+        }
+
+        public var defaultBytes: Int64 {
+            switch self {
+            case .minimal: return 128 * 1024 * 1024
+            case .balanced: return 256 * 1024 * 1024
+            case .fastRestore: return 512 * 1024 * 1024
+            case .custom: return 256 * 1024 * 1024
+            }
+        }
+    }
+
     public var iCloudEnabled: Bool
     public var localMirrorPath: String?
     public var performance: PerformanceProfile
@@ -228,6 +269,14 @@ public struct AppSettings: Codable, Hashable, Sendable {
     public var scheduler: SchedulerSettings
     /// Monotonic revision; other processes compare it against their cached copy.
     public var configRevision: Int
+    public var engineMode: EngineMode
+    public var cachePreset: CachePreset
+    public var cacheBudgetBytes: Int64?
+    /// §6.3 spool soft ceiling (default 2GB). Reaching it pauses backups; staged
+    /// data is never deleted to make room.
+    public var spoolSoftLimitBytes: Int64
+    /// §14.5: the user explicitly approved releasing the old local repository.
+    public var legacyLocalCleanupApproved: Bool
 
     public init(
         iCloudEnabled: Bool = false,
@@ -246,7 +295,12 @@ public struct AppSettings: Codable, Hashable, Sendable {
         localMirrorBookmark: Data? = nil,
         localMirrorAccessState: SecurityAccessState = .unknown,
         scheduler: SchedulerSettings = .default,
-        configRevision: Int = 0
+        configRevision: Int = 0,
+        engineMode: EngineMode = .kopia,
+        cachePreset: CachePreset = .balanced,
+        cacheBudgetBytes: Int64? = nil,
+        spoolSoftLimitBytes: Int64 = 2 * 1024 * 1024 * 1024,
+        legacyLocalCleanupApproved: Bool = false
     ) {
         self.iCloudEnabled = iCloudEnabled
         self.localMirrorPath = localMirrorPath
@@ -265,6 +319,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
         self.localMirrorAccessState = localMirrorAccessState
         self.scheduler = scheduler
         self.configRevision = configRevision
+        self.engineMode = engineMode
+        self.cachePreset = cachePreset
+        self.cacheBudgetBytes = cacheBudgetBytes
+        self.spoolSoftLimitBytes = spoolSoftLimitBytes
+        self.legacyLocalCleanupApproved = legacyLocalCleanupApproved
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -273,6 +332,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
         case showExcludedPreview, hasCompletedOnboarding, lastRecoveryKeyAcknowledgedAt
         case pauseOnBattery, cloudGracePeriodDays, minimumCloudGenerations
         case localMirrorBookmark, localMirrorAccessState, scheduler, configRevision
+        case engineMode, cachePreset, cacheBudgetBytes, spoolSoftLimitBytes
+        case legacyLocalCleanupApproved
     }
 
     public init(from decoder: Decoder) throws {
@@ -293,6 +354,12 @@ public struct AppSettings: Codable, Hashable, Sendable {
         localMirrorBookmark = try c.decodeIfPresent(Data.self, forKey: .localMirrorBookmark)
         localMirrorAccessState = try c.decodeIfPresent(SecurityAccessState.self, forKey: .localMirrorAccessState) ?? .unknown
         configRevision = try c.decodeIfPresent(Int.self, forKey: .configRevision) ?? 0
+        engineMode = try c.decodeIfPresent(EngineMode.self, forKey: .engineMode) ?? .kopia
+        cachePreset = try c.decodeIfPresent(CachePreset.self, forKey: .cachePreset) ?? .balanced
+        cacheBudgetBytes = try c.decodeIfPresent(Int64.self, forKey: .cacheBudgetBytes)
+        spoolSoftLimitBytes = try c.decodeIfPresent(Int64.self, forKey: .spoolSoftLimitBytes)
+            ?? 2 * 1024 * 1024 * 1024
+        legacyLocalCleanupApproved = try c.decodeIfPresent(Bool.self, forKey: .legacyLocalCleanupApproved) ?? false
         // Pre-state-machine databases carry these facts as flat fields.
         scheduler = try c.decodeIfPresent(SchedulerSettings.self, forKey: .scheduler) ?? SchedulerSettings(
             enabled: true,
@@ -307,6 +374,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
     }
 
     public static let `default` = AppSettings()
+
+    /// Effective download-cache budget: the preset, or the explicit custom value.
+    public var effectiveCacheBytes: Int64 {
+        cachePreset == .custom ? max(0, cacheBudgetBytes ?? cachePreset.defaultBytes) : cachePreset.defaultBytes
+    }
 
     /// Keeps the legacy flat fields and the scheduler block in agreement after an edit.
     public func synchronizingScheduler() -> AppSettings {

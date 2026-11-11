@@ -1,5 +1,6 @@
 import Foundation
 import SharedModels
+import CodeTimeSecurity
 
 public enum CloudObjectStoreV3Error: Error, Sendable, Equatable {
     case objectMissing(String)
@@ -113,10 +114,14 @@ public struct CloudObjectStoreV3: Sendable {
     private let uploadTimeout: TimeInterval
     private let eviction: ICloudEvictionManager?
     private let evictionObserver: (@Sendable (EvictionOutcome) -> Void)?
+    /// Nodes are plaintext file trees, so they are sealed like manifests: an
+    /// iCloud file name alone must never reveal project structure.
+    private let masterKey: Data
 
     public init(
         root: URL,
         deviceID: String,
+        masterKey: Data,
         access: CloudFileAccess = LocalFileAccess(),
         tracker: CloudUploadTracking = NoopUploadTracker(),
         uploadTimeout: TimeInterval = 120,
@@ -124,11 +129,16 @@ public struct CloudObjectStoreV3: Sendable {
         evictionObserver: (@Sendable (EvictionOutcome) -> Void)? = nil
     ) {
         self.layout = Layout(root: root, deviceID: deviceID)
+        self.masterKey = masterKey
         self.access = access
         self.tracker = tracker
         self.uploadTimeout = uploadTimeout
         self.eviction = eviction
         self.evictionObserver = evictionObserver
+    }
+
+    static func nodeContext(_ nodeID: String) -> String {
+        "v3:node:\(nodeID)"
     }
 
     /// Confirms the upload and, when configured, releases the local iCloud copy.
@@ -215,13 +225,25 @@ public struct CloudObjectStoreV3: Sendable {
         let destination = layout.nodeURL(node.nodeID)
         if let data = try? await access.read(destination) {
             // Same identity must mean same bytes; otherwise the tree is not
-            // content addressed and we refuse to continue silently.
-            if data == (try JSONEncoder().encode(node)) { return false }
+            // content addressed and we refuse to continue silently. Sealed bytes
+            // are randomized per nonce, so compare the decrypted node.
+            let plaintext = try? CryptoBox.open(
+                data,
+                masterKey: masterKey,
+                context: Self.nodeContext(node.nodeID)
+            )
+            let existing = plaintext.flatMap { try? JSONDecoder().decode(DirectoryNode.self, from: $0) }
+            if existing == node { return false }
             throw CloudObjectStoreV3Error.nodeMissing(node.nodeID)
         }
-        let data = try JSONEncoder().encode(node)
+        let plaintext = try JSONEncoder().encode(node)
+        let sealed = try CryptoBox.seal(
+            plaintext,
+            masterKey: masterKey,
+            context: Self.nodeContext(node.nodeID)
+        )
         try await access.ensureDirectory(destination.deletingLastPathComponent())
-        try await access.writeAtomically(data, to: destination)
+        try await access.writeAtomically(sealed, to: destination)
         try await tracker.waitForUpload(destination, timeout: uploadTimeout)
         return true
     }
@@ -230,7 +252,12 @@ public struct CloudObjectStoreV3: Sendable {
         guard let data = try? await access.read(layout.nodeURL(nodeID)) else {
             throw CloudObjectStoreV3Error.nodeMissing(nodeID)
         }
-        return try JSONDecoder().decode(DirectoryNode.self, from: data)
+        let plaintext = try CryptoBox.open(
+            data,
+            masterKey: masterKey,
+            context: Self.nodeContext(nodeID)
+        )
+        return try JSONDecoder().decode(DirectoryNode.self, from: plaintext)
     }
 
     public func hasNode(_ nodeID: String) async throws -> Bool {
@@ -341,3 +368,115 @@ public struct CloudObjectStoreV3: Sendable {
 extension CloudObjectStoreV3: CloudObjectSink {}
 
 extension CloudObjectStoreV3: CloudObjectSource {}
+
+extension CloudObjectStoreV3: CloudGarbageCollectible {
+    private func fileNames(in directory: URL) async -> [String] {
+        guard let entries = try? await access.list(directory, keys: [.isRegularFileKey]) else {
+            return []
+        }
+        return entries
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
+            .map(\.lastPathComponent)
+    }
+
+    public func projectIDs() async throws -> [UUID] {
+        let directory = layout.deviceRoot.appendingPathComponent("projects", isDirectory: true)
+        guard let entries = try? await access.list(directory, keys: [.isDirectoryKey]) else {
+            return []
+        }
+        return entries.compactMap { UUID(uuidString: $0.lastPathComponent) }
+    }
+
+    /// Unlike `commits`, a directory that exists but cannot be listed is an error:
+    /// GC must never read an I/O failure as "this device has no versions".
+    public func strictCommits(projectID: UUID) async throws -> [SnapshotCommit] {
+        let directory = layout.projectDir(projectID)
+            .appendingPathComponent("snapshots", isDirectory: true)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: directory.path) else { return [] }
+        let entries: [URL]
+        do {
+            entries = try await access.list(directory, keys: [.isRegularFileKey])
+        } catch {
+            throw CloudObjectStoreV3Error.notConfirmed("无法枚举 \(projectID.uuidString) 的提交标记：\(error)")
+        }
+        var commits: [SnapshotCommit] = []
+        for entry in entries where entry.pathExtension == "commit" {
+            let data: Data
+            do {
+                data = try await access.read(entry)
+            } catch {
+                throw CloudObjectStoreV3Error.notConfirmed("提交标记不可读：\(entry.lastPathComponent)")
+            }
+            do {
+                commits.append(try JSONDecoder().decode(SnapshotCommit.self, from: data))
+            } catch {
+                throw CloudObjectStoreV3Error.notConfirmed("提交标记损坏：\(entry.lastPathComponent)")
+            }
+        }
+        return commits
+    }
+
+    public func standaloneObjectIDs() async throws -> [String] {
+        let root = layout.deviceRoot.appendingPathComponent("objects", isDirectory: true)
+        guard let prefixes = try? await access.list(root, keys: [.isDirectoryKey]) else {
+            return []
+        }
+        var ids: [String] = []
+        for prefix in prefixes {
+            ids.append(contentsOf: await fileNames(in: prefix))
+        }
+        return ids
+    }
+
+    public func packIDs() async throws -> [String] {
+        await fileNames(in: layout.deviceRoot.appendingPathComponent("packs", isDirectory: true))
+    }
+
+    public func nodeIDs() async throws -> [String] {
+        await fileNames(in: layout.deviceRoot.appendingPathComponent("nodes", isDirectory: true))
+    }
+
+    public func deleteObject(_ objectID: String) async throws {
+        try await access.remove(layout.objectURL(objectID))
+    }
+
+    public func deletePack(_ packID: String) async throws {
+        try await access.remove(layout.packURL(packID))
+    }
+
+    public func deleteNode(_ nodeID: String) async throws {
+        try await access.remove(layout.nodeURL(nodeID))
+    }
+
+    public func deleteManifest(projectID: UUID, snapshotID: String) async throws {
+        try await access.remove(layout.manifestURL(projectID: projectID, snapshotID: snapshotID))
+    }
+
+    public func deleteCommit(projectID: UUID, snapshotID: String) async throws {
+        try await access.remove(layout.commitURL(projectID: projectID, snapshotID: snapshotID))
+    }
+
+    public func tombstonePayloads() async throws -> [Data] {
+        let names = await fileNames(in: layout.tombstonesDir)
+        var payloads: [Data] = []
+        for name in names {
+            if let data = try? await access.read(layout.tombstonesDir.appendingPathComponent(name)) {
+                payloads.append(data)
+            }
+        }
+        return payloads
+    }
+
+    public func putTombstone(_ payload: Data, id: String) async throws {
+        try await access.ensureDirectory(layout.tombstonesDir)
+        try await access.writeAtomically(
+            payload,
+            to: layout.tombstonesDir.appendingPathComponent("\(id).json")
+        )
+    }
+
+    public func deleteTombstone(id: String) async throws {
+        try await access.remove(layout.tombstonesDir.appendingPathComponent("\(id).json"))
+    }
+}

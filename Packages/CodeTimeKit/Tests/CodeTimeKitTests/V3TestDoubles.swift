@@ -17,6 +17,7 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     /// objectID → (packID, offset, length) for objects stored inside packs, so a
     /// read through either API behaves like one logical object store.
     private(set) var packedLocations: [String: (packID: String, offset: Int, length: Int)] = [:]
+    private(set) var tombstones: [String: Data] = [:]
     private(set) var readPackCount = 0
     private(set) var readObjectCount = 0
     /// Optional corruption hook: objectID → replacement payload.
@@ -146,6 +147,76 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     }
 }
 
+extension InMemoryCloud: CloudGarbageCollectible {
+    func projectIDs() async throws -> [UUID] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(Set(commits.values.map(\.projectID)))
+    }
+
+    func strictCommits(projectID: UUID) async throws -> [SnapshotCommit] {
+        lock.lock(); defer { lock.unlock() }
+        return commits.values
+            .filter { $0.projectID == projectID }
+            .sorted { $0.committedAt < $1.committedAt }
+    }
+
+    func standaloneObjectIDs() async throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(objects.keys)
+    }
+
+    func packIDs() async throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(packs.keys)
+    }
+
+    func nodeIDs() async throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(nodes.keys)
+    }
+
+    func deleteObject(_ objectID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        objects.removeValue(forKey: objectID)
+    }
+
+    func deletePack(_ packID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        packs.removeValue(forKey: packID)
+        packedLocations = packedLocations.filter { $0.value.packID != packID }
+    }
+
+    func deleteNode(_ nodeID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        nodes.removeValue(forKey: nodeID)
+    }
+
+    func deleteManifest(projectID: UUID, snapshotID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        manifests.removeValue(forKey: snapshotID)
+    }
+
+    func deleteCommit(projectID: UUID, snapshotID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        commits.removeValue(forKey: snapshotID)
+    }
+
+    func tombstonePayloads() async throws -> [Data] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(tombstones.values)
+    }
+
+    func putTombstone(_ payload: Data, id: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        tombstones[id] = payload
+    }
+
+    func deleteTombstone(id: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        tombstones.removeValue(forKey: id)
+    }
+}
+
 /// In-memory index with the same semantics as the SQLite one for the fields the
 /// engine reads.
 final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
@@ -246,6 +317,11 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
     func pendingUploadBytes() async throws -> Int64 {
         lock.lock(); defer { lock.unlock() }
         return uploads.reduce(0) { $0 + $1.fileSize }
+    }
+
+    func inFlightSnapshotCount() async throws -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return snapshots.filter { !$0.isCommitted }.count
     }
 }
 

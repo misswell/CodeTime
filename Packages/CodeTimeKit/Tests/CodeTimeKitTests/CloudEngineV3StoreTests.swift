@@ -16,7 +16,11 @@ final class CloudEngineV3StoreTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("v3-store-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        store = CloudObjectStoreV3(root: root, deviceID: deviceID)
+        store = CloudObjectStoreV3(
+            root: root,
+            deviceID: deviceID,
+            masterKey: Data("store-test-key".utf8)
+        )
     }
 
     override func tearDownWithError() throws {

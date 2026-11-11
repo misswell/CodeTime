@@ -162,6 +162,8 @@ public protocol CloudSnapshotIndex: Sendable {
     func pendingUploads(state: UploadTaskState?, limit: Int) async throws -> [PendingUploadV3]
     func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws
     func pendingUploadBytes() async throws -> Int64
+    /// Snapshots that are still publishing. GC must abort while any exists.
+    func inFlightSnapshotCount() async throws -> Int
 }
 
 /// Read side of Cloud Format v3, used by restore and verification.
@@ -194,4 +196,24 @@ public protocol ChunkCacheIndex: Sendable {
 public protocol MigrationJournaling: Sendable {
     func appendMigrationEvent(_ entry: MigrationJournalEntryV3) async throws
     func latestMigrationPhase() async throws -> String?
+}
+
+/// Enumerable, deletable view of Cloud Format v3 used only by garbage
+/// collection. Kept separate from `CloudObjectSource` so a reader cannot delete.
+public protocol CloudGarbageCollectible: CloudObjectSource {
+    func projectIDs() async throws -> [UUID]
+    /// Strict enumeration: unlike `commits`, an unreadable directory or an
+    /// undecodable marker throws instead of looking like "no versions".
+    func strictCommits(projectID: UUID) async throws -> [SnapshotCommit]
+    func standaloneObjectIDs() async throws -> [String]
+    func packIDs() async throws -> [String]
+    func nodeIDs() async throws -> [String]
+    func deleteObject(_ objectID: String) async throws
+    func deletePack(_ packID: String) async throws
+    func deleteNode(_ nodeID: String) async throws
+    func deleteManifest(projectID: UUID, snapshotID: String) async throws
+    func deleteCommit(projectID: UUID, snapshotID: String) async throws
+    func tombstonePayloads() async throws -> [Data]
+    func putTombstone(_ payload: Data, id: String) async throws
+    func deleteTombstone(id: String) async throws
 }

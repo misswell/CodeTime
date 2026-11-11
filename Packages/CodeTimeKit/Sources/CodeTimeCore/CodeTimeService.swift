@@ -36,13 +36,48 @@ public struct BootstrapReport: Sendable {
     }
 }
 
-public struct BackupOutcome: Sendable {
-    public var snapshot: Snapshot
+public struct BackupOutcome: Sendable {    public var snapshot: Snapshot
     public var cloudError: String?
 
     public init(snapshot: Snapshot, cloudError: String? = nil) {
         self.snapshot = snapshot
         self.cloudError = cloudError
+    }
+}
+
+/// Local-space accounting for the v3 engine (§13.1). Spool and cache are kept
+/// separate: only the download cache is ever safe to clear.
+public struct V3StorageStatus: Sendable, Equatable {
+    public var pendingTasks: Int
+    public var pendingBytes: Int64
+    public var spoolFileBytes: Int64
+    public var spoolSoftLimitBytes: Int64
+    public var oldestPendingAt: Date?
+    public var cacheBytes: Int64
+    public var indexedChunkBytes: Int64
+    public var cacheBudgetBytes: Int64
+    public var isSpoolOversized: Bool
+
+    public init(
+        pendingTasks: Int = 0,
+        pendingBytes: Int64 = 0,
+        spoolFileBytes: Int64 = 0,
+        spoolSoftLimitBytes: Int64 = 0,
+        oldestPendingAt: Date? = nil,
+        cacheBytes: Int64 = 0,
+        indexedChunkBytes: Int64 = 0,
+        cacheBudgetBytes: Int64 = 0,
+        isSpoolOversized: Bool = false
+    ) {
+        self.pendingTasks = pendingTasks
+        self.pendingBytes = pendingBytes
+        self.spoolFileBytes = spoolFileBytes
+        self.spoolSoftLimitBytes = spoolSoftLimitBytes
+        self.oldestPendingAt = oldestPendingAt
+        self.cacheBytes = cacheBytes
+        self.indexedChunkBytes = indexedChunkBytes
+        self.cacheBudgetBytes = cacheBudgetBytes
+        self.isSpoolOversized = isSpoolOversized
     }
 }
 
@@ -87,8 +122,7 @@ public struct CloudRecoveryResult: Sendable {
     }
 }
 
-public struct DashboardState: Sendable {
-    public var projects: [Project]
+public struct DashboardState: Sendable {    public var projects: [Project]
     public var snapshots: [Snapshot]
     public var snapshotCount: Int
     public var activity: [ActivityEvent]
@@ -139,6 +173,19 @@ public actor CodeTimeService {
     private var device: DeviceIdentity?
     private var repository: RepositoryRecord?
     private var engineCache: KopiaBackupEngine?
+    /// Cloud Format v3 stack. It shares the same Keychain master key and device
+    /// ID, but has no local repository: objects live in iCloud only.
+    private var v3StoreCache: CloudObjectStoreV3?
+    private var v3SourceCache: CloudMultiDeviceStoreV3?
+    private var v3QueueCache: UploadQueue?
+    private var v3AdapterCache: CloudFirstEngineAdapter?
+    private var v3StoreRootCache: URL?
+    private var v3RestoreCache: DiskChunkCache?
+    /// A downloaded legacy repository used to browse/restore old versions after
+    /// the local Kopia repository was released (§14.4). Released when idle.
+    private var legacyRecoveryEngine: KopiaBackupEngine?
+    private var legacyRecoveryRoot: URL?
+    private var legacyRecoveryLastUsedAt: Date?
     /// CT-124: injectable hardware-identity anchor (IOPlatformUUID in
     /// production) so tests can simulate a database moving between Macs.
     private let hardwareUUIDProvider: @Sendable () -> String?
@@ -198,6 +245,23 @@ public actor CodeTimeService {
             await logger.info("已创建新的应用密钥与恢复密钥")
         }
 
+        let usesCloudFirst = settings.engineMode == .cloudFirst
+        if usesCloudFirst {
+            // v3 has no local repository; only the cloud namespace is prepared.
+            // A legacy repository that still exists is untouched here and stays
+            // available until the migration coordinator releases it with consent.
+            do {
+                let store = try await currentV3Store()
+                try await store.prepare(deviceName: Host.current().localizedName ?? "Mac")
+                repositoryStateCache = .ready
+            } catch {
+                repositoryStateCache = .missing
+                await logger.error("v3 云端结构不可用：\(error.localizedDescription)")
+            }
+            if let resumed = await resumeV3Uploads(), resumed.failed > 0 {
+                await logger.warning("启动时仍有 \(resumed.failed) 个待上传任务失败，数据保留在 spool")
+            }
+        } else {
         let engine = try await currentEngine()
         // Only an uninitialized repository may be created. Missing, corrupted or
         // half-recovered repositories stay visible as an explicit state; starting the
@@ -224,6 +288,7 @@ public actor CodeTimeService {
             }
         default:
             await logger.warning("备份仓库状态为 \(state.displayName)，已跳过自动初始化")
+        }
         }
         let interrupted = try await database.recoverInterruptedJobs(legacyGrace: 60)
         var requeued = 0
@@ -268,10 +333,13 @@ public actor CodeTimeService {
         // already terminal) are reclaimed. Only validated direct children named
         // `restore-*` that no resumable job references are ever touched.
         await reclaimAbandonedRestoreStaging()
-        let version = await KopiaBinary.version(at: engineBinaryURL())
-        var bootState = await engine.repositoryState()
-        if bootState == .uninitialized, repositoryWasRegistered { bootState = .missing }
-        repositoryStateCache = bootState
+        let version = usesCloudFirst ? nil : await KopiaBinary.version(at: engineBinaryURL())
+        if !usesCloudFirst {
+            let engine = try await currentEngine()
+            var bootState = await engine.repositoryState()
+            if bootState == .uninitialized, repositoryWasRegistered { bootState = .missing }
+            repositoryStateCache = bootState
+        }
 
         if !interrupted.isEmpty {
             do {
@@ -426,8 +494,13 @@ public actor CodeTimeService {
         kopiaBinaryURL ?? URL(fileURLWithPath: "/nonexistent/kopia")
     }
 
-    private func currentEngine() async throws -> KopiaBackupEngine {
-        if let engineCache { return engineCache }
+    /// Builds a Kopia engine over an arbitrary repository root. The same
+    /// credentials apply to a temporary recovery copy (§14.4).
+    private func makeKopiaEngine(
+        repositoriesRoot: URL,
+        cacheURL: URL,
+        logsURL: URL
+    ) async throws -> KopiaBackupEngine {
         guard let repository else {
             throw CodeTimeError.repositoryUnavailable("服务尚未初始化")
         }
@@ -435,22 +508,475 @@ public actor CodeTimeService {
             throw CodeTimeError.kopiaNotFound
         }
         let settings = try await currentSettings()
-        let engine = KopiaBackupEngine(configuration: .init(
+        return KopiaBackupEngine(configuration: .init(
             repositoryID: repository.id,
-            repositoriesRoot: paths.repositories,
-            cacheURL: paths.cache,
-            logsURL: paths.logs,
+            repositoriesRoot: repositoriesRoot,
+            cacheURL: cacheURL,
+            logsURL: logsURL,
             binaryURL: binary,
             passwordProvider: keychain,
             gitProvider: gitInspector,
             defaultParallelism: settings.performance.backupParallelism
         ))
+    }
+
+    private func currentEngine() async throws -> KopiaBackupEngine {
+        if let engineCache { return engineCache }
+        let engine = try await makeKopiaEngine(
+            repositoriesRoot: paths.repositories,
+            cacheURL: paths.cache,
+            logsURL: paths.logs
+        )
         engineCache = engine
         return engine
     }
 
     private func rebuildEngine() {
         engineCache = nil
+        v3StoreCache = nil
+        v3SourceCache = nil
+        v3QueueCache = nil
+        v3AdapterCache = nil
+        v3StoreRootCache = nil
+        v3RestoreCache = nil
+    }
+
+    // MARK: - Cloud-first (v3) stack
+
+    /// Root of the v3 namespace. v2 data lives directly under the configured
+    /// root; v3 is a sibling `v3/` directory so the two formats can coexist.
+    private func v3StorageRoot(settings: AppSettings) async throws -> URL {
+        guard let location = try await resolveCloudRoot(settings: settings) else {
+            throw CodeTimeError.cloudNotConfigured
+        }
+        let root = location.root.appendingPathComponent(CloudFormatV3.folderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    func currentV3Store() async throws -> CloudObjectStoreV3 {
+        let settings = try await currentSettings()
+        let root = try await v3StorageRoot(settings: settings)
+        if let v3StoreCache, v3StoreRootCache == root { return v3StoreCache }
+
+        let location = try await resolveCloudRoot(settings: settings)
+        let access: CloudFileAccess = location?.coordinated == true
+            ? ICloudCoordinatedFileAccess()
+            : LocalFileAccess()
+        let eviction: ICloudEvictionManager? = location?.coordinated == true
+            ? ICloudEvictionManager()
+            : nil
+        let store = CloudObjectStoreV3(
+            root: root,
+            deviceID: try currentDevice().id.uuidString,
+            masterKey: try keychain.masterKey(),
+            access: access,
+            tracker: location?.tracker ?? NoopUploadTracker(),
+            eviction: eviction,
+            evictionObserver: { [logger] outcome in
+                guard !outcome.isComplete else { return }
+                Task {
+                    await logger.warning(
+                        "iCloud 已备份，但本地副本释放未完成："
+                        + "\(outcome.failed.count) 个失败，\(outcome.skippedNotUploaded.count) 个等待上传确认"
+                    )
+                }
+            }
+        )
+        v3StoreCache = store
+        v3StoreRootCache = root
+        return store
+    }
+
+    /// Cross-device read side. History written by another Mac is still addressable
+    /// after recovery; writes always go to this Mac's namespace.
+    func currentV3Source() async throws -> CloudMultiDeviceStoreV3 {
+        let settings = try await currentSettings()
+        let root = try await v3StorageRoot(settings: settings)
+        if let v3SourceCache {
+            return v3SourceCache
+        }
+        let location = try await resolveCloudRoot(settings: settings)
+        let access: CloudFileAccess = location?.coordinated == true
+            ? ICloudCoordinatedFileAccess()
+            : LocalFileAccess()
+        let source = CloudMultiDeviceStoreV3(
+            root: root,
+            localDeviceID: try currentDevice().id.uuidString,
+            masterKey: try keychain.masterKey(),
+            access: access,
+            tracker: location?.tracker ?? NoopUploadTracker()
+        )
+        v3SourceCache = source
+        return source
+    }
+
+    func currentUploadQueue() async throws -> UploadQueue {
+        let settings = try await currentSettings()
+        let store = try await currentV3Store()
+        if let v3QueueCache { return v3QueueCache }
+        let queue = UploadQueue(
+            base: store,
+            index: database,
+            configuration: UploadQueueConfiguration(
+                spoolRoot: paths.spoolPending,
+                softLimitBytes: settings.spoolSoftLimitBytes,
+                uploadConcurrency: max(1, settings.performance.backupParallelism),
+                maxRetries: 5
+            )
+        )
+        v3QueueCache = queue
+        return queue
+    }
+
+    private func v3RestoreCache(settings: AppSettings) -> DiskChunkCache {
+        if let v3RestoreCache {
+            return v3RestoreCache
+        }
+        let cache = DiskChunkCache(
+            root: paths.downloadedObjects,
+            index: database,
+            budget: CacheBudget(bytes: settings.effectiveCacheBytes)
+        )
+        v3RestoreCache = cache
+        return cache
+    }
+
+    /// The v3 engine as seen by the shared `BackupEngine` surface.
+    func currentV3Engine() async throws -> CloudFirstEngineAdapter {
+        let settings = try await currentSettings()
+        let store = try await currentV3Store()
+        let queue = try await currentUploadQueue()
+        let source = try await currentV3Source()
+        if let v3AdapterCache { return v3AdapterCache }
+        let deviceID = try currentDevice().id.uuidString
+        // The format marker is written once, before any object references it.
+        try await store.prepare(deviceName: Host.current().localizedName ?? "Mac")
+        let adapter = CloudFirstEngineAdapter(
+            masterKey: try keychain.masterKey(),
+            deviceID: deviceID,
+            index: database,
+            sink: queue,
+            source: source,
+            options: BackupRunOptions(
+                uploadConcurrency: max(1, settings.performance.backupParallelism)
+            ),
+            cache: v3RestoreCache(settings: settings),
+            git: gitInspector,
+            snapshotProjectProvider: { [database] snapshotID in
+                if let snapshot = try? await database.snapshot(id: snapshotID) {
+                    return snapshot.projectID
+                }
+                if let record = try? await database.snapshotRecord(snapshotID) {
+                    return record.projectID
+                }
+                return nil
+            },
+            prepareStore: { [store, logger] in
+                do {
+                    try await store.prepare(deviceName: Host.current().localizedName ?? "Mac")
+                } catch {
+                    await logger.error("初始化 v3 云端结构失败：\(error.localizedDescription)")
+                    throw error
+                }
+            }
+        )
+        v3AdapterCache = adapter
+        return adapter
+    }
+
+    /// The engine backing browse/restore/verify calls. Both implementations
+    /// satisfy `BackupEngine`; callers never need to know which format is active.
+    func activeBackupEngine() async throws -> any BackupEngine {
+        let settings = try await currentSettings()
+        if settings.engineMode == .cloudFirst {
+            return try await currentV3Engine()
+        }
+        return try await currentEngine()
+    }
+
+    /// Picks the format that actually owns a snapshot. In v3 mode historical
+    /// Kopia snapshots stay readable; the reverse is also true.
+    private func engine(for snapshotID: String) async throws -> any BackupEngine {
+        let isV3 = ((try? await database.snapshotRecord(snapshotID)) ?? nil) != nil
+        if isV3 { return try await currentV3Engine() }
+        let local = try await currentEngine()
+        if await local.repositoryState() == .ready {
+            return local
+        }
+        return try await legacyEngineForSnapshot(snapshotID)
+    }
+
+    /// Old versions remain restorable after the local repository is gone: download
+    /// the v2 generation that contains the snapshot into a temporary repository,
+    /// keep it for the session's read operations, and delete it when idle.
+    private func legacyEngineForSnapshot(_ snapshotID: String) async throws -> KopiaBackupEngine {
+        if let legacyRecoveryEngine {
+            legacyRecoveryLastUsedAt = Date()
+            return legacyRecoveryEngine
+        }
+        guard let coordinator = try await makeLegacyCoordinator() else {
+            throw CodeTimeError.restoreSourceUnavailable("旧版本需要已配置的 Cloud Format v2 备份")
+        }
+        let prepared = try await coordinator.legacyEngineForRead(snapshotIDs: [snapshotID])
+        if let temp = prepared.temporaryRoot {
+            legacyRecoveryRoot = temp
+            legacyRecoveryEngine = prepared.engine
+            legacyRecoveryLastUsedAt = Date()
+            await logger.info("已下载旧版仓库到临时目录用于恢复：\(temp.path)")
+        }
+        return prepared.engine
+    }
+
+    /// Frees a downloaded legacy repository once no read has used it for a while.
+    /// Staged un-uploaded data is elsewhere (`spool`), so this never touches it.
+    public func releaseLegacyRecoveryRepositoryIfIdle(maxIdle: TimeInterval = 1800) async {
+        guard let last = legacyRecoveryLastUsedAt,
+              Date().timeIntervalSince(last) >= maxIdle else { return }
+        await releaseLegacyRecoveryRepository()
+    }
+
+    public func releaseLegacyRecoveryRepository() async {
+        guard let root = legacyRecoveryRoot else { return }
+        try? FileManager.default.removeItem(at: root)
+        legacyRecoveryRoot = nil
+        legacyRecoveryEngine = nil
+        legacyRecoveryLastUsedAt = nil
+        await logger.info("已清理旧版临时恢复仓库")
+    }
+
+    /// Retries the durable upload queue. Called at launch once the v3 engine is
+    /// active and after a network failure; never deletes staged data.
+    @discardableResult
+    public func resumeV3Uploads() async -> UploadDrainReport? {
+        let settings: AppSettings
+        do {
+            settings = try await currentSettings()
+            guard settings.engineMode == .cloudFirst else { return nil }
+            let queue = try await currentUploadQueue()
+            let report = await queue.resumePending()
+            if report.failed > 0 || report.skippedRetryExhausted > 0 {
+                await logger.warning(
+                    "待上传队列未清空：上传 \(report.uploaded)，已存在 \(report.alreadyPresent)，"
+                    + "失败 \(report.failed)，重试耗尽 \(report.skippedRetryExhausted)；数据仍在待上传目录"
+                )
+            }
+            return report
+        } catch {
+            await logger.warning("无法恢复待上传队列：\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Clears only the rebuildable download cache. The spool (un-uploaded data)
+    /// lives in a different directory and is never touched here.
+    @discardableResult
+    public func clearDownloadCache() async -> EvictionReport? {
+        do {
+            let settings = try await currentSettings()
+            guard settings.engineMode == .cloudFirst else { return nil }
+            let cache = v3RestoreCache(settings: settings)
+            let report = try await cache.removeAllUnpinned()
+            await logger.info("已清理下载缓存 \(CodeTimeFormat.bytes(report.freedBytes))")
+            return report
+        } catch {
+            await logger.warning("清理下载缓存失败：\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Applies a cache preset and immediately enforces the new budget.
+    @discardableResult
+    public func applyCachePreset(
+        _ preset: AppSettings.CachePreset,
+        customBytes: Int64? = nil
+    ) async throws -> AppSettings {
+        var settings = try await currentSettings()
+        settings.cachePreset = preset
+        settings.cacheBudgetBytes = customBytes
+        let saved = try await saveSettings(settings)
+        if settings.engineMode == .cloudFirst {
+            let cache = v3RestoreCache(settings: saved)
+            await cache.setBudget(CacheBudget(bytes: saved.effectiveCacheBytes))
+            _ = try? await cache.enforceBudget()
+        }
+        return saved
+    }
+
+    /// Local spool/cache numbers for the dashboard. Cache and spool are reported
+    /// separately because only one of them is safe to clear.
+    public func v3StorageStatus() async -> V3StorageStatus? {
+        do {
+            let settings = try await currentSettings()
+            guard settings.engineMode == .cloudFirst else { return nil }
+            let queue = try await currentUploadQueue()
+            let spool = await queue.status()
+            let cacheBytes = (try? await database.cacheBytes()) ?? 0
+            let chunkBytes = (try? await database.chunkBytes()) ?? 0
+            return V3StorageStatus(
+                pendingTasks: spool.pendingTasks,
+                pendingBytes: spool.pendingBytes,
+                spoolFileBytes: spool.spoolFileBytes,
+                spoolSoftLimitBytes: spool.softLimitBytes,
+                oldestPendingAt: spool.oldestPendingAt,
+                cacheBytes: cacheBytes,
+                indexedChunkBytes: chunkBytes,
+                cacheBudgetBytes: settings.effectiveCacheBytes,
+                isSpoolOversized: spool.oversized
+            )
+        } catch {
+            await logger.warning("读取本地空间统计失败：\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - Legacy migration (§14)
+
+    /// Where the v2→v3 migration stands. Never performs an upload or a delete.
+    public func backupMigrationStatus() async -> MigrationStatus {
+        do {
+            guard let coordinator = try await makeMigrationCoordinator() else {
+                return MigrationStatus(phase: .complete, detail: "没有旧版本地仓库需要迁移")
+            }
+            return await coordinator.status()
+        } catch {
+            return MigrationStatus(
+                phase: .blocked,
+                detail: "无法检查旧备份：\(error.localizedDescription)",
+                requiresUserAction: true
+            )
+        }
+    }
+
+    /// Runs or resumes the migration. Releasing the old local repository only
+    /// happens with `releaseLegacyLocalSpace` (or a previous explicit approval).
+    /// On success the active engine switches to v3; on any blocked phase the
+    /// legacy engine and its data stay exactly as they were.
+    @discardableResult
+    public func runBackupMigration(releaseLegacyLocalSpace: Bool = false) async -> MigrationStatus {
+        let settings: AppSettings
+        do {
+            settings = try await currentSettings()
+        } catch {
+            return MigrationStatus(phase: .blocked, detail: "无法读取设置：\(error)", requiresUserAction: true)
+        }
+        let coordinator: BackupMigrationCoordinator
+        do {
+            guard let made = try await makeMigrationCoordinator() else {
+                var updated = settings
+                updated.engineMode = .cloudFirst
+                _ = try? await saveSettings(updated)
+                rebuildEngine()
+                return MigrationStatus(phase: .complete, detail: "没有旧备份需要迁移")
+            }
+            coordinator = made
+        } catch {
+            return MigrationStatus(
+                phase: .blocked,
+                detail: "无法开始迁移：\(error.localizedDescription)",
+                requiresUserAction: true
+            )
+        }
+
+        let consent = MigrationConsent(
+            releaseLegacyLocalSpace: releaseLegacyLocalSpace || settings.legacyLocalCleanupApproved
+        )
+        let status = await coordinator.run(consent: consent)
+
+        switch status.phase {
+        case .nativeBaselineVerified, .legacyLocalCleanupPending, .complete:
+            // The new format is verified: new backups go to v3 from now on. The
+            // old local repository may still be present until the user approves
+            // its removal, but it is no longer written to.
+            do {
+                var updated = try await currentSettings()
+                updated.engineMode = .cloudFirst
+                if case .complete = status.phase {
+                    updated.legacyLocalCleanupApproved = consent.releaseLegacyLocalSpace
+                }
+                _ = try await saveSettings(updated)
+                rebuildEngine()
+                await logger.info("已切换到云端优先 v3 引擎（迁移阶段 \(status.phase.rawValue)）")
+            } catch {
+                await logger.error("写入 v3 引擎模式失败：\(error.localizedDescription)")
+            }
+        case .blocked:
+            await logger.error("v2→v3 迁移被阻断：\(status.detail)")
+        default:
+            break
+        }
+        return status
+    }
+
+    private func makeLegacyCoordinator() async throws -> LegacyKopiaCoordinator? {
+        guard let repository, let device else {
+            throw CodeTimeError.repositoryUnavailable("服务尚未初始化")
+        }
+        let settings = try await currentSettings()
+        guard let store = try await makeCloudStoreIfConfigured(settings: settings) else {
+            return nil
+        }
+        let engine = try await currentEngine()
+        return LegacyKopiaCoordinator(
+            engine: engine,
+            store: store,
+            repositoryID: repository.id,
+            deviceID: device.id,
+            repositoriesRoot: paths.repositories,
+            legacyRoot: paths.legacyKopia,
+            snapshotIDs: { [database] in
+                let all = (try? await database.snapshots(limit: 100_000)) ?? []
+                var legacy: [String] = []
+                for snapshot in all {
+                    let isV3 = ((try? await database.snapshotRecord(snapshot.id)) ?? nil) != nil
+                    if !isV3 { legacy.append(snapshot.id) }
+                }
+                return legacy
+            },
+            activeProjects: { [database] in
+                ((try? await database.projects()) ?? []).filter {
+                    $0.lifecycle == .active && $0.enabled
+                }
+            },
+            makeNativeBaseline: { [self] project in
+                try await self.withProject(project) { resolved in
+                    let policy = (try? await self.database.policy(projectID: project.id))
+                        ?? BackupPolicy(projectID: project.id)
+                    let snapshot = try await self.currentV3Engine().createSnapshot(
+                        project: resolved,
+                        policy: policy,
+                        trigger: .scheduled
+                    )
+                    try await self.database.upsertSnapshot(snapshot)
+                    return snapshot.id
+                }
+            },
+            verifyNativeSnapshot: { [self] snapshotID in
+                let result = try await self.currentV3Engine().verify(snapshotID: snapshotID)
+                return result.outcome == .passed
+            },
+            makeEngineAtRoot: { [self] root in
+                try await self.makeKopiaEngine(
+                    repositoriesRoot: root,
+                    cacheURL: root.appendingPathComponent("cache", isDirectory: true),
+                    logsURL: root.appendingPathComponent("logs", isDirectory: true)
+                )
+            }
+        )
+    }
+
+    private func makeMigrationCoordinator() async throws -> BackupMigrationCoordinator? {
+        // No local Kopia repository means there is nothing to migrate; old cloud
+        // versions stay readable in Cloud Format v2 forever.
+        guard FileManager.default.fileExists(atPath: paths.repositories.path),
+              (try? FileManager.default.contentsOfDirectory(atPath: paths.repositories.path))?.isEmpty == false
+        else {
+            return nil
+        }
+        guard let probe = try await makeLegacyCoordinator() else {
+            throw CodeTimeError.cloudNotConfigured
+        }
+        return BackupMigrationCoordinator(probe: probe, journal: database)
     }
 
     // MARK: - Settings
@@ -798,14 +1324,31 @@ public actor CodeTimeService {
             throw CodeTimeError.repositoryUnavailable("项目不存在")
         }
         let cached = try await database.snapshots(projectID: projectID, limit: 1000)
-        let engine = try await currentEngine()
-        // Listing snapshots reads only the repository; the source directory may
-        // legitimately be absent after a machine migration.
-        let fresh = try await engine.listSnapshots(project: project)
-            .sorted { $0.createdAt > $1.createdAt }
+        let settings = try await currentSettings()
+        // Listing snapshots reads only the cloud/repository; the source directory
+        // may legitimately be absent after a machine migration.
+        let fresh: [Snapshot]
+        if settings.engineMode == .cloudFirst {
+            var v3 = try await currentV3Engine().listSnapshots(project: project)
+            // Historical Kopia versions stay visible after the switch; they are
+            // still restorable through the legacy coordinator.
+            var knownV3: Set<String> = []
+            for snapshot in cached {
+                if ((try? await database.snapshotRecord(snapshot.id)) ?? nil) != nil {
+                    knownV3.insert(snapshot.id)
+                }
+            }
+            let legacy = cached.filter { !knownV3.contains($0.id) }
+            let v3IDs = Set(v3.map(\.id))
+            v3.append(contentsOf: legacy.filter { !v3IDs.contains($0.id) })
+            fresh = v3
+        } else {
+            fresh = try await currentEngine().listSnapshots(project: project)
+        }
+        let sorted = fresh.sorted { $0.createdAt > $1.createdAt }
         let stored = Dictionary(uniqueKeysWithValues: cached.map { ($0.id, $0) })
         var merged: [Snapshot] = []
-        for var snapshot in fresh {
+        for var snapshot in sorted {
             if let old = stored[snapshot.id] {
                 snapshot.git = old.git
                 snapshot.cloudState = old.cloudState
@@ -855,6 +1398,12 @@ public actor CodeTimeService {
 
     private func refreshRepositoryStateCache() async {
         do {
+            if try await currentSettings().engineMode == .cloudFirst {
+                // v3 has no local repository; readiness means the key/cloud stack
+                // is usable. Never rewrite the legacy repository state.
+                repositoryStateCache = .ready
+                return
+            }
             let engine = try await currentEngine()
             var state = await engine.repositoryState()
             if state == .uninitialized, repositoryWasRegistered { state = .missing }
@@ -907,7 +1456,15 @@ public actor CodeTimeService {
         }
         let job = claimed.job
         let leaseState = LeaseState()
+        let settings = try await currentSettings()
+        let usesCloudFirst = settings.engineMode == .cloudFirst
         let work = Task { [self] in
+            if usesCloudFirst {
+                let engine = try await currentV3Engine()
+                return try await withProject(project) { resolved in
+                    try await engine.createSnapshot(project: resolved, policy: policy, trigger: trigger)
+                }
+            }
             let engine = try await currentEngine()
             return try await withProject(project) { resolved in
                 try await engine.createSnapshot(project: resolved, policy: policy, trigger: trigger)
@@ -995,7 +1552,9 @@ public actor CodeTimeService {
                 details: "\(snapshot.fileCount) 个文件 · \(CodeTimeFormat.bytes(snapshot.totalSize))"
             ))
 
-            let cloudError = await publishIfConfigured(snapshot: snapshot)
+            let cloudError = usesCloudFirst
+                ? nil // the v3 commit is the publish; there is no second phase
+                : await publishIfConfigured(snapshot: snapshot)
             // CT-091: the post-publish status comes from the unified recompute —
             // which reads the NEWEST snapshot, so a concurrent newer snapshot's
             // failure cannot be masked by this (older) upload finishing.
@@ -1139,7 +1698,7 @@ public actor CodeTimeService {
     // MARK: - Browse / diff
 
     public func listDirectory(snapshotID: String, path: String) async throws -> [FileEntry] {
-        let engine = try await currentEngine()
+        let engine = try await engine(for: snapshotID)
         return try await engine.listDirectory(snapshotID: snapshotID, path: path)
     }
 
@@ -1148,12 +1707,17 @@ public actor CodeTimeService {
         query: String,
         limits: SearchLimits = .default
     ) async throws -> FileSearchResult {
+        if ((try? await database.snapshotRecord(snapshotID)) ?? nil) != nil {
+            return try await currentV3Engine().searchFiles(
+                snapshotID: snapshotID, query: query, limits: limits
+            )
+        }
         let engine = try await currentEngine()
         return try await engine.searchFiles(snapshotID: snapshotID, query: query, limits: limits)
     }
 
     public func readFile(snapshotID: String, path: String, maxBytes: Int = 2 * 1024 * 1024) async throws -> Data {
-        let engine = try await currentEngine()
+        let engine = try await engine(for: snapshotID)
         return try await engine.readFile(snapshotID: snapshotID, path: path, maxBytes: maxBytes)
     }
 
@@ -1162,7 +1726,14 @@ public actor CodeTimeService {
               try await database.snapshot(id: snapshotB)?.projectID == projectID else {
             throw CodeTimeError.unsupported("只能比较同一项目的快照")
         }
-        let engine = try await currentEngine()
+        let aIsV3 = ((try? await database.snapshotRecord(snapshotA)) ?? nil) != nil
+        let bIsV3 = ((try? await database.snapshotRecord(snapshotB)) ?? nil) != nil
+        guard aIsV3 == bIsV3 else {
+            throw CodeTimeError.unsupported("v2 与 v3 版本使用不同的存储格式，暂不支持跨格式比较")
+        }
+        let engine: any BackupEngine = aIsV3
+            ? try await currentV3Engine()
+            : try await currentEngine()
         return try await engine.diff(from: snapshotA, to: snapshotB)
     }
 
@@ -1270,7 +1841,7 @@ public actor CodeTimeService {
         }
 
         do {
-            let engine = try await currentEngine()
+            let engine = try await self.engine(for: request.snapshotID)
             switch request.mode {
             case .preview:
                 break
@@ -1393,12 +1964,43 @@ public actor CodeTimeService {
 
     // MARK: - Verification
 
+    /// v3 equivalent of the generation check: verify the newest committed
+    /// snapshot's manifest and every chunk it references. An unreadable manifest
+    /// clears the "verified" marker instead of leaving a stale success behind.
+    private func verifyCloudV3() async throws -> VerificationResult? {
+        guard let newest = try await database.snapshots(limit: 1).first else {
+            return nil
+        }
+        let engine = try await currentV3Engine()
+        var result = try await engine.verify(snapshotID: newest.id)
+        result.projectID = newest.projectID
+        try await database.insertVerification(result)
+        if var snapshot = try await database.snapshot(id: newest.id) {
+            if result.outcome == .passed {
+                snapshot.verifiedAt = Date()
+                snapshot.verificationLevel = .cloudIntegrity
+            } else {
+                snapshot.verifiedAt = nil
+                snapshot.verificationLevel = nil
+            }
+            try await database.upsertSnapshot(snapshot)
+        }
+        try await recordActivity(ActivityEvent(
+            kind: .verification,
+            level: result.outcome == .passed ? .success : .error,
+            projectID: newest.projectID,
+            message: result.outcome == .passed ? "云端 v3 版本校验通过" : "云端 v3 版本校验失败",
+            details: result.details
+        ))
+        return result
+    }
+
     @discardableResult
     public func verifySnapshot(projectID: UUID, snapshotID: String) async throws -> VerificationResult {
         guard let project = try await database.project(id: projectID) else {
             throw CodeTimeError.repositoryUnavailable("项目不存在")
         }
-        let engine = try await currentEngine()
+        let engine = try await self.engine(for: snapshotID)
         var result = try await engine.verify(snapshotID: snapshotID)
         result.projectID = projectID
         try await database.insertVerification(result)
@@ -1427,6 +2029,9 @@ public actor CodeTimeService {
     @discardableResult
     public func verifyCloud() async throws -> VerificationResult? {
         let settings = try await currentSettings()
+        if settings.engineMode == .cloudFirst {
+            return try await verifyCloudV3()
+        }
         guard let store = try await makeCloudStoreIfConfigured(settings: settings) else {
             return nil
         }
@@ -1488,6 +2093,48 @@ public actor CodeTimeService {
         await runMaintenanceIfDue(.cleanup)
     }
 
+    /// §11 two-phase GC for v3. The first call only tombstones; deletions happen
+    /// on a later run once the grace period has elapsed and every reference has
+    /// been recomputed. Returns nil when the engine is not v3.
+    @discardableResult
+    public func runV3GarbageCollection(applyDeletions: Bool = false) async throws -> V3GCReport? {
+        let settings = try await currentSettings()
+        guard settings.engineMode == .cloudFirst else { return nil }
+        let projects = try await database.projects()
+        var policies: [UUID: RetentionPolicy] = [:]
+        for project in projects {
+            policies[project.id] = (try? await database.policy(projectID: project.id))?.retention ?? .default
+        }
+        let collector = CloudGarbageCollector(
+            store: try await currentV3Store(),
+            masterKey: try await keychain.masterKey(),
+            deviceID: try await currentDevice().id.uuidString,
+            index: database,
+            isSafeToCollect: { [self] in await isIdleForGarbageCollection() }
+        )
+        let tombstoned = try await collector.createTombstones(policies: policies)
+        var report = tombstoned
+        if applyDeletions {
+            do {
+                report = try await collector.sweep(policies: policies)
+                await logger.info(
+                    "v3 云端清理：删除对象 \(report.deletedObjects)、包 \(report.deletedPacks)、"
+                    + "节点 \(report.deletedNodes)、版本 \(report.deletedSnapshots)"
+                )
+            } catch {
+                // Refusing to delete is the safe outcome; keep the tombstones and
+                // report the reason instead of pretending the pass succeeded.
+                await logger.warning("v3 云端清理已跳过：\(error.localizedDescription)")
+                report.skippedReason = "\(error)"
+            }
+        }
+        return report
+    }
+
+    private func isIdleForGarbageCollection() -> Bool {
+        activeProjects.isEmpty && registeredWork.isEmpty && pendingWorkClaims == 0
+    }
+
     /// Runs a maintenance task only when its persisted next-run time has passed.
     /// Success and failure are recorded separately: a skipped or failed run must
     /// never look like a successful verification.
@@ -1536,6 +2183,18 @@ public actor CodeTimeService {
                 // local protection copies; corrupt ones are marked invalid.
                 try await auditProtectionCopies()
             case .cleanup:
+                await releaseLegacyRecoveryRepositoryIfIdle()
+                if settings.engineMode == .cloudFirst {
+                    guard let report = try await runV3GarbageCollection(applyDeletions: true) else {
+                        try await recordMaintenanceSkip(task, reason: "v3 云端不可用", at: started, interval: intervalSeconds)
+                        return
+                    }
+                    if let reason = report.skippedReason {
+                        try await recordMaintenanceSkip(task, reason: reason, at: started, interval: intervalSeconds)
+                        return
+                    }
+                    break
+                }
                 guard let report = try await cleanupCloud() else {
                     try await recordMaintenanceSkip(task, reason: "未配置云端镜像", at: started, interval: intervalSeconds)
                     return
@@ -1753,6 +2412,10 @@ public actor CodeTimeService {
     // MARK: - Cloud internals
 
     private func publishIfConfigured(snapshot: Snapshot) async -> String? {
+        if (try? await currentSettings())?.engineMode == .cloudFirst {
+            // The v3 commit marker is the publish; there is no second upload.
+            return nil
+        }
         var activeGenerationID: UUID?
         do {
             let settings = try await currentSettings()
@@ -2082,24 +2745,32 @@ public actor CodeTimeService {
         return await CloudLocation.iCloudStorageRoot()?.path
     }
 
-    private func makeCloudStoreIfConfigured(settings: AppSettings) async throws -> CloudMirrorStore? {
-        guard let repository else { return nil }
-        let root: URL
-        let coordinated: Bool
-        let tracker: any CloudUploadTracking
+    struct CloudRoot {
+        var root: URL
+        var coordinated: Bool
+        var tracker: any CloudUploadTracking
+        /// The exact container used for the upload confirmation check.
+        var container: URL?
+    }
 
+    /// Resolves the configured cloud/mirror root exactly once for both the v2
+    /// mirror and the v3 store. A configured-but-unavailable iCloud is an error,
+    /// never a silent fallback to another directory.
+    private func resolveCloudRoot(settings: AppSettings) async throws -> CloudRoot? {
         if settings.iCloudEnabled {
-            // CT-129: never silently degrade. If iCloud was enabled but the
-            // container is unavailable, report the exact reason instead of
-            // publishing to a different location.
             let status = await CloudSetupService.detect()
             guard status.isReady, let iCloud = status.storageRoot else {
                 throw CodeTimeError.cloudSetupUnavailable(state: status.state.rawValue, detail: status.detail)
             }
-            root = iCloud
-            coordinated = true
-            tracker = UbiquitousUploadTracker()
-        } else if let custom = settings.localMirrorPath, !custom.isEmpty {
+            let container = await CloudLocation.iCloudDocuments()
+            return CloudRoot(
+                root: iCloud,
+                coordinated: true,
+                tracker: UbiquitousUploadTracker(containerURL: container),
+                container: container
+            )
+        }
+        if let custom = settings.localMirrorPath, !custom.isEmpty {
             if let bookmark = settings.localMirrorBookmark {
                 do {
                     let resolved = try SecurityScopedBookmarks.resolve(bookmark)
@@ -2107,30 +2778,32 @@ public actor CodeTimeService {
                         mirrorAccess?.stop()
                         mirrorAccess = SecurityScopedAccess(url: resolved.url)
                     }
-                    root = resolved.url
+                    return CloudRoot(root: resolved.url, coordinated: false, tracker: NoopUploadTracker())
                 } catch {
                     await markMirrorAccess(.stale)
                     throw CodeTimeError.bookmarkFailed("本地镜像授权已失效：\(error.localizedDescription)")
                 }
-            } else {
-                let url = URL(fileURLWithPath: custom, isDirectory: true)
-                // The mirror may be configured before it is created; only fail when
-                // the directory cannot be created or written.
-                do {
-                    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                } catch {
-                    throw CodeTimeError.securityScopeUnavailable("\(custom)：\(error.localizedDescription)")
-                }
-                if !FileManager.default.isWritableFile(atPath: url.path) {
-                    throw CodeTimeError.securityScopeUnavailable(custom)
-                }
-                root = url
             }
-            coordinated = false
-            tracker = NoopUploadTracker()
-        } else {
-            return nil
+            let url = URL(fileURLWithPath: custom, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            } catch {
+                throw CodeTimeError.securityScopeUnavailable("\(custom)：\(error.localizedDescription)")
+            }
+            if !FileManager.default.isWritableFile(atPath: url.path) {
+                throw CodeTimeError.securityScopeUnavailable(custom)
+            }
+            return CloudRoot(root: url, coordinated: false, tracker: NoopUploadTracker())
         }
+        return nil
+    }
+
+    private func makeCloudStoreIfConfigured(settings: AppSettings) async throws -> CloudMirrorStore? {
+        guard let repository else { return nil }
+        guard let location = try await resolveCloudRoot(settings: settings) else { return nil }
+        let root = location.root
+        let coordinated = location.coordinated
+        let tracker = location.tracker
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return CloudMirrorStore(configuration: .init(
@@ -2162,6 +2835,137 @@ public actor CodeTimeService {
     public func cloudRecoveryCandidates(storageRoot: URL, recoveryKeyText: String) async throws -> [RecoveryCandidate] {
         let key = try RecoveryKey.parse(recoveryKeyText)
         return try await CloudMirrorStore.recoverCandidates(storageRoot: storageRoot, recoveryKey: key)
+    }
+
+    // MARK: - Cloud Format v3 recovery (§9.5)
+
+    /// Discovers v3 projects on a new Mac. Only the commit markers and the
+    /// encrypted manifests are read; nothing is downloaded or restored yet.
+    public func v3RecoveryCandidates(
+        storageRoot: URL,
+        recoveryKeyText: String
+    ) async throws -> [V3RecoveryProject] {
+        let key = try RecoveryKey.parse(recoveryKeyText)
+        let root = storageRoot.appendingPathComponent(CloudFormatV3.folderName, isDirectory: true)
+        return try await CloudRecoveryV3.scan(root: root, masterKey: key)
+    }
+
+    /// Restores one v3 version on a new Mac and registers the project locally so
+    /// the restored history is browsable and restorable again.
+    @discardableResult
+    public func recoverV3Project(
+        storageRoot: URL,
+        recoveryKeyText: String,
+        candidate: V3RecoveryProject,
+        destination: URL,
+        snapshotID: String? = nil
+    ) async throws -> UUID {
+        let key = try RecoveryKey.parse(recoveryKeyText)
+        let root = storageRoot.appendingPathComponent(CloudFormatV3.folderName, isDirectory: true)
+        let values = try? storageRoot.resourceValues(forKeys: [.isUbiquitousItemKey])
+        let access: CloudFileAccess = values?.isUbiquitousItem == true
+            ? ICloudCoordinatedFileAccess()
+            : LocalFileAccess()
+        let store = CloudObjectStoreV3(
+            root: root,
+            deviceID: candidate.sourceDeviceID,
+            masterKey: key,
+            access: access,
+            tracker: values?.isUbiquitousItem == true
+                ? UbiquitousUploadTracker(containerURL: await CloudLocation.iCloudDocuments())
+                : NoopUploadTracker()
+        )
+        let commits = try await store.strictCommits(projectID: candidate.projectID)
+        guard let target = commits
+            .filter({ snapshotID == nil || $0.snapshotID == snapshotID })
+            .max(by: { $0.committedAt < $1.committedAt })
+        else {
+            throw CodeTimeError.snapshotNotFound(snapshotID ?? candidate.latestSnapshotID ?? "")
+        }
+
+        let reader = CloudRestoreEngine(masterKey: key, source: store)
+        _ = try await reader.restore(
+            projectID: candidate.projectID,
+            snapshotID: target.snapshotID,
+            target: .project,
+            destination: destination
+        )
+
+        // Register the restored project under its ORIGINAL project ID: the cloud
+        // commit/manifest context is keyed by it, so browsing and later backups
+        // continue the same history instead of forking a second project.
+        if try await database.project(id: candidate.projectID) != nil {
+            throw CodeTimeError.unsupported("该项目的恢复目标已存在，请使用普通恢复功能")
+        }
+        let bookmark = try? SecurityScopedBookmarks.makeBookmark(for: destination)
+        var project = Project(
+            id: candidate.projectID,
+            name: destination.lastPathComponent,
+            rootPath: destination.path,
+            bookmark: bookmark
+        )
+        project.accessState = bookmark == nil ? .unknown : .granted
+        project.lastBackupAt = target.committedAt
+        project.lastSnapshotID = target.snapshotID
+        project.status = .synced
+        project.lastCloudState = .synced
+        try await database.upsertProject(project)
+        let settings = try await currentSettings()
+        try await database.upsertPolicy(BackupPolicy(
+            projectID: project.id,
+            intervalMinutes: settings.globalIntervalMinutes,
+            performance: settings.performance
+        ))
+
+        // Make the full history visible locally. Old versions are read from cloud
+        // commits; no chunk is downloaded until the user asks for it.
+        for commit in commits {
+            var snapshot = Snapshot(
+                id: commit.snapshotID,
+                projectID: commit.projectID,
+                createdAt: commit.committedAt,
+                finishedAt: commit.committedAt,
+                summary: "\(commit.fileCount) 个文件",
+                status: .complete,
+                fileCount: commit.fileCount,
+                totalSize: commit.totalBytes,
+                cloudState: .synced
+            )
+            if commit.snapshotID == target.snapshotID {
+                snapshot.verifiedAt = Date()
+                snapshot.verificationLevel = .crossDeviceRestore
+            }
+            try await database.upsertSnapshot(snapshot)
+            var record = SnapshotRecordV3(
+                snapshotID: commit.snapshotID,
+                projectID: commit.projectID,
+                createdAt: commit.committedAt,
+                rootNodeID: "",
+                fileCount: commit.fileCount,
+                totalBytes: commit.totalBytes,
+                uploadState: .uploaded,
+                commitState: .committed,
+                manifestPayloadHash: commit.manifestPayloadHash
+            )
+            record.rootNodeID = (try? await reader.loadManifest(
+                projectID: commit.projectID, snapshotID: commit.snapshotID
+            ))?.rootNodeID ?? ""
+            try await database.upsertSnapshot(record)
+        }
+
+        // A recovered v3 Mac should keep using the cloud-first engine.
+        var updated = settings
+        updated.engineMode = .cloudFirst
+        _ = try? await saveSettings(updated)
+        rebuildEngine()
+        try await recordActivity(ActivityEvent(
+            kind: .restore,
+            level: .success,
+            projectID: project.id,
+            message: "已从 iCloud 恢复 \(project.name)",
+            details: "版本 \(target.snapshotID) · \(target.fileCount) 个文件"
+        ))
+        return project.id
     }
 
     public func recoverFromCloud(storageRoot: URL, recoveryKeyText: String) async throws -> CloudRecoveryResult {

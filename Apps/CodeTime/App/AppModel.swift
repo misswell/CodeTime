@@ -125,6 +125,8 @@ final class AppModel: ObservableObject {
     @Published var cloudSummary: CloudStorageSummary?
     @Published var diagnostics = DiagnosticsReport()
     @Published var repositoryBytes: Int64?
+    @Published var v3Storage: V3StorageStatus?
+    @Published var migrationStatus: MigrationStatus?
 
     @Published var selectedSection: SidebarSection = .dashboard
     @Published var selectedProjectID: UUID?
@@ -152,6 +154,7 @@ final class AppModel: ObservableObject {
     @Published var secretRecoveryMode = false
     @Published var recoveryKeyText: String = ""
     @Published var recoveryCandidates: [RecoveryCandidate] = []
+    @Published var v3RecoveryCandidates: [V3RecoveryProject] = []
     @Published var recoveryRestoreJob: CloudRestoreJob?
     @Published var recoveryImportNotice: String?
     @Published var schedulerActive = false
@@ -594,6 +597,10 @@ final class AppModel: ObservableObject {
                 if !silent { showToast("读取恢复任务失败：\(error.localizedDescription)", style: .warning) }
             }
             repositoryBytes = await service.repositoryUsage()
+            v3Storage = await service.v3StorageStatus()
+            if settings.engineMode == .cloudFirst {
+                migrationStatus = await service.backupMigrationStatus()
+            }
             if selectedProjectID == nil, let first = projects.first {
                 selectedProjectID = first.id
             }
@@ -773,6 +780,83 @@ final class AppModel: ObservableObject {
         cloudSetup = .checking
         cloudSetup = await service.cloudSetupStatus()
         cloudDiagnosticSummary = cloudSetup.detail
+    }
+
+    // MARK: - Storage (v3)
+
+    func refreshStorageStatus() async {
+        guard let service else { return }
+        v3Storage = await service.v3StorageStatus()
+        migrationStatus = await service.backupMigrationStatus()
+    }
+
+    /// Clears only rebuildable download data; un-uploaded objects are never here.
+    func clearDownloadCache() async {
+        guard let service else { return }
+        guard let report = await service.clearDownloadCache() else {
+            showToast("当前引擎没有可清理的下载缓存", style: .info)
+            return
+        }
+        if let reason = report.skippedReason {
+            showToast(reason, style: .warning)
+        } else {
+            showToast("已释放 \(CodeTimeFormat.bytes(report.freedBytes)) 下载缓存", style: .success)
+        }
+        await refreshStorageStatus()
+    }
+
+    func applyCachePreset(_ preset: AppSettings.CachePreset, customBytes: Int64? = nil) async {
+        guard let service else { return }
+        do {
+            settings = try await service.applyCachePreset(preset, customBytes: customBytes)
+            persistedSettings = settings
+            await refreshStorageStatus()
+            showToast("缓存策略已更新为 \(preset.displayName)", style: .success)
+        } catch {
+            showToast(error.localizedDescription, style: .error)
+        }
+    }
+
+    func resumePendingUploads() async {
+        guard let service else { return }
+        guard let report = await service.resumeV3Uploads() else {
+            showToast("当前没有待上传队列", style: .info)
+            return
+        }
+        if report.failed > 0 || report.skippedRetryExhausted > 0 {
+            showToast(
+                "上传仍未完成：\(report.failed) 个失败、\(report.skippedRetryExhausted) 个重试耗尽；数据仍在待上传目录",
+                style: .warning
+            )
+        } else {
+            showToast("待上传数据已全部确认上传", style: .success)
+        }
+        await refreshStorageStatus()
+    }
+
+    /// Runs the v2→v3 migration. Releasing the old local repository is a separate
+    /// explicit decision; without it the baseline is still verified and v3 becomes
+    /// the active engine.
+    func runMigration(releaseLegacyLocalSpace: Bool = false) async {
+        guard let service else { return }
+        isBusy = true
+        busyLabel = "正在迁移旧备份…"
+        defer { isBusy = false; busyLabel = nil }
+        let status = await service.runBackupMigration(releaseLegacyLocalSpace: releaseLegacyLocalSpace)
+        migrationStatus = status
+        settings = await (try? service.currentSettings()) ?? settings
+        persistedSettings = settings
+        switch status.phase {
+        case .complete:
+            showToast("迁移完成", style: .success)
+        case .legacyLocalCleanupPending:
+            showToast("基线已验证。旧本地仓库仍占用空间，可选择释放", style: .info)
+        case .blocked:
+            showToast("迁移已暂停：\(status.detail)", style: .warning)
+        default:
+            showToast(status.detail, style: .info)
+        }
+        await refreshAll(silent: true)
     }
 
     /// One-tap enable. Verifies the target BEFORE persisting anything; on failure
@@ -1259,7 +1343,34 @@ final class AppModel: ObservableObject {
         recoveryImportNotice = nil
         let candidates = try await service.cloudRecoveryCandidates(storageRoot: storageRoot, recoveryKeyText: key)
         recoveryCandidates = candidates
+        // v3 projects are discovered independently and merged into the same sheet.
+        v3RecoveryCandidates = (try? await service.v3RecoveryCandidates(
+            storageRoot: storageRoot,
+            recoveryKeyText: key
+        )) ?? []
         return candidates
+    }
+
+    /// §9.5: restore one v3 project on this Mac. The whole project is restored
+    /// from cloud chunks and registered locally; no Kopia repository is involved.
+    @discardableResult
+    func recoverV3Project(
+        candidate: V3RecoveryProject,
+        storageRoot: URL,
+        recoveryKey: String,
+        destination: URL
+    ) async throws -> UUID {
+        guard let service else { throw CodeTimeError.repositoryUnavailable("服务尚未就绪") }
+        let key = recoveryKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { throw CodeTimeError.unsupported("请先输入恢复密钥") }
+        let projectID = try await service.recoverV3Project(
+            storageRoot: storageRoot,
+            recoveryKeyText: key,
+            candidate: candidate,
+            destination: destination
+        )
+        await refreshAll(silent: true)
+        return projectID
     }
 
     /// Restores the chosen candidate. A previous failed attempt is resumed

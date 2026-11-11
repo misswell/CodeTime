@@ -193,6 +193,11 @@ final class CloudFirstBackupEngineTests: XCTestCase {
             lock.lock(); defer { lock.unlock() }
             return uploads.reduce(0) { $0 + $1.fileSize }
         }
+
+        func inFlightSnapshotCount() async throws -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return snapshots.filter { !$0.isCommitted }.count
+        }
     }
 
     // MARK: - Setup

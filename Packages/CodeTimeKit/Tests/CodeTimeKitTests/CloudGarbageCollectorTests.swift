@@ -1,0 +1,225 @@
+import XCTest
+import Foundation
+@testable import BackupEngine
+@testable import SharedModels
+
+/// CT-163: Cloud Format v3 garbage collection. Two phases, reference analysis
+/// from retained commits only, and hard refusal whenever the graph is uncertain.
+final class CloudGarbageCollectorTests: XCTestCase {
+    private var root: URL!
+    private let masterKey = Data("gc-test-key".utf8)
+    private let projectID = UUID()
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gc-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        if let root { try? FileManager.default.removeItem(at: root) }
+        try super.tearDownWithError()
+    }
+
+    private func write(_ version: Int, at date: Date) throws {
+        // A unique payload per version, so expired versions own private chunks.
+        let url = root.appendingPathComponent("data.txt")
+        try Data("version-\(version)-\(String(repeating: "q", count: 5000))".utf8).write(to: url)
+        // Distinct mtimes: the reuse heuristic compares size and mtime, and these
+        // snapshots are created back to back in the test.
+        try FileManager.default.setAttributes(
+            [.modificationDate: date],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private func makeEngine(
+        cloud: InMemoryCloud,
+        index: InMemoryIndex,
+        snapshotID: String,
+        at date: Date
+    ) -> CloudFirstBackupEngine {
+        CloudFirstBackupEngine(
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            sink: cloud,
+            options: BackupRunOptions(
+                chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 16 * 1024),
+                uploadConcurrency: 2,
+                packObjectsUpTo: nil
+            ),
+            clock: { date }
+        )
+    }
+
+    private func makeSnapshots(
+        count: Int,
+        cloud: InMemoryCloud,
+        index: InMemoryIndex
+    ) async throws -> [(id: String, date: Date)] {
+        var result: [(String, Date)] = []
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        for version in 0..<count {
+            let date = start.addingTimeInterval(Double(version) * 86_400)
+            try write(version, at: date)
+            let id = "snapshot-\(version)"
+            let engine = makeEngine(cloud: cloud, index: index, snapshotID: id, at: date)
+            let report = try await engine.run(
+                projectID: projectID,
+                root: root,
+                matcher: ExclusionMatcher(rules: []),
+                snapshotID: id
+            )
+            XCTAssertTrue(report.committed)
+            result.append((id, date))
+        }
+        return result
+    }
+
+    func testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 5, cloud: cloud, index: index)
+        let latestDate = snapshots.last!.date
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let collector = CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            gracePeriod: 30 * 86_400,
+            clock: { latestDate }
+        )
+
+        let objectsBefore = cloud.objects.count
+        let nodesBefore = cloud.nodes.count
+        let commitsBefore = cloud.commits.count
+
+        let tombstoned = try await collector.createTombstones(
+            policies: [projectID: policy],
+            now: latestDate
+        )
+        XCTAssertEqual(tombstoned.retainedSnapshots, 2)
+        XCTAssertEqual(tombstoned.expiredSnapshots, 3)
+        XCTAssertGreaterThan(tombstoned.orphanObjects, 0)
+        XCTAssertGreaterThan(tombstoned.tombstonesPending, 0)
+        XCTAssertEqual(cloud.objects.count, objectsBefore, "墓碑阶段不得删除任何对象")
+        XCTAssertEqual(cloud.nodes.count, nodesBefore)
+        XCTAssertEqual(cloud.commits.count, commitsBefore)
+
+        // Before the grace period expires nothing is deleted.
+        let early = try await collector.sweep(policies: [projectID: policy], now: latestDate)
+        XCTAssertEqual(early.deletedObjects, 0)
+        XCTAssertGreaterThan(early.tombstonesPending, 0)
+
+        // After 31 days the expired versions and their exclusive data are gone.
+        let later = latestDate.addingTimeInterval(31 * 86_400)
+        let swept = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(swept.deletedSnapshots, 3)
+        XCTAssertGreaterThan(swept.deletedObjects, 0)
+        XCTAssertEqual(cloud.commits.count, 2, "只保留策略内的提交标记")
+        XCTAssertEqual(
+            Set(cloud.commits.keys),
+            Set(["snapshot-3", "snapshot-4"]),
+            "保留的必须是最新两个版本，实际 \(cloud.commits.keys.sorted())"
+        )
+
+        // The newest snapshot must still restore bit-for-bit.
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gc-restore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        _ = try await restore.restore(
+            projectID: projectID,
+            snapshotID: snapshots.last!.id,
+            target: .project,
+            destination: destination
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: destination.appendingPathComponent("data.txt")),
+            try Data(contentsOf: root.appendingPathComponent("data.txt"))
+        )
+    }
+
+    func testCT163_SweepRefusesWhileDataIsStagedOrPublishing() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        _ = try await makeSnapshots(count: 3, cloud: cloud, index: index)
+        try await index.enqueueUploads([
+            PendingUploadV3(
+                taskID: "object:\(String(repeating: "c", count: 64))",
+                objectID: String(repeating: "c", count: 64),
+                localPath: "/tmp/pending",
+                remotePath: UploadQueue.objectKind,
+                fileSize: 128,
+                state: .failed
+            )
+        ])
+        let collector = CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index
+        )
+        do {
+            _ = try await collector.sweep(policies: [projectID: .default])
+            XCTFail("存在未上传数据时必须拒绝清理")
+        } catch let error as V3GCError {
+            guard case .unsafe = error else { return XCTFail("期望 unsafe，实际 \(error)") }
+        }
+    }
+
+    func testCT163_MissingReferencedObjectAbortsBeforeAnyTombstone() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        _ = try await makeSnapshots(count: 2, cloud: cloud, index: index)
+        let fileNodes = try await index.fileNodes(projectID: projectID)
+        let objectID = try XCTUnwrap(fileNodes.flatMap(\.chunks).first?.objectID)
+        try await cloud.deleteObject(objectID)
+
+        let collector = CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index
+        )
+        do {
+            _ = try await collector.createTombstones(policies: [projectID: .default])
+            XCTFail("引用对象缺失时必须中止")
+        } catch let error as V3GCError {
+            guard case .unsafe(let reason) = error else { return XCTFail("期望 unsafe") }
+            XCTAssertTrue(reason.contains("缺失"), reason)
+        }
+        XCTAssertTrue(cloud.tombstones.isEmpty, "中止时不得留下墓碑")
+    }
+
+    func testCT163_RetentionPlannerKeepsNewestAndBuckets() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let commits = (0..<40).map { index in
+            SnapshotCommit(
+                snapshotID: "s\(index)",
+                projectID: projectID,
+                deviceID: "d",
+                parentSnapshotID: nil,
+                committedAt: now.addingTimeInterval(-Double(index) * 3 * 3600),
+                manifestPayloadHash: "hash",
+                nodeCount: 1,
+                fileCount: 1,
+                totalBytes: 1
+            )
+        }
+        let retained = SnapshotRetentionPlanner.retained(
+            commits: commits,
+            policy: RetentionPolicy(keepLatest: 3, keepDaily: 2, keepWeekly: 1, keepMonthly: 1),
+            now: now
+        )
+        XCTAssertTrue(retained.contains("s0"))
+        XCTAssertTrue(retained.contains("s1"))
+        XCTAssertTrue(retained.contains("s2"))
+        XCTAssertFalse(retained.contains("s39"), "超过窗口的旧版本应被淘汰")
+        XCTAssertGreaterThan(retained.count, 3)
+    }
+}

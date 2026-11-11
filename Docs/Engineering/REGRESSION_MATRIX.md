@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-159）
+# 回归测试矩阵（CT-001 … CT-164）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -163,10 +163,15 @@
 | CT-157 | `testCT157_PackFormatRoundTripsEveryObject` | 对象包格式与引擎/恢复集成 | 是 | 否 |
 | CT-158 | `testCT158_HappyPathWithConsentReleasesLegacyLast` | v2→v3 迁移状态机（顺序/阻塞/续跑/同意） | 是 | 否 |
 | CT-159 | `testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes` | 持久化待上传队列（失败保留/软上限/续传） | 是 | 否 |
+| CT-160 | `testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter` | BackupEngine v3 适配层（浏览/Diff/恢复/校验） | 是 | 否 |
+| CT-161 | `testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace` | 服务层 v3 引擎集成与空间统计 | 是 | 否 |
+| CT-162 | `testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory` | 服务层 v2→v3 迁移与旧历史保留 | 是 | 否 |
+| CT-163 | `testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData` | v3 两阶段云端 GC 与安全中止 | 是 | 否 |
+| CT-164 | `testCT164_NewMacDiscoversAndRestoresV3Project` | 新 Mac v3 发现与按需恢复 | 是 | 否 |
 
 ## 门禁规则（CT-114 / CT-138）
 
-- 索引必须恰好登记 CT-001…CT-159，编号与测试名唯一，且每个测试都能在测试源码中找到。
+- 索引必须恰好登记 CT-001…CT-164，编号与测试名唯一，且每个测试都能在测试源码中找到。
 - `required=true` 的测试 **不允许** 标记 `envSkip`/`manualAcceptance`。
 - 门禁先构建 `CodeTimeCrashChild`，CT-098 的 SIGKILL 矩阵不得因缺少二进制而跳过。
 - 人工验收项（CT-037 百万文件、CT-044 磁盘写满）允许跳过并需写明原因。

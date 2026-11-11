@@ -1588,5 +1588,55 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "未确认上传的数据永不删除；spool 只在上传确认后释放；续传不重新编码"
+  },
+  {
+    "id": "CT-160",
+    "test": "testCT160_BackupBrowseDiffRestoreAndVerifyThroughTheAdapter",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "BackupEngine v3 适配层：备份/列表/浏览/读取/Diff/单文件恢复/全量校验",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "适配层不得泄露 v3 细节；损坏块必须让校验失败；单文件恢复只取所需数据"
+  },
+  {
+    "id": "CT-161",
+    "test": "testCT161_ServiceBacksUpBrowsesRestoresAndReportsSpace",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3IntegrationTests.swift",
+    "purpose": "服务层真正走 v3 引擎：设置切换、快照、浏览、恢复、空间统计",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "v3 模式不得写 v2 generations；恢复经 staging；spool 上传确认后清空"
+  },
+  {
+    "id": "CT-162",
+    "test": "testCT162_MigrationReleasesLegacyOnlyWithConsentAndKeepsHistory",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceMigrationIntegrationTests.swift",
+    "purpose": "服务层 v2→v3 迁移：基线验证、显式同意后才释放旧仓库、旧历史保留",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "未同意时旧仓库原样保留；切换后旧版本仍可列出；同意后才允许清理"
+  },
+  {
+    "id": "CT-163",
+    "test": "testCT163_TombstonesFirstThenSweepsOnlyExpiredUnreferencedData",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "v3 两阶段云端 GC：先墓碑、引用重算、宽限期后只删除无引用对象/版本",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "引用图不完整即中止；未过期墓碑不删除；保留版本必须仍可恢复"
+  },
+  {
+    "id": "CT-164",
+    "test": "testCT164_NewMacDiscoversAndRestoresV3Project",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3RecoveryTests.swift",
+    "purpose": "新 Mac：发现 v3 项目、用恢复密钥恢复版本、注册项目并继续浏览历史",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "恢复不下载 Kopia 仓库；跨设备命名空间可读；历史版本保持可见"
   }
 ]

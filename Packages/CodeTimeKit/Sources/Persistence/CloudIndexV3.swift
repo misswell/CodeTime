@@ -344,6 +344,18 @@ extension SQLiteStore {
         return 0
     }
 
+    /// A non-committed snapshot younger than a day is treated as publishing; an
+    /// older one was abandoned by a crash and must not block GC forever.
+    public func inFlightSnapshotCount(now: Date = Date()) throws -> Int {
+        let cutoff = now.addingTimeInterval(-24 * 3600).timeIntervalSince1970
+        return try scalarInt(
+            """
+            SELECT COUNT(*) FROM v3_snapshot_index
+            WHERE commit_state != 'committed' AND created_at >= \(cutoff);
+            """
+        )
+    }
+
     // MARK: - Cache index
 
     public func upsertCacheEntry(_ entry: CacheEntryV3) throws {
@@ -491,6 +503,10 @@ extension SQLiteStore: CloudSnapshotIndex {
 
     public func knownChunks(_ objectIDs: [String]) async throws -> [String: ChunkRecordV3] {
         try chunkRecords(objectIDs)
+    }
+
+    public func inFlightSnapshotCount() async throws -> Int {
+        try inFlightSnapshotCount(now: Date())
     }
 }
 

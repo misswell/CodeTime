@@ -11,6 +11,18 @@ public struct AppPaths: Sendable {
     public let recovery: URL
     public let schedulerLock: URL
     public let agentLock: URL
+    /// Legacy Kopia repositories moved here during migration. Kept until the user
+    /// approves releasing them (§14.5); never part of the v3 layout.
+    public let legacy: URL
+    public let legacyKopia: URL
+    /// Rebuildable v3 index data and the bounded encrypted-download cache.
+    public let cacheMetadata: URL
+    public let downloadedObjects: URL
+    /// Encrypted data that has not been confirmed uploaded. Never LRU-evicted.
+    public let spoolPending: URL
+    public let spoolJournal: URL
+    /// Verified restore staging; cleared on completion and on launch.
+    public let restoreStaging: URL
     /// Stable directory outside `root` that survives `replaceItemAt(root, …)`.
     /// Lifecycle coordination locks and migration journal files live here.
     public let lifecycleDir: URL
@@ -27,6 +39,13 @@ public struct AppPaths: Sendable {
         self.spool = root.appendingPathComponent("spool", isDirectory: true)
         self.logs = root.appendingPathComponent("logs", isDirectory: true)
         self.recovery = root.appendingPathComponent("recovery", isDirectory: true)
+        self.legacy = root.appendingPathComponent("legacy", isDirectory: true)
+        self.legacyKopia = root.appendingPathComponent("legacy/kopia", isDirectory: true)
+        self.cacheMetadata = root.appendingPathComponent("cache/metadata", isDirectory: true)
+        self.downloadedObjects = root.appendingPathComponent("cache/downloaded-objects", isDirectory: true)
+        self.spoolPending = root.appendingPathComponent("spool/pending", isDirectory: true)
+        self.spoolJournal = root.appendingPathComponent("spool/journal", isDirectory: true)
+        self.restoreStaging = root.appendingPathComponent("cache/restore-staging", isDirectory: true)
         // Lifecycle locks live OUTSIDE the replaceable data root so they survive
         // a whole-root swap during Beta → Release migration.
         self.lifecycleDir = root.deletingLastPathComponent()
@@ -52,9 +71,16 @@ public struct AppPaths: Sendable {
             database.deletingLastPathComponent(),
             repositories,
             cache,
+            cacheMetadata,
+            downloadedObjects,
+            restoreStaging,
             spool,
+            spoolPending,
+            spoolJournal,
             logs,
             recovery,
+            legacy,
+            legacyKopia,
             lifecycleDir,
         ] {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -13,6 +13,7 @@ public enum CloudRestoreError: Error, Sendable, Equatable {
     case destinationExists(String)
     case chunkMissing(String)
     case fileHashMismatch(path: String)
+    case fileTooLarge(path: String, size: Int64, limit: Int)
     case cancelled
 
     public var diagnosticCode: String {
@@ -23,6 +24,7 @@ public enum CloudRestoreError: Error, Sendable, Equatable {
         case .chunkMissing: return "ICLOUD_OBJECT_CORRUPTED"
         case .fileHashMismatch: return "ICLOUD_OBJECT_CORRUPTED"
         case .invalidPath, .destinationExists: return "ICLOUD_RESTORE_FAILED"
+        case .fileTooLarge: return "ICLOUD_RESTORE_FAILED"
         case .cancelled: return "ICLOUD_RESTORE_FAILED"
         }
     }
@@ -102,7 +104,7 @@ public struct CloudRestoreReport: Sendable, Equatable {
 /// interrupted restore leaves the user's existing tree exactly as it was.
 public struct CloudRestoreEngine: Sendable {
     private let masterKey: Data
-    private let source: CloudObjectSource
+    let source: CloudObjectSource
     private let options: RestoreOptions
     private let chunker: ChunkerConfig
 
@@ -389,6 +391,140 @@ public struct CloudRestoreEngine: Sendable {
         }
         report.filesRestored += 1
         report.bytesWritten += written
+    }
+
+    // MARK: - Browsing / single-file read
+
+    /// Directory listing straight from the manifest's tree. Directories come
+    /// first, then files, both sorted by path so the UI is stable.
+    public func listDirectory(
+        projectID: UUID,
+        snapshotID: String,
+        path: String
+    ) async throws -> [FileEntry] {
+        let manifest = try await loadManifest(projectID: projectID, snapshotID: snapshotID)
+        let node = try await directoryNode(at: path, rootNodeID: manifest.rootNodeID)
+        var entries: [FileEntry] = []
+        for directory in node.directories {
+            let childPath = node.path.isEmpty
+                ? directory.name
+                : node.path + "/" + directory.name
+            entries.append(FileEntry(
+                path: childPath,
+                name: directory.name,
+                isDirectory: true,
+                size: directory.totalBytes
+            ))
+        }
+        for file in node.files {
+            entries.append(FileEntry(
+                path: file.path,
+                name: MerkleTreeBuilder.lastComponent(of: file.path),
+                isDirectory: file.kind == .directory,
+                isSymlink: file.kind == .symlink,
+                size: file.size,
+                modifiedAt: file.modifiedAt,
+                objectID: file.contentHash
+            ))
+        }
+        return entries.sorted {
+            if $0.isDirectory != $1.isDirectory { return $0.isDirectory && !$1.isDirectory }
+            return $0.path < $1.path
+        }
+    }
+
+    /// Reads exactly one file, downloading only the chunks it references.
+    public func readFileData(
+        projectID: UUID,
+        snapshotID: String,
+        path: String,
+        maxBytes: Int,
+        isCancelled: @Sendable () -> Bool = { false }
+    ) async throws -> Data {
+        let manifest = try await loadManifest(projectID: projectID, snapshotID: snapshotID)
+        guard let file = try await fileNode(path: path, rootNodeID: manifest.rootNodeID) else {
+            throw CloudRestoreError.pathNotFound(path)
+        }
+        guard file.kind == .file else {
+            throw CloudRestoreError.pathNotFound(path)
+        }
+        if file.size > Int64(maxBytes) {
+            throw CloudRestoreError.fileTooLarge(path: path, size: file.size, limit: maxBytes)
+        }
+
+        let packCache = PackCache(limit: 2)
+        var data = Data()
+        data.reserveCapacity(Int(file.size))
+        for chunk in file.chunks {
+            if isCancelled() { throw CloudRestoreError.cancelled }
+            let decoded = try await decodedChunk(chunk, packCache: packCache)
+            data.append(decoded)
+            if data.count > maxBytes {
+                throw CloudRestoreError.fileTooLarge(path: path, size: file.size, limit: maxBytes)
+            }
+        }
+        if options.verifyHashes, let expected = file.contentHash {
+            guard CanonicalHashing.sha256Hex(data) == expected else {
+                throw CloudRestoreError.fileHashMismatch(path: path)
+            }
+        }
+        return data
+    }
+
+    func directoryNode(at path: String, rootNodeID: String) async throws -> DirectoryNode {
+        let resolved = try await node(at: path, rootNodeID: rootNodeID)
+        // A path that names a file is not a directory.
+        if path.isEmpty { return resolved }
+        let parentPath = MerkleTreeBuilder.parentPath(of: path)
+        let parent = parentPath.isEmpty
+            ? try await source.readNode(rootNodeID)
+            : try await node(at: parentPath, rootNodeID: rootNodeID)
+        let name = MerkleTreeBuilder.lastComponent(of: path)
+        if parent.files.contains(where: { MerkleTreeBuilder.lastComponent(of: $0.path) == name }) {
+            throw CloudRestoreError.pathNotFound(path)
+        }
+        return resolved
+    }
+
+    func fileNode(path: String, rootNodeID: String) async throws -> FileNode? {
+        let parentPath = MerkleTreeBuilder.parentPath(of: path)
+        let parent = parentPath.isEmpty
+            ? try await source.readNode(rootNodeID)
+            : try await node(at: parentPath, rootNodeID: rootNodeID)
+        let name = MerkleTreeBuilder.lastComponent(of: path)
+        return parent.files.first { file in
+            file.path == path || MerkleTreeBuilder.lastComponent(of: file.path) == name
+        }
+    }
+
+    /// One chunk: cache → pack → standalone object, then decrypt and check the
+    /// plaintext size. Never trusts the local index over the actual bytes.
+    func decodedChunk(_ chunk: ChunkRef, packCache: PackCache) async throws -> Data {
+        if let cache = options.cache, let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
+            return cached
+        }
+        let payload: Data
+        if let packID = chunk.packID {
+            let pack: Data
+            if let cached = packCache.get(packID) {
+                pack = cached
+            } else {
+                pack = try await source.readPack(packID)
+                packCache.put(packID, pack)
+            }
+            payload = try ObjectPackReader().object(chunk.objectID, in: pack)
+        } else {
+            payload = try await source.readObject(chunk.objectID)
+        }
+        let data = try ObjectEncoder(masterKey: masterKey).decode(
+            payload,
+            objectID: chunk.objectID,
+            expectingSize: Int(chunk.plaintextSize)
+        )
+        if let cache = options.cache {
+            try await cache.storeChunk(objectID: chunk.objectID, data: data)
+        }
+        return data
     }
 
     // MARK: - Path safety

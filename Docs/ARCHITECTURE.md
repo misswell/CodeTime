@@ -1,6 +1,56 @@
 # CodeTime 架构
 
-## 1. 总览
+## 0. CodeTime 2.0：云端优先引擎（v3）
+
+自 Cloud Format v3 起，新备份不再依赖本地 Kopia 仓库。完整历史保存在
+`iCloud Drive/CodeTime/v3`，本地只保留三类数据：
+
+```text
+Application Support/CodeTime/
+├── database/codetime.sqlite          # 可重建索引（文件/块/版本/任务/缓存/迁移）
+├── cache/
+│   ├── downloaded-objects/           # 有界 LRU 下载缓存（可安全清理）
+│   └── restore-staging/              # 恢复暂存，成功后原子提交
+├── spool/
+│   ├── pending/                      # 已加密、未确认上传（永不因缓存上限删除）
+│   └── journal/                      # 任务日志（SQLite 为主）
+├── legacy/kopia/                     # 迁移后的旧仓库临时位置
+├── logs/ recovery/
+└── repositories/                     # 仅旧引擎使用；v3 不读取
+```
+
+数据流：
+
+```text
+项目文件 → 流式 FastCDC 分块 → HMAC 对象 ID → LZFSE 压缩 → AEAD 加密
+        → spool/pending → UploadQueue → iCloud objects/packs
+        → 目录 Merkle 节点 → 加密 Manifest → Commit Marker
+```
+
+- 发布顺序不可交换；Commit 是版本可见的唯一入口。
+- 恢复只下载目标文件需要的块或包，写入 staging 并校验 SHA-256 后原子提交。
+- 上传确认后才释放 spool 副本；上传成功后按需驱逐 iCloud 本地副本。
+- v2→v3 迁移顺序：旧本地仓库检测 → v2 云端发布/校验 → v3 基线创建/校验 →
+  用户明确同意 → 释放旧本地仓库。旧历史在迁移后仍可恢复。
+
+详细格式见 [CLOUD_FORMAT_V3.md](CLOUD_FORMAT_V3.md)。
+
+### 引擎选择
+
+`AppSettings.engineMode` 决定新快照写入哪个引擎：
+
+| 模式 | 行为 |
+|---|---|
+| `kopia` | 旧版兼容：本地 Kopia 快照 + Cloud Format v2 发布 |
+| `cloudFirst` | 云端优先：CloudFirstBackupEngine + Cloud Format v3 |
+
+读取/恢复按版本归属选择引擎：存在 `v3_snapshot_index` 记录的版本走 v3，
+其余走 Kopia；比较/恢复不混用两种格式。迁移基线验证通过后自动切换到
+`cloudFirst`，旧引擎保留为只读兼容路径。
+
+---
+
+## 1. 总览（v2 / 兼容路径）
 
 CodeTime 把“备份算法”和“云端封装”严格分开：
 

@@ -67,6 +67,8 @@ public struct BackupRunReport: Sendable, Equatable {
     public var nodesUploaded: Int
     public var packsUploaded: Int
     public var nodeCount: Int
+    public var excludedFileCount: Int
+    public var excludedSize: Int64
     public var committed: Bool
     public var manifestPayloadHash: String?
     /// Non-fatal notes (excluded content, allowed partial scans).
@@ -87,6 +89,8 @@ public struct BackupRunReport: Sendable, Equatable {
         nodesUploaded: Int = 0,
         packsUploaded: Int = 0,
         nodeCount: Int = 0,
+        excludedFileCount: Int = 0,
+        excludedSize: Int64 = 0,
         committed: Bool = false,
         manifestPayloadHash: String? = nil,
         notes: [String] = []
@@ -105,6 +109,8 @@ public struct BackupRunReport: Sendable, Equatable {
         self.nodesUploaded = nodesUploaded
         self.packsUploaded = packsUploaded
         self.nodeCount = nodeCount
+        self.excludedFileCount = excludedFileCount
+        self.excludedSize = excludedSize
         self.committed = committed
         self.manifestPayloadHash = manifestPayloadHash
         self.notes = notes
@@ -180,7 +186,9 @@ public struct CloudFirstBackupEngine: Sendable {
         var report = BackupRunReport(
             snapshotID: snapshotID,
             parentSnapshotID: parent?.snapshotID,
-            filesScanned: scan.fileCount
+            filesScanned: scan.fileCount,
+            excludedFileCount: scan.excludedCount,
+            excludedSize: scan.excludedBytes
         )
 
         let encoder = ObjectEncoder(masterKey: masterKey)

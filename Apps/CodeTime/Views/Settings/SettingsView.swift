@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import SharedModels
+import BackupEngine
 import CodeTimeCore
 import Diagnostics
 
@@ -293,12 +294,21 @@ private struct CloudSettingsView: View {
                 }
 
                 // MARK: 本机备份
-                SettingsCard(title: "本机备份", subtitle: "本地仓库始终保留完整副本，云端失败不影响本地数据。") {
+                SettingsCard(
+                    title: "本机备份",
+                    subtitle: model.settings.engineMode == .cloudFirst
+                        ? "云端优先引擎：完整历史在 iCloud，本地只保留索引、有界缓存与受保护的待上传数据。"
+                        : "本地仓库始终保留完整副本，云端失败不影响本地数据。"
+                ) {
                     HStack(spacing: 24) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(CodeTimeFormat.bytes(model.repositoryBytes ?? 0))
+                            Text(CodeTimeFormat.bytes(
+                                model.settings.engineMode == .cloudFirst
+                                    ? (model.v3Storage?.pendingBytes ?? 0) + (model.v3Storage?.cacheBytes ?? 0)
+                                    : (model.repositoryBytes ?? 0)
+                            ))
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
-                            Text("本机仓库占用")
+                            Text(model.settings.engineMode == .cloudFirst ? "本地缓存 + 待上传" : "本机仓库占用")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -312,6 +322,111 @@ private struct CloudSettingsView: View {
                         Spacer()
                         Button("从云端恢复…") { model.showCloudRecovery = true }
                             .buttonStyle(.bordered)
+                    }
+                }
+
+                if model.settings.engineMode == .cloudFirst {
+                    SettingsCard(
+                        title: "本地空间与缓存",
+                        subtitle: "下载缓存可以安全清理；待上传数据是唯一副本，任何情况下都不会因缓存上限被删除。"
+                    ) {
+                        if let storage = model.v3Storage {
+                            HStack(spacing: 24) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(CodeTimeFormat.bytes(storage.cacheBytes) + " / " + CodeTimeFormat.bytes(storage.cacheBudgetBytes))
+                                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                    Text("下载缓存")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(CodeTimeFormat.bytes(storage.pendingBytes))
+                                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                    Text("待上传数据（\(storage.pendingTasks) 个任务）")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(CodeTimeFormat.bytes(storage.indexedChunkBytes))
+                                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                    Text("元数据索引")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            HStack(spacing: 10) {
+                                Picker("缓存策略", selection: Binding(
+                                    get: { model.settings.cachePreset },
+                                    set: { preset in
+                                        Task { await model.applyCachePreset(preset) }
+                                    }
+                                )) {
+                                    ForEach(AppSettings.CachePreset.allCases, id: \.self) { preset in
+                                        Text(preset.displayName).tag(preset)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: 260)
+                                Button("清理下载缓存") {
+                                    Task { await model.clearDownloadCache() }
+                                }
+                                .disabled(storage.cacheBytes == 0)
+                                Button("查看待上传任务") {
+                                    Task { await model.resumePendingUploads() }
+                                }
+                                .disabled(storage.pendingTasks == 0)
+                                Spacer()
+                            }
+                            if storage.isSpoolOversized {
+                                Text("待上传数据已达到软上限，新备份会暂停。请等待 iCloud 恢复；CodeTime 不会删除这些数据。")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        } else {
+                            Text("本地空间统计暂不可用。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let migration = model.migrationStatus, migration.phase != .complete {
+                    SettingsCard(
+                        title: "迁移旧备份",
+                        subtitle: "旧历史继续保留在 Cloud Format v2；只有新格式基线验证通过并且你明确同意后，才会释放旧本地仓库。"
+                    ) {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: migration.phase == .blocked
+                                  ? "exclamationmark.triangle.fill"
+                                  : "clock.arrow.circlepath")
+                                .foregroundStyle(migration.phase == .blocked ? CT.warning : CT.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(migration.phase.rawValue)
+                                    .font(.callout.weight(.semibold))
+                                Text(migration.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if migration.legacyLocalBytes > 0 {
+                                    Text("旧本地仓库占用：\(CodeTimeFormat.bytes(migration.legacyLocalBytes))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if migration.phase == .legacyLocalCleanupPending {
+                                Button("释放旧本地空间…") {
+                                    Task { await model.runMigration(releaseLegacyLocalSpace: true) }
+                                }
+                                .buttonStyle(.bordered)
+                            } else if migration.phase == .blocked {
+                                Button("重新尝试") {
+                                    Task { await model.runMigration() }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
                     }
                 }
 

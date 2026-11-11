@@ -59,8 +59,12 @@ struct DashboardView: View {
                     )
                     MetricCard(
                         title: "云端备份容量",
-                        value: model.cloudSummary.map { CodeTimeFormat.bytes($0.byteSize) } ?? "纯本地",
-                        caption: model.cloudSummary == nil ? "未启用 iCloud 镜像" : "增量去重后",
+                        value: model.settings.engineMode == .cloudFirst
+                            ? "已同步"
+                            : (model.cloudSummary.map { CodeTimeFormat.bytes($0.byteSize) } ?? "纯本地"),
+                        caption: model.settings.engineMode == .cloudFirst
+                            ? "按内容块去重 · 按需恢复"
+                            : (model.cloudSummary == nil ? "未启用 iCloud 镜像" : "增量去重后"),
                         symbol: "icloud.and.arrow.up",
                         tint: CT.mint
                     )
@@ -169,35 +173,116 @@ struct DashboardView: View {
 struct StorageSummaryCard: View {
     @EnvironmentObject var model: AppModel
 
+    private var isV3: Bool { model.settings.engineMode == .cloudFirst }
+
     var body: some View {
         CTCard {
-            HStack(spacing: 14) {
-                Image(systemName: "internaldrive")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(CT.accent)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(CT.accent.opacity(0.12)))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("本地加密仓库")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Kopia 仓库保留完整数据副本，用于快速浏览与本地恢复。")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    Image(systemName: isV3 ? "icloud.and.arrow.up" : "internaldrive")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(CT.accent)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(CT.accent.opacity(0.12)))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(isV3 ? "云端优先 · 本地只保留必要数据" : "本地加密仓库")
+                            .font(.subheadline.weight(.semibold))
+                        Text(isV3
+                             ? "完整历史保存在 iCloud；本地是索引、有限下载缓存和受保护的待上传数据。"
+                             : "Kopia 仓库保留完整数据副本，用于快速浏览与本地恢复。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if isV3 {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(CodeTimeFormat.bytes(model.v3Storage?.cacheBytes ?? 0))
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            Text("下载缓存 / \(CodeTimeFormat.bytes(model.v3Storage?.cacheBudgetBytes ?? 0))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(model.repositoryBytes.map(CodeTimeFormat.bytes) ?? "无法统计")
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            Text("去重后占用")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Button("存储设置") {
+                        model.selectedSection = .settings
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if let storage = model.v3Storage {
+                    HStack(spacing: 18) {
+                        storageItem(
+                            "元数据索引",
+                            CodeTimeFormat.bytes(storage.indexedChunkBytes),
+                            "重建即可恢复"
+                        )
+                        storageItem(
+                            "下载缓存",
+                            CodeTimeFormat.bytes(storage.cacheBytes),
+                            "可安全清理"
+                        )
+                        storageItem(
+                            "待上传数据",
+                            CodeTimeFormat.bytes(storage.pendingBytes),
+                            storage.pendingTasks == 0 ? "云端已确认" : "\(storage.pendingTasks) 个任务 · 不可删除"
+                        )
+                        storageItem(
+                            "iCloud 备份",
+                            model.cloudSummary.map { CodeTimeFormat.bytes($0.byteSize) } ?? "已启用",
+                            "最终恢复来源"
+                        )
+                        Spacer()
+                        if storage.cacheBytes > 0 {
+                            Button("清理下载缓存") {
+                                Task { await model.clearDownloadCache() }
+                            }
+                            .controlSize(.small)
+                        }
+                        if storage.pendingTasks > 0 {
+                            Button("立即上传") {
+                                Task { await model.resumePendingUploads() }
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    if storage.isSpoolOversized {
+                        Label(
+                            "待上传数据已达到软上限，新备份会暂停而不是删除未上传数据。请等待 iCloud 恢复。",
+                            systemImage: "exclamationmark.triangle"
+                        )
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
+                    }
+                } else if model.repositoryBytes ?? 0 > 0 {
+                    HStack {
+                        Text("检测到旧版本地仓库。迁移会保留旧历史并验证新格式，之后才允许释放本地空间。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("迁移到云端优先引擎") {
+                            Task { await model.runMigration() }
+                        }
+                        .controlSize(.small)
+                    }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(model.repositoryBytes.map(CodeTimeFormat.bytes) ?? "无法统计")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    Text("去重后占用")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Button("存储设置") {
-                    model.selectedSection = .settings
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
+        }
+    }
+
+    private func storageItem(_ title: String, _ value: String, _ caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 13, weight: .semibold, design: .rounded))
+            Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
     }
 }

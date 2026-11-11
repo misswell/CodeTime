@@ -689,6 +689,7 @@ struct CloudRecoverySheet: View {
     @State private var isScanning = false
     @State private var hasScanned = false
     @State private var selectedCandidateID: UUID?
+    @State private var selectedV3ID: UUID?
     @State private var isRestoring = false
     @State private var restoreAttempts = 0
     @State private var errorMessage: String?
@@ -697,15 +698,18 @@ struct CloudRecoverySheet: View {
         model.recoveryCandidates.first { $0.id == selectedCandidateID }
     }
 
+    private var selectedV3Candidate: V3RecoveryProject? {
+        model.v3RecoveryCandidates.first { $0.id == selectedV3ID }
+    }
+
     private var canScan: Bool {
         storageRoot != nil && !key.trimmingCharacters(in: .whitespaces).isEmpty && !isRestoring
     }
 
     private var canRestore: Bool {
-        guard let selectedCandidate, selectedCandidate.isRestorable, storageRoot != nil, !isRestoring else {
-            return false
-        }
-        return true
+        guard storageRoot != nil, !isRestoring else { return false }
+        if let selectedV3Candidate { return selectedV3Candidate.restorable }
+        return selectedCandidate?.isRestorable == true
     }
 
     var body: some View {
@@ -854,7 +858,7 @@ struct CloudRecoverySheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                } else if model.recoveryCandidates.isEmpty {
+                } else if model.recoveryCandidates.isEmpty && model.v3RecoveryCandidates.isEmpty {
                     Text("没有找到能用此恢复密钥解密的备份。请确认目录与密钥来自同一账号。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -864,9 +868,12 @@ struct CloudRecoverySheet: View {
                             ForEach(model.recoveryCandidates) { candidate in
                                 candidateRow(candidate)
                             }
+                            ForEach(model.v3RecoveryCandidates) { candidate in
+                                v3CandidateRow(candidate)
+                            }
                         }
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: 240)
                 }
 
                 Text("恢复始终选择一份历史版本；对象在恢复时会逐个校验 SHA-256，不会混用不同设备的数据。")
@@ -880,6 +887,7 @@ struct CloudRecoverySheet: View {
         let isSelected = candidate.id == selectedCandidateID
         return Button {
             selectedCandidateID = candidate.id
+            selectedV3ID = nil
             errorMessage = nil
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -949,6 +957,69 @@ struct CloudRecoverySheet: View {
         return parts.joined(separator: " · ")
     }
 
+    /// §9.5: a v3 project can be restored directly, without downloading any
+    /// repository. The row is deliberately separate from the Kopia candidates so
+    /// the two formats are never mixed.
+    private func v3CandidateRow(_ candidate: V3RecoveryProject) -> some View {
+        let isSelected = candidate.id == selectedV3ID
+        return Button {
+            selectedV3ID = candidate.id
+            selectedCandidateID = nil
+            errorMessage = nil
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isSelected ? CT.accent : Color.secondary)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("云端优先项目 \(candidate.projectID.uuidString.prefix(8))")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Text("v3")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(CT.accent.opacity(0.14)))
+                    }
+                    Text(v3Subtitle(candidate))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !candidate.restorable {
+                        Text(candidate.detail)
+                            .font(.caption2)
+                            .foregroundStyle(CT.danger)
+                    } else {
+                        Text("恢复时只下载该版本需要的数据块，不需要旧版 Kopia 仓库。")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? CT.accent.opacity(0.10) : Color.primary.opacity(0.03))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isRestoring || !candidate.restorable)
+        .opacity(candidate.restorable ? 1 : 0.65)
+    }
+
+    private func v3Subtitle(_ candidate: V3RecoveryProject) -> String {
+        var parts: [String] = []
+        if let date = candidate.latestBackupAt {
+            parts.append("最近备份 \(CodeTimeFormat.relative(date))")
+        }
+        parts.append("\(candidate.snapshotCount) 个版本")
+        parts.append("\(CodeTimeFormat.count(candidate.latestFileCount)) 个文件")
+        parts.append(CodeTimeFormat.bytes(candidate.latestBytes))
+        return parts.joined(separator: " · ")
+    }
+
     private func restoreProgressCard(_ job: CloudRestoreJob) -> some View {
         CTCard {
             VStack(alignment: .leading, spacing: 8) {
@@ -1015,8 +1086,39 @@ struct CloudRecoverySheet: View {
             storageRoot = panel.url
             hasScanned = false
             selectedCandidateID = nil
+            selectedV3ID = nil
             errorMessage = nil
             model.recoveryCandidates = []
+            model.v3RecoveryCandidates = []
+        }
+    }
+
+    /// v3 restore writes a fresh project folder; the user picks where it lands.
+    private func restoreV3(_ candidate: V3RecoveryProject, storageRoot: URL) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "选择恢复位置"
+        panel.message = "选择恢复项目的父文件夹；CodeTime 会在其中创建项目目录"
+        guard panel.runModal() == .OK, let parent = panel.url else { return }
+        let destination = parent.appendingPathComponent("CodeTime-恢复-\(candidate.projectID.uuidString.prefix(8))")
+        isRestoring = true
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await model.recoverV3Project(
+                    candidate: candidate,
+                    storageRoot: storageRoot,
+                    recoveryKey: key,
+                    destination: destination
+                )
+                isRestoring = false
+                dismiss()
+            } catch {
+                isRestoring = false
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -1030,8 +1132,11 @@ struct CloudRecoverySheet: View {
             do {
                 let candidates = try await model.loadRecoveryCandidates(storageRoot: storageRoot, recoveryKey: key)
                 selectedCandidateID = candidates.first(where: { $0.isRestorable })?.id
+                if selectedCandidateID == nil {
+                    selectedV3ID = model.v3RecoveryCandidates.first(where: { $0.restorable })?.id
+                }
                 isScanning = false
-                if candidates.isEmpty {
+                if candidates.isEmpty && model.v3RecoveryCandidates.isEmpty {
                     errorMessage = "此目录中没有可用该恢复密钥解密的备份。"
                 }
             } catch {
@@ -1042,7 +1147,12 @@ struct CloudRecoverySheet: View {
     }
 
     private func restore() {
-        guard let storageRoot, let candidate = selectedCandidate, candidate.isRestorable else { return }
+        guard let storageRoot else { return }
+        if let candidate = selectedV3Candidate, candidate.restorable {
+            restoreV3(candidate, storageRoot: storageRoot)
+            return
+        }
+        guard let candidate = selectedCandidate, candidate.isRestorable else { return }
         isRestoring = true
         restoreAttempts += 1
         errorMessage = nil
