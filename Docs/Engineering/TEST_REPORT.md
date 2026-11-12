@@ -18,7 +18,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | 门禁结果 | `PASS`，328 tests / 0 failures / 3 skipped |
 | 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-229（227 required） |
 | 运行标识 | `202611120900`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
-| 门禁日志 | `Docs/Engineering/TestArtifacts/46805da-reliability-p0p1-gate.log`（原始输出归档） |
+| 门禁日志 | `Docs/Engineering/TestArtifacts/e6e8090-reliability-final-gate.log`（原始输出归档） |
 
 ## 2. 环境
 
