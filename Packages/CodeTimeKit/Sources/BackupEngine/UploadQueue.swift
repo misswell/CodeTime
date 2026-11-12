@@ -221,6 +221,32 @@ public actor UploadQueue: CloudObjectSink {
         }
     }
 
+    /// Pack lifecycle with the same journal priority as objects. The protocol
+    /// default would collapse `.inaccessible` into “not uploaded”, which is
+    /// unsafe for incremental reuse.
+    public func packState(_ packID: String) async throws -> CloudObjectState {
+        let taskID = Self.taskID(kind: Self.packKind, id: packID)
+        if let task = try? await index.uploadTask(taskID) {
+            switch task.state {
+            case .pending, .uploading:
+                return .staged
+            case .failed:
+                return .failed("上传任务失败：\(task.taskID)")
+            case .uploadedPendingCleanup, .uploaded, .completed:
+                return .uploaded(storedSize: Int(task.fileSize))
+            }
+        }
+        let url = spoolURL(kind: Self.packKind, id: packID)
+        if fileManager.fileExists(atPath: url.path) {
+            return .staged
+        }
+        do {
+            return try await base.packState(packID)
+        } catch {
+            return .inaccessible(error.localizedDescription)
+        }
+    }
+
     /// The single write transaction for an object: lock → state → spool →
     /// validate → upload → confirm → cleanup. No caller may publish a reference
     /// until this returns.
@@ -311,7 +337,13 @@ public actor UploadQueue: CloudObjectSink {
                 break
             }
         }
-        if try await base.hasPack(packID) { return false }
+        if try await waitForConfirmedRemote(kind: Self.packKind, id: packID) {
+            // Confirmed location is not enough: the existing pack must still
+            // match the payload (same ID, same bytes). The base store performs
+            // the strict comparison and never overwrites a mismatch.
+            _ = try await base.putPack(payload, packID: packID)
+            return false
+        }
         // Structural validation is unconditional; the injected validator adds
         // object-level AEAD/identity checks (see CodeTimeService).
         do {
@@ -360,7 +392,11 @@ public actor UploadQueue: CloudObjectSink {
     private func stage(taskID: String, kind: String, id: String, payload: Data) async throws {
         try ensureDirectories()
         let url = spoolURL(kind: kind, id: id)
-        let current = try currentSpoolBytes()
+        // Quota check + write must be one cross-process critical section. A
+        // per-actor cache would let UI and Agent each spend the full soft limit.
+        let quotaFD = try openSpoolQuotaLock()
+        defer { close(quotaFD) }
+        let current = try currentSpoolBytes(refresh: true)
         // Re-staging the same object replaces its own bytes; do not count them
         // twice (otherwise a retry could spuriously hit the soft limit).
         let existing = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
@@ -481,94 +517,84 @@ public actor UploadQueue: CloudObjectSink {
         isCancelled: @escaping @Sendable () -> Bool = { false }
     ) async -> UploadDrainReport {
         var report = UploadDrainReport()
+        let pageSize = 10_000
         do {
-            // A crash during upload leaves `.uploading`; it is not proof of an
-            // upload. Resetting is safe even if another process is uploading the
-            // same task: writes are idempotent, and the loser sees the file gone
-            // and confirms the object in the cloud instead.
-            for stale in try await index.pendingUploads(state: .uploading, limit: 10_000) {
-                try await index.updateUploadState(stale.taskID, state: .pending, bumpRetry: false)
-            }
-            // Clean up tasks whose upload was already confirmed.
-            var cleanupOnly = try await index.pendingUploads(state: .uploadedPendingCleanup, limit: 10_000)
-            cleanupOnly += try await index.pendingUploads(state: .uploaded, limit: 10_000)
-            cleanupOnly += try await index.pendingUploads(state: .completed, limit: 10_000)
-            for task in cleanupOnly {
-                let url = URL(fileURLWithPath: task.localPath)
-                if fileManager.fileExists(atPath: url.path) {
-                    do { try fileManager.removeItem(at: url) }
-                    catch { continue }
+            // Reset stale `.uploading` rows page by page. A crash during upload
+            // is not proof of an upload; the loser later confirms against cloud.
+            var resetCursor: UploadTaskCursor?
+            while true {
+                let page = try await index.pendingUploads(
+                    after: resetCursor, state: .uploading, limit: pageSize
+                )
+                guard !page.isEmpty else { break }
+                for stale in page {
+                    try await index.updateUploadState(stale.taskID, state: .pending, bumpRetry: false)
                 }
-                try? await index.removeUpload(task.taskID)
+                resetCursor = UploadTaskCursor(page[page.count - 1])
             }
 
-            var work = try await index.pendingUploads(state: .pending, limit: 10_000)
-            work += try await index.pendingUploads(state: .failed, limit: 10_000)
-            work.sort { $0.createdAt < $1.createdAt }
-
-            var retryExhausted = 0
-            var deferred = 0
-            var queue: [PendingUploadV3] = []
-            let now = Date()
-            for task in work {
-                if task.retryCount >= configuration.maxRetries {
-                    retryExhausted += 1
-                } else if let nextAttempt = task.nextAttemptAt, nextAttempt > now {
-                    // Exponential backoff is durable: relaunching the app must not
-                    // turn it into a tight retry loop.
-                    deferred += 1
-                } else {
-                    queue.append(task)
+            // Clean up already-confirmed tasks in stable pages.
+            for state in [UploadTaskState.uploadedPendingCleanup, .uploaded, .completed] {
+                var cursor: UploadTaskCursor?
+                while true {
+                    let page = try await index.pendingUploads(
+                        after: cursor, state: state, limit: pageSize
+                    )
+                    guard !page.isEmpty else { break }
+                    for task in page {
+                        let url = URL(fileURLWithPath: task.localPath)
+                        if fileManager.fileExists(atPath: url.path) {
+                            do { try fileManager.removeItem(at: url) }
+                            catch { continue }
+                        }
+                        try? await index.removeUpload(task.taskID)
+                    }
+                    cursor = UploadTaskCursor(page[page.count - 1])
                 }
             }
-            report.skippedRetryExhausted = retryExhausted
-            report.deferred = deferred
-            if retryExhausted > 0 {
-                report.stoppedReason = "\(retryExhausted) 个上传任务已超过重试上限，数据仍保留在待上传目录"
-            }
-            guard !queue.isEmpty else { return report }
 
-            var next = 0
             var stopScheduling = false
-            let window = min(configuration.uploadConcurrency, queue.count)
-            await withTaskGroup(of: Result<DrainOutcome, Error>.self) { group in
-                func enqueue() {
-                    guard !stopScheduling, next < queue.count else { return }
-                    let task = queue[next]
-                    next += 1
-                    group.addTask { [self] in
-                        if isCancelled() {
-                            return .failure(CloudFirstEngineError.cancelled)
-                        }
-                        do {
-                            return .success(try await drain(task))
-                        } catch {
-                            return .failure(error)
+            // Pending then failed, each paginated with a durable cursor. A
+            // backlog larger than one page must never strand later tasks.
+            for state in [UploadTaskState.pending, .failed] {
+                var cursor: UploadTaskCursor?
+                while !stopScheduling && !isCancelled() {
+                    let page = try await index.pendingUploads(
+                        after: cursor, state: state, limit: pageSize
+                    )
+                    guard !page.isEmpty else { break }
+                    cursor = UploadTaskCursor(page[page.count - 1])
+
+                    var retryExhausted = 0
+                    var deferred = 0
+                    var queue: [PendingUploadV3] = []
+                    let now = Date()
+                    for task in page {
+                        if task.retryCount >= configuration.maxRetries {
+                            retryExhausted += 1
+                        } else if let nextAttempt = task.nextAttemptAt, nextAttempt > now {
+                            deferred += 1
+                        } else {
+                            queue.append(task)
                         }
                     }
-                }
-                for _ in 0..<window { enqueue() }
-                while let result = await group.next() {
-                    report.attempted += 1
-                    switch result {
-                    case .success(let outcome):
-                        switch outcome {
-                        case .uploaded(let bytes):
-                            report.uploaded += 1
-                            report.bytesUploaded += bytes
-                        case .alreadyPresent:
-                            report.alreadyPresent += 1
-                        case .busy:
-                            report.skippedBusy += 1
-                        }
-                        enqueue()
-                    case .failure(let error):
-                        report.failed += 1
-                        report.errors.append("\(error)")
-                        // Keep the remaining tasks staged, but do not keep
-                        // hitting a network that is clearly unavailable.
-                        stopScheduling = true
+                    report.skippedRetryExhausted += retryExhausted
+                    report.deferred += deferred
+                    if retryExhausted > 0 {
+                        report.stoppedReason =
+                            "\(report.skippedRetryExhausted) 个上传任务已超过重试上限，数据仍保留在待上传目录"
                     }
+                    guard !queue.isEmpty else { continue }
+
+                    let batch = await drainBatch(queue, isCancelled: isCancelled)
+                    report.attempted += batch.report.attempted
+                    report.uploaded += batch.report.uploaded
+                    report.bytesUploaded += batch.report.bytesUploaded
+                    report.alreadyPresent += batch.report.alreadyPresent
+                    report.skippedBusy += batch.report.skippedBusy
+                    report.failed += batch.report.failed
+                    report.errors.append(contentsOf: batch.report.errors)
+                    stopScheduling = batch.stopScheduling
                 }
             }
         } catch {
@@ -578,10 +604,95 @@ public actor UploadQueue: CloudObjectSink {
         return report
     }
 
+    private func drainBatch(
+        _ tasks: [PendingUploadV3],
+        isCancelled: @escaping @Sendable () -> Bool
+    ) async -> (report: UploadDrainReport, stopScheduling: Bool) {
+        var report = UploadDrainReport()
+        var next = 0
+        var stopScheduling = false
+        let window = min(configuration.uploadConcurrency, tasks.count)
+        await withTaskGroup(of: Result<DrainOutcome, Error>.self) { group in
+            func enqueue() {
+                guard !stopScheduling, next < tasks.count else { return }
+                let task = tasks[next]
+                next += 1
+                group.addTask { [self] in
+                    if isCancelled() {
+                        return .failure(CloudFirstEngineError.cancelled)
+                    }
+                    do {
+                        return .success(try await drain(task))
+                    } catch {
+                        return .failure(error)
+                    }
+                }
+            }
+            for _ in 0..<window { enqueue() }
+            while let result = await group.next() {
+                report.attempted += 1
+                switch result {
+                case .success(let outcome):
+                    switch outcome {
+                    case .uploaded(let bytes):
+                        report.uploaded += 1
+                        report.bytesUploaded += bytes
+                    case .alreadyPresent:
+                        report.alreadyPresent += 1
+                    case .busy:
+                        report.skippedBusy += 1
+                    }
+                    enqueue()
+                case .failure(let error):
+                    report.failed += 1
+                    report.errors.append("\(error)")
+                    stopScheduling = true
+                }
+            }
+        }
+        return (report, stopScheduling)
+    }
+
     private enum DrainOutcome {
         case uploaded(Int64)
         case alreadyPresent
         case busy
+    }
+
+    /// True only when the backend says the object/pack is durably present.
+    /// `.uploading` is waited on; `.failed`, `.inaccessible` and timeouts throw.
+    /// A raw `hasPack`/`hasObject` check is explicitly not sufficient here.
+    private func waitForConfirmedRemote(kind: String, id: String) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(configuration.leaseTimeout)
+        while true {
+            let state: CloudObjectState
+            switch kind {
+            case Self.objectKind:
+                state = try await base.objectState(id)
+            case Self.packKind:
+                state = try await base.packState(id)
+            default:
+                throw UploadQueueError.invalidTask("\(kind):\(id)")
+            }
+            switch state {
+            case .uploaded, .verified, .packed:
+                return true
+            case .absent, .staged:
+                return false
+            case .uploading:
+                if Date() >= deadline {
+                    throw CloudObjectLifecycleError.uploadNotConfirmed(
+                        objectID: id,
+                        detail: "等待 \(kind) 上传确认超时"
+                    )
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            case .failed(let detail):
+                throw CloudObjectLifecycleError.writerFailed(objectID: id, detail: detail)
+            case .inaccessible(let detail):
+                throw CloudObjectLifecycleError.stateUnavailable(objectID: id, detail: detail)
+            }
+        }
     }
 
     private func drain(_ task: PendingUploadV3) async throws -> DrainOutcome {
@@ -596,21 +707,13 @@ public actor UploadQueue: CloudObjectSink {
         let url = URL(fileURLWithPath: task.localPath)
         guard let payload = try? Data(contentsOf: url) else {
             // The file is gone, but that is only acceptable when the cloud
-            // already holds the object (crash between upload and journal clean).
-            let present: Bool
-            switch kind {
-            case Self.objectKind:
-                present = try await base.hasObject(task.objectID)
-            case Self.packKind:
-                present = try await base.hasPack(task.objectID)
-            default:
-                throw UploadQueueError.invalidTask(task.taskID)
-            }
-            guard present else {
+            // confirms the object is durable (crash between upload and journal
+            // clean). A local name or a still-uploading file is not enough.
+            guard try await waitForConfirmedRemote(kind: kind, id: task.objectID) else {
                 await markFailure(taskID: task.taskID, retryCount: task.retryCount)
                 throw UploadQueueError.spoolReadFailed("待上传文件缺失：\(task.localPath)")
             }
-            try await index.removeUpload(task.taskID)
+            try await finish(taskID: task.taskID, kind: kind, id: task.objectID)
             return .alreadyPresent
         }
 
@@ -629,11 +732,9 @@ public actor UploadQueue: CloudObjectSink {
             default:
                 throw UploadQueueError.invalidTask(task.taskID)
             }
-            try? fileManager.removeItem(at: url)
-            if let current = spoolBytes {
-                spoolBytes = max(0, current - Int64(payload.count))
-            }
-            try await index.removeUpload(task.taskID)
+            // One cleanup path only: `finish` keeps the journal row when file
+            // removal fails, so a successful upload never loses its spool record.
+            try await finish(taskID: task.taskID, kind: kind, id: task.objectID)
             return uploaded ? .uploaded(Int64(payload.count)) : .alreadyPresent
         } catch {
             await markFailure(taskID: task.taskID, retryCount: task.retryCount)
@@ -673,8 +774,32 @@ public actor UploadQueue: CloudObjectSink {
         )
     }
 
-    private func currentSpoolBytes() throws -> Int64 {
-        if let spoolBytes { return spoolBytes }
+    /// Cross-process spool quota lock. It is deliberately separate from the
+    /// striped per-object upload locks and never contains payload data.
+    private func openSpoolQuotaLock() throws -> Int32 {
+        let quotaDirectory = configuration.spoolRoot.deletingLastPathComponent()
+        do {
+            try fileManager.createDirectory(
+                at: quotaDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw UploadQueueError.spoolWriteFailed("无法创建 spool 配额锁目录：\(error)")
+        }
+        let path = quotaDirectory.appendingPathComponent("spool-quota.lock").path
+        let descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            throw UploadQueueError.spoolWriteFailed("无法打开 spool 配额锁：\(path)")
+        }
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            close(descriptor)
+            throw UploadQueueError.spoolWriteFailed("无法锁定 spool 配额：\(path)")
+        }
+        return descriptor
+    }
+
+    private func currentSpoolBytes(refresh: Bool = false) throws -> Int64 {
+        if !refresh, let spoolBytes { return spoolBytes }
         let url = configuration.spoolRoot
         guard let enumerator = fileManager.enumerator(
             at: url,

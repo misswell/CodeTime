@@ -28,6 +28,7 @@ Scripts/single_mac_acceptance.sh record \
   --device-id "<device-id>" \
   --candidate-sha "<zip sha256>" \
   --commit "<git sha>" \
+  --evidence-kind real \
   --assertions '{"commit_published":true}' \
   --out Docs/releases/<tag>-single-mac-evidence/backup_created.json
 ```
@@ -61,7 +62,7 @@ Scripts/single_mac_acceptance.sh report \
   --out "Docs/releases/<tag>-single-mac-acceptance.md"
 ```
 
-报告生成器和 `Scripts/require_single_mac_acceptance.sh` 会拒绝缺失场景、候选哈希不符、恢复文件未全量校验、占位符和手写 PASS。
+报告生成器和 `Scripts/require_single_mac_acceptance.sh` 会拒绝缺失场景、候选哈希不符、恢复文件未全量校验、占位符、手写 PASS，以及标记为 `fixture` 的模拟证据。
 
 ## 原始证据
 

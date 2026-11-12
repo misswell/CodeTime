@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-249）
+# 回归测试矩阵（CT-001 … CT-263）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -253,3 +253,17 @@
 | CT-247 | `testCT247_ServiceRejectsEqualChildAndAncestorDestinations` | 服务拒绝等于/子目录/祖先恢复目标 | 是 | 否 |
 | CT-248 | `testCT248_ServiceRejectsOverwriteMode` | 服务拒绝覆盖恢复模式 | 是 | 否 |
 | CT-249 | `testCT249_MirrorInsideSourceIsRejectedBeforeBackup` | 镜像目录位于原始项目内时备份必须拒绝 | 是 | 否 |
+| CT-250 | `testCT250_StagingIdentitySeparatesSnapshotTargetAndDestination` | staging 身份必须包含 Snapshot、目标类型/路径与目标目录 | 是 | 否 |
+| CT-251 | `testCT251_PrePlantedStagingSymlinkIsRejected` | 预置 staging 符号链接指向原始项目必须拒绝 | 是 | 否 |
+| CT-252 | `testCT252_OverwriteDestinationIsRejectedWithoutSourceRoots` | 底层恢复引擎默认拒绝覆盖恢复 | 是 | 否 |
+| CT-253 | `testCT253_MissingCloudObjectIsReuploadedInsteadOfReusedFromIndex` | 本地索引缺失的云端对象必须重新读取并上传 | 是 | 否 |
+| CT-254 | `testCT254_InaccessibleRemoteStateAbortsBeforeCommit` | 远端状态不可读时必须中止提交 | 是 | 否 |
+| CT-255 | `testCT255_IdleLeaseStateIsRemoved` | 空闲本地副本租约状态必须回收 | 是 | 否 |
+| CT-256 | `testCT256_WaitingWriterRunsBeforeNewReaders` | 等待中的 Writer 必须优先于新 Reader | 是 | 否 |
+| CT-257 | `testCT257_FixtureEvidenceCannotPassReleaseGate` | fixture 验收证据不得通过发布门禁 | 是 | 否 |
+| CT-258 | `testCT258_SearchStopsBeforeLoadingTheWholeTree` | Search 达到限制后不得继续加载整棵树 | 是 | 否 |
+| CT-259 | `testCT259_PrePlantedJournalSymlinkIsRejected` | 预置恢复 journal 符号链接必须拒绝 | 是 | 否 |
+| CT-260 | `testCT260_FailedPackStateIsNotTreatedAsPresent` | failed Pack 状态不得当作已上传 | 是 | 否 |
+| CT-261 | `testCT261_UploadingPackIsWaitedForBeforeReuse` | uploading Pack 必须等待确认并校验已有内容 | 是 | 否 |
+| CT-262 | `testCT262_SpoolQuotaIsSharedAcrossQueueInstances` | spool 额度必须跨 UploadQueue 实例共享 | 是 | 否 |
+| CT-263 | `testCT263_UploadRecoveryCursorPagesPastOneBatch` | 上传恢复必须用游标跨页处理积压任务 | 是 | 否 |

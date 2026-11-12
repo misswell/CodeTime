@@ -139,6 +139,138 @@ final class UploadLifecycleTests: XCTestCase {
         XCTAssertEqual(remaining.count, 1)
     }
 
+    actor PackStateBox {
+        var state: CloudObjectState
+        init(_ state: CloudObjectState) { self.state = state }
+        func set(_ state: CloudObjectState) { self.state = state }
+        func get() -> CloudObjectState { state }
+    }
+
+    final class PackStateSink: CloudObjectSink, @unchecked Sendable {
+        let box: PackStateBox
+        private(set) var putPackCalls = 0
+
+        init(state: CloudObjectState) { box = PackStateBox(state) }
+
+        func hasObject(_ objectID: String) async throws -> Bool { false }
+        func putObject(_ payload: Data, objectID: String) async throws -> Bool { false }
+        func putNode(_ node: DirectoryNode) async throws -> Bool { true }
+        func putPack(_ payload: Data, packID: String) async throws -> Bool {
+            putPackCalls += 1
+            return false
+        }
+        func hasPack(_ packID: String) async throws -> Bool { true }
+        func packState(_ packID: String) async throws -> CloudObjectState {
+            await box.get()
+        }
+        func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
+            CanonicalHashing.sha256Hex(payload)
+        }
+        func putCommit(_ commit: SnapshotCommit) async throws {}
+    }
+
+    func testCT260_FailedPackStateIsNotTreatedAsPresent() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sink = PackStateSink(state: .failed("provider error"))
+        let index = InMemoryIndex()
+        let queue = UploadQueue(
+            base: sink,
+            index: index,
+            configuration: .init(spoolRoot: root, leaseTimeout: 1, retryBaseDelay: 0)
+        )
+        let packID = String(repeating: "d", count: 64)
+        do {
+            _ = try await queue.putPack(Data("pack".utf8), packID: packID)
+            XCTFail("failed pack 状态不得当作已上传")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(sink.putPackCalls, 0)
+        let tasks = try await index.pendingUploads(state: nil, limit: 10)
+        XCTAssertTrue(tasks.isEmpty, "未确认的 pack 不得在 spool 中留下假任务")
+    }
+
+    func testCT261_UploadingPackIsWaitedForBeforeReuse() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sink = PackStateSink(state: .uploading)
+        let index = InMemoryIndex()
+        let queue = UploadQueue(
+            base: sink,
+            index: index,
+            configuration: .init(spoolRoot: root, leaseTimeout: 2, retryBaseDelay: 0)
+        )
+        let packID = String(repeating: "e", count: 64)
+        Task {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await sink.box.set(.uploaded(storedSize: 4))
+        }
+        let created = try await queue.putPack(Data("pack".utf8), packID: packID)
+        XCTAssertFalse(created)
+        XCTAssertEqual(sink.putPackCalls, 1, "确认后必须比较已有 pack 内容，不能仅凭文件名复用")
+        let tasks = try await index.pendingUploads(state: nil, limit: 10)
+        XCTAssertTrue(tasks.isEmpty)
+    }
+
+    func testCT262_SpoolQuotaIsSharedAcrossQueueInstances() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let first = UploadQueue(
+            base: OfflineSink(),
+            index: index,
+            configuration: .init(spoolRoot: root, softLimitBytes: 10, retryBaseDelay: 0)
+        )
+        let second = UploadQueue(
+            base: OfflineSink(),
+            index: index,
+            configuration: .init(spoolRoot: root, softLimitBytes: 10, retryBaseDelay: 0)
+        )
+        do {
+            _ = try await first.putObject(Data("12345678".utf8), objectID: String(repeating: "f", count: 64))
+            XCTFail("离线上传应失败并保留 spool")
+        } catch {
+            // expected
+        }
+        do {
+            _ = try await second.putObject(Data("87654321".utf8), objectID: String(repeating: "1", count: 64))
+            XCTFail("第二个进程必须看到第一个进程已占用的 spool 额度")
+        } catch let error as UploadQueueError {
+            guard case .spoolFull(let pending, let limit) = error else {
+                return XCTFail("期望 spoolFull，实际 \(error)")
+            }
+            XCTAssertEqual(pending, 8)
+            XCTAssertEqual(limit, 10)
+        }
+    }
+
+    func testCT263_UploadRecoveryCursorPagesPastOneBatch() async throws {
+        let index = InMemoryIndex()
+        let now = Date()
+        let uploads = (0..<3).map { offset in
+            PendingUploadV3(
+                taskID: "task-\(offset)",
+                objectID: String(format: "%064x", offset + 1),
+                localPath: "/tmp/spool-\(offset)",
+                remotePath: UploadQueue.objectKind,
+                fileSize: 1,
+                state: .pending,
+                retryCount: 0,
+                createdAt: now.addingTimeInterval(Double(offset))
+            )
+        }
+        try await index.enqueueUploads(uploads)
+        let first = try await index.pendingUploads(after: nil, state: .pending, limit: 2)
+        XCTAssertEqual(first.map(\.taskID), ["task-0", "task-1"])
+        let second = try await index.pendingUploads(
+            after: UploadTaskCursor(first[first.count - 1]),
+            state: .pending,
+            limit: 2
+        )
+        XCTAssertEqual(second.map(\.taskID), ["task-2"])
+    }
+
     final class OfflineSink: CloudObjectSink, @unchecked Sendable {
         func hasObject(_ objectID: String) async throws -> Bool { false }
         func putObject(_ payload: Data, objectID: String) async throws -> Bool {

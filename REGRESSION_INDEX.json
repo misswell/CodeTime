@@ -2488,5 +2488,145 @@
     "invariant": "镜像目录位于原始项目内时备份必须拒绝",
     "manualAcceptance": false,
     "acceptanceReason": ""
+  },
+  {
+    "id": "CT-250",
+    "test": "testCT250_StagingIdentitySeparatesSnapshotTargetAndDestination",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "staging 身份必须包含 Snapshot、目标类型/路径与目标目录",
+    "required": true,
+    "invariant": "staging 身份必须包含 Snapshot、目标类型/路径与目标目录",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-251",
+    "test": "testCT251_PrePlantedStagingSymlinkIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "预置 staging 符号链接指向原始项目必须拒绝",
+    "required": true,
+    "invariant": "预置 staging 符号链接指向原始项目必须拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-252",
+    "test": "testCT252_OverwriteDestinationIsRejectedWithoutSourceRoots",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "底层恢复引擎默认拒绝覆盖恢复",
+    "required": true,
+    "invariant": "底层恢复引擎默认拒绝覆盖恢复",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-253",
+    "test": "testCT253_MissingCloudObjectIsReuploadedInsteadOfReusedFromIndex",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "本地索引缺失的云端对象必须重新读取并上传",
+    "required": true,
+    "invariant": "本地索引缺失的云端对象必须重新读取并上传",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-254",
+    "test": "testCT254_InaccessibleRemoteStateAbortsBeforeCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "远端状态不可读时必须中止提交",
+    "required": true,
+    "invariant": "远端状态不可读时必须中止提交",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-255",
+    "test": "testCT255_IdleLeaseStateIsRemoved",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "空闲本地副本租约状态必须回收",
+    "required": true,
+    "invariant": "空闲本地副本租约状态必须回收",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-256",
+    "test": "testCT256_WaitingWriterRunsBeforeNewReaders",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "等待中的 Writer 必须优先于新 Reader",
+    "required": true,
+    "invariant": "等待中的 Writer 必须优先于新 Reader",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-257",
+    "test": "testCT257_FixtureEvidenceCannotPassReleaseGate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SingleMacAcceptanceEvidenceTests.swift",
+    "purpose": "fixture 验收证据不得通过发布门禁",
+    "required": true,
+    "invariant": "fixture 验收证据不得通过发布门禁",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-258",
+    "test": "testCT258_SearchStopsBeforeLoadingTheWholeTree",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "Search 达到限制后不得继续加载整棵树",
+    "required": true,
+    "invariant": "Search 达到限制后不得继续加载整棵树",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-259",
+    "test": "testCT259_PrePlantedJournalSymlinkIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "预置恢复 journal 符号链接必须拒绝",
+    "required": true,
+    "invariant": "预置恢复 journal 符号链接必须拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-260",
+    "test": "testCT260_FailedPackStateIsNotTreatedAsPresent",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "failed Pack 状态不得当作已上传",
+    "required": true,
+    "invariant": "failed Pack 状态不得当作已上传",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-261",
+    "test": "testCT261_UploadingPackIsWaitedForBeforeReuse",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "uploading Pack 必须等待确认并校验已有内容",
+    "required": true,
+    "invariant": "uploading Pack 必须等待确认并校验已有内容",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-262",
+    "test": "testCT262_SpoolQuotaIsSharedAcrossQueueInstances",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "spool 额度必须跨 UploadQueue 实例共享",
+    "required": true,
+    "invariant": "spool 额度必须跨 UploadQueue 实例共享",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-263",
+    "test": "testCT263_UploadRecoveryCursorPagesPastOneBatch",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "上传恢复必须用游标跨页处理积压任务",
+    "required": true,
+    "invariant": "上传恢复必须用游标跨页处理积压任务",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
   }
 ]

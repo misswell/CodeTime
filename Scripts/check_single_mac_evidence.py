@@ -56,6 +56,7 @@ def main() -> None:
     commit = sys.argv[3] if len(sys.argv) > 3 else ""
     if not os.path.isdir(directory):
         fail(f"missing evidence directory: {directory}")
+    allow_fixture = os.environ.get("SINGLE_MAC_ACCEPTANCE_ALLOW_FIXTURE") == "1"
     seen = {}
     hosts = set()
     devices = set()
@@ -71,6 +72,11 @@ def main() -> None:
             fail(f"duplicate scenario evidence: {scenario}")
         if entry.get("result") != "passed":
             fail(f"{scenario} result is {entry.get('result')!r}")
+        evidence_kind = entry.get("evidence_kind")
+        if evidence_kind not in ("real", "fixture"):
+            fail(f"{scenario} lacks evidence_kind (real|fixture)")
+        if evidence_kind != "real" and not allow_fixture:
+            fail(f"{scenario} is fixture evidence and cannot pass the release gate")
         if entry.get("candidate_sha256") != candidate:
             fail(f"{scenario} candidate hash mismatch")
         if commit and entry.get("commit") != commit:

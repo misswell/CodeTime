@@ -202,8 +202,16 @@ public struct CloudFirstBackupEngine: Sendable {
         )
 
         let encoder = ObjectEncoder(masterKey: masterKey)
+        let knownChunks = try await index.knownChunks(
+            previousFiles.flatMap { $0.chunks.map(\.objectID) }
+        )
+        // A local SQLite row is not proof that the cloud object still exists.
+        // Probe remote metadata before seeding the registry or reusing a file
+        // node; a stale row must force a re-read/re-upload, never a snapshot that
+        // references bytes iCloud no longer has.
+        let remoteReadyIDs = try await verifiedRemoteObjectIDs(in: knownChunks)
         let registry = ObjectRegistry(
-            known: try await index.knownChunks(previousFiles.flatMap { $0.chunks.map(\.objectID) })
+            known: knownChunks.filter { remoteReadyIDs.contains($0.key) }
         )
         let packBuffer = options.packObjectsUpTo.map {
             PackBuffer(
@@ -226,7 +234,8 @@ public struct CloudFirstBackupEngine: Sendable {
             seen.insert(entry.path)
             if !forceFullRead,
                let previous = previousByPath[entry.path],
-               Self.looksUnchanged(entry: entry, previous: previous) {
+               Self.looksUnchanged(entry: entry, previous: previous),
+               previous.chunks.allSatisfy({ remoteReadyIDs.contains($0.objectID) }) {
                 reused.append(previous)
                 report.filesReused += 1
             } else {
@@ -724,6 +733,90 @@ public struct CloudFirstBackupEngine: Sendable {
             return .spoolFull(pendingBytes: pending, limitBytes: limit)
         default:
             return .uploadFailed(path: "spool", detail: "\(error)")
+        }
+    }
+
+    // MARK: - Remote reuse verification
+
+    /// Probes cloud metadata for every chunk the local index claims is reusable.
+    /// Packs are checked once per pack; standalone objects once per object.
+    /// `.failed` is treated as not reusable (the caller will re-upload it);
+    /// `.inaccessible` aborts because the true state is unknown.
+    private func verifiedRemoteObjectIDs(
+        in known: [String: ChunkRecordV3]
+    ) async throws -> Set<String> {
+        var packIDs = Set<String>()
+        var standaloneIDs = Set<String>()
+        for (id, record) in known {
+            guard record.storedSize > 0 || record.packID != nil else { continue }
+            if let packID = record.packID {
+                packIDs.insert(packID)
+            } else {
+                standaloneIDs.insert(id)
+            }
+        }
+
+        var probes: [(key: String, kind: String, id: String)] = []
+        probes.append(contentsOf: packIDs.map { ("pack:" + $0, "pack", $0) })
+        probes.append(contentsOf: standaloneIDs.map { ("object:" + $0, "object", $0) })
+        guard !probes.isEmpty else { return [] }
+
+        var ready = Set<String>()
+        try await withThrowingTaskGroup(of: (String, Bool).self) { group in
+            var next = 0
+            let window = min(max(1, options.uploadConcurrency), probes.count)
+            func enqueue() {
+                guard next < probes.count else { return }
+                let probe = probes[next]
+                next += 1
+                group.addTask {
+                    (probe.key, try await self.probeRemoteDurability(kind: probe.kind, id: probe.id))
+                }
+            }
+            for _ in 0..<window { enqueue() }
+            while let result = try await group.next() {
+                if result.1 { ready.insert(result.0) }
+                enqueue()
+            }
+        }
+
+        var result = Set<String>()
+        for (id, record) in known {
+            guard record.storedSize > 0 || record.packID != nil else { continue }
+            if let packID = record.packID {
+                if ready.contains("pack:" + packID) { result.insert(id) }
+            } else if ready.contains("object:" + id) {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
+    private func probeRemoteDurability(kind: String, id: String) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(30)
+        while true {
+            let state: CloudObjectState
+            if kind == "pack" {
+                state = try await sink.packState(id)
+            } else {
+                state = try await sink.objectState(id)
+            }
+            switch state {
+            case .uploaded, .verified, .packed:
+                return true
+            case .absent, .staged, .failed:
+                return false
+            case .uploading:
+                if Date() >= deadline {
+                    throw CloudObjectLifecycleError.uploadNotConfirmed(
+                        objectID: id,
+                        detail: "远端对象仍在上传，无法确认可复用"
+                    )
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            case .inaccessible(let detail):
+                throw CloudObjectLifecycleError.stateUnavailable(objectID: id, detail: detail)
+            }
         }
     }
 

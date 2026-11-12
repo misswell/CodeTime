@@ -212,6 +212,9 @@ public actor CodeTimeService {
     private var v3StoreRootCache: URL?
     private var v3RestoreCache: DiskChunkCache?
     private var v3RuntimeFingerprint: RuntimeConfigurationFingerprint?
+    /// One lease table for every store that reads/writes the same iCloud
+    /// namespace. Separate instances cannot see each other's readers/writers.
+    private let v3LeaseManager = LocalCopyLeaseManager()
     /// A downloaded legacy repository used to browse/restore old versions after
     /// the local Kopia repository was released (§14.4). Released when idle.
     private var legacyRecoveryEngine: KopiaBackupEngine?
@@ -663,7 +666,8 @@ public actor CodeTimeService {
             },
             objectValidator: { payload, objectID in
                 (try? objectValidatorEncoder.decode(payload, objectID: objectID)) != nil
-            }
+            },
+            leaseManager: v3LeaseManager
         )
         v3StoreCache = store
         v3StoreRootCache = root
@@ -689,7 +693,8 @@ public actor CodeTimeService {
             masterKey: try keychain.masterKey(),
             access: access,
             tracker: location?.tracker ?? NoopUploadTracker(),
-            eviction: location?.coordinated == true ? ICloudEvictionManager() : nil
+            eviction: location?.coordinated == true ? ICloudEvictionManager() : nil,
+            leaseManager: v3LeaseManager
         )
         v3SourceCache = source
         return source
@@ -778,7 +783,7 @@ public actor CodeTimeService {
             // job exists, and the adapter refuses source overlaps again so a
             // direct adapter caller cannot stage files inside a project.
             sourceRootsProvider: { [database] in
-                ((try? await database.projects()) ?? []).map(Self.sourceRootURL(for:))
+                try (await database.projects()).map(Self.sourceRootURL(for:))
             },
             prepareStore: { [store, logger] in
                 do {
@@ -2169,6 +2174,7 @@ public actor CodeTimeService {
         // start restoring a candidate snapshot. The check must happen before any
         // job/lease is created, not only while holding a local shared lock.
         let settingsForRestore = try await currentSettings()
+        let protectedRoots = await protectedRestoreRoots(settings: settingsForRestore)
         if settingsForRestore.engineMode == .cloudFirst {
             let blocked = try await currentV3Store().blockedSnapshotIDs()
             if blocked.contains(request.snapshotID) {
@@ -2191,11 +2197,11 @@ public actor CodeTimeService {
         // project itself, a child of it, nor an ancestor of it can be a restore
         // destination.
         if request.mode != .preview {
-            let sourceRoots = try await database.projects().map(Self.sourceRootURL(for:))
+            let sourceRoots = try (await database.projects()).map(Self.sourceRootURL(for:))
             do {
                 try SafePath.validateRestoreDestination(
                     request.destination,
-                    protectedRoots: [paths.root, paths.lifecycleDir],
+                    protectedRoots: protectedRoots,
                     sourceRoots: sourceRoots
                 )
             } catch let error as SafePath.SafePathError {
@@ -2325,7 +2331,7 @@ public actor CodeTimeService {
                 // and CodeTime's data root before the job was created.
                 try SafePath.validateRestoreDestination(
                     request.destination,
-                    protectedRoots: [paths.root, paths.lifecycleDir]
+                    protectedRoots: protectedRoots
                 )
                 let destinationAccess = SecurityScopedAccess(url: request.destination)
                 defer { destinationAccess.stop() }
@@ -3269,11 +3275,14 @@ public actor CodeTimeService {
 
     /// The real on-disk source root. A security-scoped bookmark is authoritative
     /// when the project was moved; a stored `rootPath` can otherwise be stale.
-    private static func sourceRootURL(for project: Project) -> URL {
+    private static func sourceRootURL(for project: Project) throws -> URL {
         if let bookmark = project.bookmark,
            let resolved = try? SecurityScopedBookmarks.resolve(bookmark) {
             return resolved.url
         }
+        // A recovered project may have no local source at all. The stored path is
+        // still the only usable boundary for overlap checks; an actual backup
+        // will fail later in withProject if that directory is inaccessible.
         return URL(fileURLWithPath: project.rootPath, isDirectory: true)
     }
 
@@ -3284,7 +3293,7 @@ public actor CodeTimeService {
         _ project: Project,
         settings: AppSettings
     ) async throws {
-        let source = Self.sourceRootURL(for: project)
+        let source = try Self.sourceRootURL(for: project)
         var writeRoots: [(URL, String)] = [
             (paths.root, "CodeTime 数据目录"),
             (paths.lifecycleDir, "CodeTime 生命周期锁目录"),
@@ -3306,9 +3315,11 @@ public actor CodeTimeService {
     /// Cloud/mirror roots receive uploads, indexes and staging files. Refuse a
     /// root that overlaps any registered source project before creating it.
     private func assertManagedWriteRootIsIndependent(_ root: URL) async throws {
-        let projects = (try? await database.projects()) ?? []
+        // A database failure means the source list is unknown, not empty. Fail
+        // closed instead of skipping every overlap check.
+        let projects = try await database.projects()
         for project in projects {
-            let source = Self.sourceRootURL(for: project)
+            let source = try Self.sourceRootURL(for: project)
             if SafePath.overlaps(root, source) {
                 throw CodeTimeError.pathOverlap(
                     path: root.path,
@@ -3316,6 +3327,22 @@ public actor CodeTimeService {
                 )
             }
         }
+    }
+
+    /// Every path that must never be a restore destination: app data, lifecycle
+    /// locks, legacy repository and the configured cloud/mirror roots.
+    private func protectedRestoreRoots(settings: AppSettings) async -> [URL] {
+        var roots: [URL] = [paths.root, paths.lifecycleDir]
+        if let repository {
+            roots.append(URL(fileURLWithPath: repository.path, isDirectory: true))
+        }
+        if let mirror = settings.localMirrorPath, !mirror.isEmpty {
+            roots.append(URL(fileURLWithPath: mirror, isDirectory: true))
+        }
+        if settings.iCloudEnabled, let iCloud = await CloudLocation.iCloudStorageRoot() {
+            roots.append(iCloud)
+        }
+        return roots
     }
 
     /// Resolves the configured cloud/mirror root exactly once for both the v2
@@ -3441,7 +3468,8 @@ public actor CodeTimeService {
             access: access,
             tracker: values?.isUbiquitousItem == true
                 ? UbiquitousUploadTracker(containerURL: await CloudLocation.iCloudDocuments())
-                : NoopUploadTracker()
+                : NoopUploadTracker(),
+            leaseManager: v3LeaseManager
         )
         let commits = try await store.strictCommits(projectID: candidate.projectID)
         guard let target = commits
@@ -3457,11 +3485,11 @@ public actor CodeTimeService {
         }
         // Disaster recovery is still a restore: it must land in an independent
         // directory, never inside or above a project that already exists locally.
-        let recoverySourceRoots = try await database.projects().map(Self.sourceRootURL(for:))
+        let recoverySourceRoots = try (await database.projects()).map(Self.sourceRootURL(for:))
         do {
             try SafePath.validateRestoreDestination(
                 destination,
-                protectedRoots: [paths.root, paths.lifecycleDir],
+                protectedRoots: [paths.root, paths.lifecycleDir, storageRoot, root],
                 sourceRoots: recoverySourceRoots
             )
         } catch let error as SafePath.SafePathError {

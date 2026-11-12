@@ -316,7 +316,7 @@ extension SQLiteStore {
                 """,
                 [.text(state.rawValue), .text(taskID)]
             )
-            if let record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) {
+            if let record = try uploadTaskRecord(taskID) {
                 var updated = record
                 updated.state = state
                 updated.retryCount += 1
@@ -329,7 +329,7 @@ extension SQLiteStore {
                 "UPDATE v3_pending_uploads SET upload_state = ? WHERE task_id = ?",
                 [.text(state.rawValue), .text(taskID)]
             )
-            if var record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) {
+            if var record = try uploadTaskRecord(taskID) {
                 record.state = state
                 if let payload = try? encode(record) {
                     try? upsert("UPDATE v3_pending_uploads SET payload = ? WHERE task_id = ?", [.blob(payload), .text(taskID)])
@@ -351,7 +351,7 @@ extension SQLiteStore {
         nextAttemptAt: Date?
     ) throws {
         try setUploadTaskState(taskID, state: state, bumpRetry: bumpRetry)
-        guard var record = try uploadTasks(limit: 5000).first(where: { $0.taskID == taskID }) else {
+        guard var record = try uploadTaskRecord(taskID) else {
             return
         }
         record.nextAttemptAt = nextAttemptAt
@@ -648,6 +648,36 @@ extension SQLiteStore: CloudSnapshotIndex {
         limit: Int = 500
     ) async throws -> [PendingUploadV3] {
         try uploadTasks(state: state, limit: limit)
+    }
+
+    public func pendingUploads(
+        after cursor: UploadTaskCursor?,
+        state: UploadTaskState?,
+        limit: Int
+    ) async throws -> [PendingUploadV3] {
+        var clauses: [String] = []
+        var params: [SQLValue] = []
+        if let state {
+            clauses.append("upload_state = ?")
+            params.append(.text(state.rawValue))
+        }
+        if let cursor {
+            clauses.append("(created_at > ? OR (created_at = ? AND task_id > ?))")
+            params.append(.double(cursor.createdAt.timeIntervalSince1970))
+            params.append(.double(cursor.createdAt.timeIntervalSince1970))
+            params.append(.text(cursor.taskID))
+        }
+        let whereClause = clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")
+        let sql = """
+        SELECT payload FROM v3_pending_uploads\(whereClause)
+        ORDER BY created_at ASC, task_id ASC LIMIT ?
+        """
+        params.append(.int(Int64(limit)))
+        let rows = try query(sql, params)
+        return try rows.compactMap { row in
+            guard case .blob(let data) = row[0] else { return nil }
+            return try decode(PendingUploadV3.self, from: data)
+        }
     }
 
     public func uploadTask(_ taskID: String) async throws -> PendingUploadV3? {

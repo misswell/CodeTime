@@ -56,6 +56,57 @@ final class LocalCopyLeaseManagerTests: XCTestCase {
         await task.value
     }
 
+    func testCT255_IdleLeaseStateIsRemoved() async {
+        let manager = LocalCopyLeaseManager()
+        await manager.acquireRead(url)
+        var count = await manager.trackedStateCount
+        XCTAssertEqual(count, 1)
+        await manager.releaseRead(url)
+        count = await manager.trackedStateCount
+        XCTAssertEqual(count, 0)
+
+        await manager.acquireWrite(url)
+        count = await manager.trackedStateCount
+        XCTAssertEqual(count, 1)
+        await manager.releaseWrite(url)
+        count = await manager.trackedStateCount
+        XCTAssertEqual(count, 0)
+
+        await manager.pin(url)
+        count = await manager.trackedStateCount
+        XCTAssertEqual(count, 1)
+        await manager.unpin(url)
+        count = await manager.trackedStateCount
+        XCTAssertEqual(count, 0)
+    }
+
+    func testCT256_WaitingWriterRunsBeforeNewReaders() async {
+        let manager = LocalCopyLeaseManager()
+        await manager.acquireRead(url)
+        actor Events {
+            private var values: [String] = []
+            func append(_ value: String) { values.append(value) }
+            func snapshot() -> [String] { values }
+        }
+        let events = Events()
+        let writer = Task {
+            await manager.acquireWrite(url)
+            await events.append("writer")
+            await manager.releaseWrite(url)
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let reader = Task {
+            await manager.acquireRead(url)
+            await events.append("reader")
+            await manager.releaseRead(url)
+        }
+        await manager.releaseRead(url)
+        await writer.value
+        await reader.value
+        let order = await events.snapshot()
+        XCTAssertEqual(order, ["writer", "reader"], "等待中的 Writer 必须先于新 Reader 获得租约")
+    }
+
     func testCT219_CoordinatedReadEvictsOnlyAfterLastReader() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("lease-coord-\(UUID().uuidString)", isDirectory: true)

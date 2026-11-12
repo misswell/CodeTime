@@ -670,6 +670,143 @@ final class SourceImmutabilityTests: XCTestCase {
             Data("alpha-content".utf8)
         )
     }
+
+    func testCT250_StagingIdentitySeparatesSnapshotTargetAndDestination() {
+        let destination = workspace.appendingPathComponent("export", isDirectory: true)
+        let otherDestination = workspace.appendingPathComponent("export-2", isDirectory: true)
+        let snapshot = "aaaaaaaa-1111-2222-3333-444444444444"
+        let samePrefixDifferentSnapshot = "aaaaaaaa-9999-8888-7777-666666666666"
+        let project = CloudRestoreEngine.stagingURL(
+            for: destination,
+            snapshotID: snapshot,
+            target: .project
+        )
+        let file = CloudRestoreEngine.stagingURL(
+            for: destination,
+            snapshotID: snapshot,
+            target: .file(path: "a.txt")
+        )
+        let otherSnapshot = CloudRestoreEngine.stagingURL(
+            for: destination,
+            snapshotID: samePrefixDifferentSnapshot,
+            target: .project
+        )
+        let otherTarget = CloudRestoreEngine.stagingURL(
+            for: otherDestination,
+            snapshotID: snapshot,
+            target: .project
+        )
+        XCTAssertNotEqual(project, file, "不同恢复目标不得复用 staging")
+        XCTAssertNotEqual(project, otherSnapshot, "Snapshot ID 前 8 位相同也不得复用 staging")
+        XCTAssertNotEqual(project, otherTarget, "不同目标目录不得复用 staging")
+    }
+
+    func testCT251_PrePlantedStagingSymlinkIsRejected() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let before = try snapshot(project)
+        let destination = workspace.appendingPathComponent("symlink-staging", isDirectory: true)
+        let staging = CloudRestoreEngine.stagingURL(
+            for: destination,
+            snapshotID: report.snapshotID,
+            target: .project
+        )
+        try FileManager.default.createDirectory(
+            at: staging.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(at: staging, withDestinationURL: project)
+        let reader = CloudRestoreEngine(
+            masterKey: masterKey,
+            source: cloud,
+            options: RestoreOptions(sourceRoots: [project])
+        )
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination
+            )
+            XCTFail("预置 staging 符号链接必须被拒绝")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(try snapshot(project), before, "符号链接 staging 不得写入原始项目")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destination.path),
+            "被拒绝的恢复不得提交目标"
+        )
+    }
+
+    func testCT259_PrePlantedJournalSymlinkIsRejected() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let before = try snapshot(project)
+        let destination = workspace.appendingPathComponent("journal-symlink", isDirectory: true)
+        let staging = CloudRestoreEngine.stagingURL(
+            for: destination,
+            snapshotID: report.snapshotID,
+            target: .project
+        )
+        let parent = staging.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let journal = parent.appendingPathComponent(".\(staging.lastPathComponent)-journal.jsonl")
+        try FileManager.default.createSymbolicLink(
+            at: journal,
+            withDestinationURL: project.appendingPathComponent("a.txt")
+        )
+        let reader = CloudRestoreEngine(
+            masterKey: masterKey,
+            source: cloud,
+            options: RestoreOptions(sourceRoots: [project])
+        )
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination
+            )
+            XCTFail("预置 journal 符号链接必须被拒绝")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(try snapshot(project), before)
+    }
+
+    func testCT252_OverwriteDestinationIsRejectedWithoutSourceRoots() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let destination = workspace.appendingPathComponent("existing-export", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let reader = CloudRestoreEngine(
+            masterKey: masterKey,
+            source: cloud,
+            options: RestoreOptions(overwriteDestination: true)
+        )
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination
+            )
+            XCTFail("底层引擎必须默认拒绝覆盖恢复")
+        } catch {
+            // expected
+        }
+        XCTAssertTrue(
+            try FileManager.default.contentsOfDirectory(atPath: destination.path).isEmpty,
+            "覆盖恢复被拒绝后不得写入目标"
+        )
+    }
 }
 
 /// Service-level destination policy: the service must reject before creating a

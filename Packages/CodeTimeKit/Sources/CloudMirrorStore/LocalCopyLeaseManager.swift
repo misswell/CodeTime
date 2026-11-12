@@ -19,15 +19,32 @@ public actor LocalCopyLeaseManager {
 
     public init() {}
 
+    /// Test/diagnostic view: idle entries must not accumulate for millions of
+    /// one-shot iCloud URLs.
+    public var trackedStateCount: Int { states.count }
+
     private func key(_ url: URL) -> String {
         url.standardizedFileURL.path
+    }
+
+    private func removeIfIdle(_ key: String) {
+        guard let state = states[key],
+              !state.writer,
+              state.readers == 0,
+              state.pins == 0,
+              state.waitingReaders.isEmpty,
+              state.waitingWriters.isEmpty else { return }
+        states.removeValue(forKey: key)
     }
 
     private func drainWriterIfPossible(_ key: String) {
         guard var state = states[key],
               !state.writer,
               state.readers == 0,
-              !state.waitingWriters.isEmpty else { return }
+              !state.waitingWriters.isEmpty else {
+            removeIfIdle(key)
+            return
+        }
         let next = state.waitingWriters.removeFirst()
         state.writer = true
         states[key] = state
@@ -37,9 +54,9 @@ public actor LocalCopyLeaseManager {
     public func acquireRead(_ url: URL) async {
         let key = self.key(url)
         var state = states[key] ?? State()
-        if state.writer {
-            // The writer grants the read slot by incrementing `readers` before
-            // resuming this continuation; no post-await increment is needed.
+        // Writer priority: a new reader must queue behind a waiting writer, or a
+        // continuous read stream can starve eviction/upload forever.
+        if state.writer || !state.waitingWriters.isEmpty {
             await withCheckedContinuation { continuation in
                 state.waitingReaders.append(continuation)
                 states[key] = state
@@ -76,6 +93,14 @@ public actor LocalCopyLeaseManager {
         let key = self.key(url)
         guard var state = states[key] else { return }
         state.writer = false
+        // Writers first. Readers are batched only when no writer is waiting.
+        if !state.waitingWriters.isEmpty {
+            let next = state.waitingWriters.removeFirst()
+            state.writer = true
+            states[key] = state
+            next.resume()
+            return
+        }
         if !state.waitingReaders.isEmpty {
             state.readers += state.waitingReaders.count
             let waiters = state.waitingReaders
@@ -85,7 +110,7 @@ public actor LocalCopyLeaseManager {
             return
         }
         states[key] = state
-        drainWriterIfPossible(key)
+        removeIfIdle(key)
     }
 
     /// Non-blocking eviction claim. Returns false when a reader, writer or pin is

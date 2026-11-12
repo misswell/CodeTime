@@ -53,7 +53,7 @@ final class RestoreSafetyTests: XCTestCase {
     func testCT186_TruncatedStagingFileIsNeverAcceptedWhenVerifyHashesIsFalse() async throws {
         let (cloud, report) = try await backup()
         let destination = work.appendingPathComponent("restored", isDirectory: true)
-        let staging = CloudRestoreEngine.stagingURL(for: destination, snapshotID: report.snapshotID)
+        let staging = CloudRestoreEngine.stagingURL(for: destination, snapshotID: report.snapshotID, target: .project)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         // Same size, wrong content: the old resume shortcut would accept it.
         try Data("inCORRECT!!".utf8.prefix(15)).write(to: staging.appendingPathComponent("a.txt"))

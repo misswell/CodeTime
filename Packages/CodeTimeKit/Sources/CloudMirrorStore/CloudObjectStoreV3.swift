@@ -251,11 +251,7 @@ public struct CloudObjectStoreV3: Sendable {
     // MARK: - Objects
 
     public func hasObject(_ objectID: String) async throws -> Bool {
-        let parent = layout.objectURL(objectID).deletingLastPathComponent()
-        guard let entries = try? await cloudAccess.list(parent, keys: [.isRegularFileKey]) else {
-            return false
-        }
-        return entries.contains { $0.lastPathComponent == objectID }
+        try existsStrict(layout.objectURL(objectID))
     }
 
     /// Uploads one object and waits for confirmation. Returns true when the object
@@ -299,7 +295,7 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putNode(_ node: DirectoryNode) async throws -> Bool {
         let destination = layout.nodeURL(node.nodeID)
-        if let data = try? await cloudAccess.read(destination) {
+        if let data = try await readExistingStrict(destination) {
             // Same identity must mean same bytes; otherwise the tree is not
             // content addressed and we refuse to continue silently. Sealed bytes
             // are randomized per nonce, so compare the decrypted node.
@@ -351,7 +347,7 @@ public struct CloudObjectStoreV3: Sendable {
     }
 
     public func hasNode(_ nodeID: String) async throws -> Bool {
-        (try? await cloudAccess.read(layout.nodeURL(nodeID))) != nil
+        try existsStrict(layout.nodeURL(nodeID))
     }
 
     // MARK: - Manifest / Commit
@@ -365,10 +361,15 @@ public struct CloudObjectStoreV3: Sendable {
         snapshotID: String
     ) async throws -> String {
         let destination = layout.manifestURL(projectID: projectID, snapshotID: snapshotID)
-        if let existing = try? await cloudAccess.read(destination), existing != payload {
-            // A published manifest is immutable; rewriting it would invalidate
-            // the commit hash that points at it.
-            throw CloudObjectStoreV3Error.manifestHashMismatch
+        if let existing = try await readExistingStrict(destination) {
+            guard existing == payload else {
+                // A published manifest is immutable; rewriting it would
+                // invalidate the commit hash that points at it.
+                throw CloudObjectStoreV3Error.manifestHashMismatch
+            }
+            // Reuse confirmed bytes; never rewrite an identical manifest.
+            try await cloudAccess.waitForUpload(destination)
+            return CanonicalHashing.sha256Hex(payload)
         }
         try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
         try await cloudAccess.writeAtomically(payload, to: destination)
@@ -402,7 +403,7 @@ public struct CloudObjectStoreV3: Sendable {
             throw CloudObjectStoreV3Error.manifestHashMismatch
         }
         let destination = layout.commitURL(projectID: commit.projectID, snapshotID: commit.snapshotID)
-        if let existing = try? await cloudAccess.read(destination) {
+        if let existing = try await readExistingStrict(destination) {
             let decoded = try? JSONDecoder().decode(SnapshotCommit.self, from: existing)
             guard decoded == commit else {
                 // A version marker is immutable; a different commit for the same
@@ -433,10 +434,11 @@ public struct CloudObjectStoreV3: Sendable {
         }
         var result: [SnapshotCommit] = []
         for entry in entries where entry.pathExtension == "commit" {
-            guard let data = try? await cloudAccess.read(entry) else { continue }
-            if let commit = try? JSONDecoder().decode(SnapshotCommit.self, from: data) {
-                result.append(commit)
+            let data = try await readStrict(entry)
+            guard let commit = try? JSONDecoder().decode(SnapshotCommit.self, from: data) else {
+                throw CloudObjectStoreV3Error.notConfirmed("提交标记损坏：\(entry.lastPathComponent)")
             }
+            result.append(commit)
         }
         return result.sorted { $0.committedAt < $1.committedAt }
     }
@@ -457,11 +459,35 @@ public struct CloudObjectStoreV3: Sendable {
     @discardableResult
     public func putPack(_ payload: Data, packID: String) async throws -> Bool {
         let destination = layout.packURL(packID)
-        if let existing = try? await cloudAccess.read(destination) {
+        switch try await packState(packID) {
+        case .absent, .staged:
+            break
+        case .uploaded, .verified, .packed:
+            // Existence is not enough; the pack must be upload-confirmed and the
+            // existing bytes must match before it can be reused.
+            let existing = try await readStrict(destination)
             guard existing == payload else {
                 throw CloudObjectStoreV3Error.objectMissing(packID)
             }
             return false
+        case .uploading:
+            do {
+                try await cloudAccess.waitForUpload(destination)
+            } catch {
+                throw CloudObjectLifecycleError.uploadNotConfirmed(
+                    objectID: packID,
+                    detail: error.localizedDescription
+                )
+            }
+            let existing = try await readStrict(destination)
+            guard existing == payload else {
+                throw CloudObjectStoreV3Error.objectMissing(packID)
+            }
+            return false
+        case .failed(let detail):
+            throw CloudObjectLifecycleError.uploadNotConfirmed(objectID: packID, detail: detail)
+        case .inaccessible(let detail):
+            throw CloudObjectLifecycleError.stateUnavailable(objectID: packID, detail: detail)
         }
         try await cloudAccess.ensureDirectory(destination.deletingLastPathComponent())
         try await cloudAccess.writeAtomically(payload, to: destination)
@@ -484,13 +510,7 @@ public struct CloudObjectStoreV3: Sendable {
     }
 
     public func hasPack(_ packID: String) async throws -> Bool {
-        guard let entries = try? await cloudAccess.list(
-            layout.packURL(packID).deletingLastPathComponent(),
-            keys: [.isRegularFileKey]
-        ) else {
-            return false
-        }
-        return entries.contains { $0.lastPathComponent == packID }
+        try existsStrict(layout.packURL(packID))
     }
 }
 
@@ -542,6 +562,14 @@ extension CloudObjectStoreV3: CloudGarbageCollectible {
     private func readStrict(_ url: URL) async throws -> Data {
         do { return try await cloudAccess.readLeased(url) }
         catch { throw CloudObjectStoreV3Error.notConfirmed("无法读取 \(url.lastPathComponent)：\(error)") }
+    }
+
+    /// Strict optional read: a genuinely absent file is nil, while an existing
+    /// but unreadable file throws. `try? read` would silently turn the second
+    /// case into "missing" and permit overwriting immutable metadata.
+    private func readExistingStrict(_ url: URL) async throws -> Data? {
+        guard try existsStrict(url) else { return nil }
+        return try await readStrict(url)
     }
 
     // MARK: - Device registry

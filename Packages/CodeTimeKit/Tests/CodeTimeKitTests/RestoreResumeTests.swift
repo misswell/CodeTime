@@ -100,7 +100,7 @@ final class RestoreResumeTests: XCTestCase {
             // expected
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
-        let staging = CloudRestoreEngine.stagingURL(for: destination, snapshotID: snapshotID)
+        let staging = CloudRestoreEngine.stagingURL(for: destination, snapshotID: snapshotID, target: .project)
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: staging.appendingPathComponent("a.txt").path
         ), "已校验的文件必须留在 staging 供续传")

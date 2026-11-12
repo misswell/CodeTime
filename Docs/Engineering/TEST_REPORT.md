@@ -5,7 +5,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"11b2271390952fc54a41199e008569b5df4e00eb","run":"202611121338","executed":348,"failures":0,"skipped":3,"passed":345,"gate":"PASS","notRun":["单 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
+{"commit":"11b2271390952fc54a41199e008569b5df4e00eb","run":"202611121338","executed":362,"failures":0,"skipped":3,"passed":359,"gate":"PASS","notRun":["单 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
 -->
 
 ## 1. 绑定信息
@@ -15,8 +15,8 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | 交付 Commit SHA | `11b2271`（原始项目只读、恢复目标隔离、书签与大小写重叠防护） |
 | CI Run | `202611121338`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
-| 门禁结果 | `PASS`，348 tests / 0 failures / 3 skipped |
-| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-249（247 required） |
+| 门禁结果 | `PASS`，362 tests / 0 failures / 3 skipped |
+| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-263（261 required） |
 | 运行标识 | `202611121338`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
 | 门禁日志 | `Docs/Engineering/TestArtifacts/source-readonly-gate-20261112.log`（原始输出归档） |
 
@@ -32,7 +32,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ## 3. 测试规模
 
-- **全量门禁**：348 个 XCTest，345 通过，0 失败，3 跳过。
+- **全量门禁**：362 个 XCTest，359 通过，0 失败，3 跳过。
 - 跳过项均为人工/规模验收，登记在 `REGRESSION_INDEX.json` 的
   `manualAcceptance=true`：CT-037 百万文件、CT-044 磁盘写满、单机真实 iCloud 往返。
 - 规模测试（`CODETIME_SCALE_TESTS=1`）在门禁中真实执行 CT-036/CT-117 的规模变体。
@@ -78,6 +78,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | CT-227–CT-229 | GC Device Barrier | Prepared ACK 持久 Barrier；旧 Epoch 禁止删除；本地活动任务拒绝 ACK |
 | CT-230–CT-233 | 单 Mac 发布门禁 | 缺场景/多 Host/手写 PASS 均拒绝；完整单机证据生成报告并通过门禁 |
 | CT-234–CT-249 | 原始项目只读与恢复目标隔离 | 备份/失败/重试/取消不改原始字节、权限、mtime、xattr、符号链接；恢复只写独立目录；等于/子目录/祖先目标与覆盖模式拒绝；本地或云端删除不反向修改；GC 不触碰源目录；中断恢复安全 |
+| CT-250–CT-263 | 恢复 API / Pack / 远端复用 / 租约 / 分页 | staging 身份与符号链接防护；底层默认拒绝覆盖；Pack/对象只认上传确认状态；本地索引失效时重新上传；远端状态不可读即中止；租约空闲回收与 Writer 优先；Search 流式；spool 跨进程额度；游标分页 |
 
 ## 6. 可靠性修复与加固覆盖（CT-168 … CT-196）
 
@@ -121,11 +122,11 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ```
 regression gate: PASS
-  executed: 348 tests, 0 failures
+  executed: 362 tests, 0 failures
   skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
 testCT044_DiskFullLeavesRepositoryUntouched
 testSingleMacICloudRoundTrip
-  index: CT-001 … CT-249 (247 required)
+  index: CT-001 … CT-263 (261 required)
   test-report check: PASS
 ```
 

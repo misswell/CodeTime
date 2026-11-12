@@ -30,6 +30,7 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     var failDeletes = false
     private(set) var readPackCount = 0
     private(set) var readObjectCount = 0
+    private(set) var readNodeCount = 0
     /// Optional corruption hook: objectID → replacement payload.
     var corruptObjects: [String: Data] = [:]
 
@@ -110,8 +111,16 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
 
     func readNode(_ nodeID: String) async throws -> DirectoryNode {
         lock.lock(); defer { lock.unlock() }
+        readNodeCount += 1
         guard let node = nodes[nodeID] else { throw Failure.nodeMissing(nodeID) }
         return node
+    }
+
+    func resetReadCounts() {
+        lock.lock(); defer { lock.unlock() }
+        readNodeCount = 0
+        readObjectCount = 0
+        readPackCount = 0
     }
 
     func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
@@ -460,6 +469,30 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
             uploads
                 .filter { state == nil || $0.state == state }
                 .sorted { $0.createdAt < $1.createdAt }
+                .prefix(limit)
+        )
+    }
+
+    func pendingUploads(
+        after cursor: UploadTaskCursor?,
+        state: UploadTaskState?,
+        limit: Int
+    ) async throws -> [PendingUploadV3] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(
+            uploads
+                .filter { state == nil || $0.state == state }
+                .filter { upload in
+                    guard let cursor else { return true }
+                    if upload.createdAt != cursor.createdAt {
+                        return upload.createdAt > cursor.createdAt
+                    }
+                    return upload.taskID > cursor.taskID
+                }
+                .sorted {
+                    if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+                    return $0.taskID < $1.taskID
+                }
                 .prefix(limit)
         )
     }

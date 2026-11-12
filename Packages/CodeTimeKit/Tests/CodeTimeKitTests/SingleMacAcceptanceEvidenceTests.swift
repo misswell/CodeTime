@@ -70,7 +70,8 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
         into directory: URL,
         omitting: String? = nil,
         host: String = "Mac-A",
-        device: String = "device-A"
+        device: String = "device-A",
+        evidenceKind: String = "real"
     ) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for scenario in scenarios where scenario != omitting {
@@ -84,6 +85,7 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
                 "app_version": "1.0.0",
                 "candidate_sha256": candidate,
                 "commit": commit,
+                "evidence_kind": evidenceKind,
                 "started_at": "2026-11-12T00:00:00Z",
                 "finished_at": "2026-11-12T00:01:00Z",
                 "assertions": assertions(scenario),
@@ -93,7 +95,10 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
         }
     }
 
-    private func makeReport(_ evidence: URL) throws -> (status: Int32, output: String, url: URL) {
+    private func makeReport(
+        _ evidence: URL,
+        allowFixture: Bool = false
+    ) throws -> (status: Int32, output: String, url: URL) {
         let report = workspace.appendingPathComponent("report-\(UUID().uuidString).md")
         let result = try run([
             repoRoot.appendingPathComponent("Scripts/single_mac_acceptance.sh").path,
@@ -106,7 +111,7 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
             "--run", "12345",
             "--operator", "tester",
             "--out", report.path,
-        ])
+        ], environment: allowFixture ? ["SINGLE_MAC_ACCEPTANCE_ALLOW_FIXTURE": "1"] : [:])
         return (result.status, result.output, report)
     }
 
@@ -132,6 +137,7 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
             "app_version": "1.0.0",
             "candidate_sha256": candidate,
             "commit": commit,
+            "evidence_kind": "real",
             "started_at": "2026-11-12T00:00:00Z",
             "finished_at": "2026-11-12T00:01:00Z",
             "assertions": assertions("backup_created"),
@@ -166,6 +172,24 @@ final class SingleMacAcceptanceEvidenceTests: XCTestCase {
             ]
         )
         XCTAssertEqual(gate.status, 0, gate.output)
+    }
+
+    func testCT257_FixtureEvidenceCannotPassReleaseGate() throws {
+        let evidence = workspace.appendingPathComponent("fixture-evidence", isDirectory: true)
+        try writeEvidence(into: evidence, evidenceKind: "fixture")
+        let report = try makeReport(evidence, allowFixture: true)
+        XCTAssertEqual(report.status, 0, report.output)
+        let gate = try run(
+            [repoRoot.appendingPathComponent("Scripts/require_single_mac_acceptance.sh").path, "v1.0.0"],
+            environment: [
+                "SINGLE_MAC_ACCEPTANCE_REPORT": report.url.path,
+                "SINGLE_MAC_ACCEPTANCE_EVIDENCE_DIR": evidence.path,
+                "GITHUB_SHA": commit,
+                "EXPECTED_ARTIFACT_SHA": candidate,
+            ]
+        )
+        XCTAssertNotEqual(gate.status, 0)
+        XCTAssertTrue(gate.output.contains("fixture evidence"), gate.output)
     }
 
     func testCT233_HandWrittenPassWithoutEvidenceIsRejected() throws {

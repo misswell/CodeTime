@@ -30,6 +30,7 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
         access: CloudFileAccess = LocalFileAccess(),
         tracker: CloudUploadTracking = NoopUploadTracker(),
         eviction: ICloudEvictionManager? = nil,
+        leaseManager: LocalCopyLeaseManager = LocalCopyLeaseManager(),
         deviceListTTL: TimeInterval = 60
     ) {
         self.root = root
@@ -38,7 +39,7 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
         self.access = access
         self.tracker = tracker
         self.eviction = eviction
-        self.leaseManager = LocalCopyLeaseManager()
+        self.leaseManager = leaseManager
         self.cloudAccess = CloudAccessCoordinator(
             access: access,
             tracker: tracker,

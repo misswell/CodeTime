@@ -187,6 +187,14 @@ public struct CloudRestoreEngine: Sendable {
         destination: URL,
         isCancelled: @Sendable () -> Bool = { false }
     ) async throws -> CloudRestoreReport {
+        // Overwriting is not a restore primitive anymore. Even a caller that
+        // bypasses the service must not be able to replace an existing tree,
+        // including an original project. A fresh destination is mandatory.
+        guard !options.overwriteDestination else {
+            throw CloudRestoreError.invalidPath(
+                "覆盖恢复已禁用：CodeTime 只允许恢复到独立的新目录"
+            )
+        }
         // Refuse before reading the manifest: a destination that equals, lives
         // inside, or contains an original project can never be written to.
         if options.sourceRoots.contains(where: { Self.pathsOverlap(destination, $0) }) {
@@ -198,17 +206,24 @@ public struct CloudRestoreEngine: Sendable {
         var report = CloudRestoreReport(snapshotID: snapshotID)
 
         let fm = FileManager.default
-        let destinationExists = fm.fileExists(atPath: destination.path)
-        if destinationExists && !options.overwriteDestination {
+        if fm.fileExists(atPath: destination.path) {
             throw CloudRestoreError.destinationExists(destination.path)
         }
 
         let packCache = PackCache(limit: 2)
-        // Deterministic staging per (destination, snapshot): an interrupted run
-        // can resume and skip files that already hash correctly. It stays hidden
-        // and is removed by the successful atomic move.
-        let staging = Self.stagingURL(for: destination, snapshotID: snapshotID)
-        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        // Staging identity includes the full snapshot ID, the restore target and
+        // the destination hash. Reusing staging from a different target would
+        // leak old files into the exported tree.
+        let staging = Self.stagingURL(
+            for: destination,
+            snapshotID: snapshotID,
+            target: target
+        )
+        try Self.ensureSafeStagingDirectory(
+            staging,
+            destination: destination,
+            sourceRoots: options.sourceRoots
+        )
         let journalURL = staging.deletingLastPathComponent()
             .appendingPathComponent(".\(staging.lastPathComponent)-journal.jsonl")
         let journal = try RestoreJournal(url: journalURL)
@@ -271,27 +286,12 @@ public struct CloudRestoreEngine: Sendable {
         journal.close()
         try? fm.removeItem(at: journalURL)
 
-        // Commit with rollback: an existing destination is moved aside, never
-        // deleted before the new tree is in place.
-        let backup = destination.deletingLastPathComponent()
-            .appendingPathComponent(".codetime-backup-\(UUID().uuidString)", isDirectory: true)
-        var movedAside = false
-        if destinationExists {
-            try fm.moveItem(at: destination, to: backup)
-            movedAside = true
+        // The destination was proven absent before staging began. Re-check right
+        // before the commit so a concurrently created path is never replaced.
+        guard !fm.fileExists(atPath: destination.path) else {
+            throw CloudRestoreError.destinationExists(destination.path)
         }
-        do {
-            try fm.moveItem(at: staging, to: destination)
-        } catch {
-            if movedAside {
-                try? fm.moveItem(at: backup, to: destination)
-            }
-            throw error
-        }
-        if movedAside {
-            var trashed: NSURL?
-            try? fm.trashItem(at: backup, resultingItemURL: &trashed)
-        }
+        try fm.moveItem(at: staging, to: destination)
         report.commited = true
         return report
     }
@@ -723,17 +723,92 @@ public struct CloudRestoreEngine: Sendable {
         return Array(left.prefix(shared)) == Array(right.prefix(shared))
     }
 
-    static func stagingURL(for destination: URL, snapshotID: String) -> URL {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in destination.standardizedFileURL.path.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
+    static func stagingURL(
+        for destination: URL,
+        snapshotID: String,
+        target: RestoreTarget
+    ) -> URL {
+        let targetKey: String
+        switch target {
+        case .project:
+            targetKey = "project"
+        case .directory(let path):
+            targetKey = "directory:" + path
+        case .file(let path):
+            targetKey = "file:" + path
         }
+        let destinationPath = destination.standardizedFileURL
+            .resolvingSymlinksInPath().path.lowercased()
+        let material = "\(snapshotID)\u{0}\(targetKey)\u{0}\(destinationPath)"
+        let digest = SHA256.hash(data: Data(material.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
         return destination.deletingLastPathComponent()
             .appendingPathComponent(
-                ".codetime-restore-\(snapshotID.prefix(8))-\(String(hash, radix: 16))",
+                ".codetime-restore-\(digest.prefix(32))",
                 isDirectory: true
             )
+    }
+
+    /// Creates staging without following a pre-planted symlink and verifies the
+    /// real directory is disjoint from every source root. `mkdir` does not follow
+    /// a symlink at the final component; O_NOFOLLOW re-proves the result.
+    static func ensureSafeStagingDirectory(
+        _ staging: URL,
+        destination: URL,
+        sourceRoots: [URL]
+    ) throws {
+        // Check before creating anything: a parent symlink can make the staging
+        // path resolve into a source project.
+        for source in sourceRoots {
+            if Self.pathsOverlap(staging, source) || Self.pathsOverlap(destination, source) {
+                throw CloudRestoreError.invalidPath(
+                    "恢复临时目录位于原始项目内，已拒绝：\(staging.path)"
+                )
+            }
+        }
+        let parent = staging.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+
+        var info = stat()
+        if lstat(staging.path, &info) == 0 {
+            guard (info.st_mode & S_IFMT) == S_IFDIR else {
+                throw CloudRestoreError.invalidPath(
+                    "恢复 staging 不是真实目录，已拒绝：\(staging.path)"
+                )
+            }
+        } else if errno != ENOENT {
+            throw CloudRestoreError.invalidPath(
+                "无法检查恢复 staging：\(staging.path)"
+            )
+        } else if mkdir(staging.path, 0o700) != 0 {
+            throw CloudRestoreError.invalidPath(
+                "无法创建恢复 staging：\(staging.path)"
+            )
+        }
+
+        guard lstat(staging.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else {
+            throw CloudRestoreError.invalidPath(
+                "恢复 staging 被符号链接或文件替换：\(staging.path)"
+            )
+        }
+        let fd = open(staging.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else {
+            throw CloudRestoreError.invalidPath(
+                "恢复 staging 未通过 O_NOFOLLOW 校验：\(staging.path)"
+            )
+        }
+        close(fd)
+
+        // A symlinked parent can redirect the staging path after lexical checks.
+        // Compare the real staging and destination paths against source roots.
+        for source in sourceRoots {
+            if Self.pathsOverlap(staging, source) || Self.pathsOverlap(destination, source) {
+                throw CloudRestoreError.invalidPath(
+                    "恢复临时目录位于原始项目内，已拒绝：\(staging.path)"
+                )
+            }
+        }
     }
 
     private func openNoFollow(_ url: URL) -> FileHandle? {
@@ -786,12 +861,19 @@ final class RestoreJournal: @unchecked Sendable {
     private let lock = NSLock()
 
     init(url: URL) throws {
-        _ = FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try? FileHandle(forWritingTo: url)
-        handle?.seekToEndOfFile()
-        if handle == nil {
-            throw CloudRestoreError.invalidPath("无法写入恢复日志：\(url.lastPathComponent)")
+        // A pre-planted journal symlink must not redirect writes into a source or
+        // any other file. O_NOFOLLOW rejects the final component being a link.
+        let fd = open(
+            url.path,
+            O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC,
+            0o600
+        )
+        guard fd >= 0 else {
+            throw CloudRestoreError.invalidPath("无法安全写入恢复日志：\(url.lastPathComponent)")
         }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        handle.seekToEndOfFile()
+        self.handle = handle
     }
 
     func append(_ entry: RestoreJournalEntry) throws {

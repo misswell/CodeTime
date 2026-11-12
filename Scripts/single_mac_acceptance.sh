@@ -20,6 +20,7 @@ case "$cmd" in
     MACOS="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
     APP_VERSION="${CODETIME_APP_VERSION:-1.0.0}"
     CANDIDATE=""; COMMIT=""; STARTED=""; FINISHED=""; ASSERTIONS=""; OUT=""
+    EVIDENCE_KIND="${SINGLE_MAC_EVIDENCE_KIND:-real}"
     while [ $# -gt 0 ]; do
       case "$1" in
         --scenario) SCENARIO="$2"; shift 2 ;;
@@ -34,6 +35,7 @@ case "$cmd" in
         --started-at) STARTED="$2"; shift 2 ;;
         --finished-at) FINISHED="$2"; shift 2 ;;
         --assertions) ASSERTIONS="$2"; shift 2 ;;
+        --evidence-kind) EVIDENCE_KIND="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         *) usage ;;
       esac
@@ -42,11 +44,12 @@ case "$cmd" in
       [ -n "${!required}" ] || fail "--${required,,} is required"
     done
     case "$RESULT" in passed|failed|blocked) ;; *) fail "result must be passed/failed/blocked" ;; esac
+    case "$EVIDENCE_KIND" in real|fixture) ;; *) fail "evidence-kind must be real/fixture" ;; esac
     python3 - "$SCENARIO" "$RESULT" "$DEVICE_ID" "$HOST" "$MODEL" "$MACOS" "$APP_VERSION" \
-      "$CANDIDATE" "$COMMIT" "$STARTED" "$FINISHED" "$ASSERTIONS" "$OUT" <<'PY'
+      "$CANDIDATE" "$COMMIT" "$STARTED" "$FINISHED" "$ASSERTIONS" "$OUT" "$EVIDENCE_KIND" <<'PY'
 import json, sys, datetime
 (scenario, result, device, host, model, macos, app_version,
- candidate, commit, started, finished, assertions_raw, out) = sys.argv[1:14]
+ candidate, commit, started, finished, assertions_raw, out, evidence_kind) = sys.argv[1:15]
 try:
     assertions = json.loads(assertions_raw)
 except json.JSONDecodeError as error:
@@ -61,6 +64,7 @@ payload = {
     "model": model, "macOS": macos, "app_version": app_version,
     "candidate_sha256": candidate, "commit": commit,
     "started_at": started or now, "finished_at": finished or now,
+    "evidence_kind": evidence_kind,
     "assertions": assertions,
 }
 with open(out, "w") as fh:

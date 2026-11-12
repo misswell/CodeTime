@@ -56,7 +56,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
     private let cache: RestoreObjectCache?
     private let git: GitCapturing?
     private let snapshotProjectProvider: @Sendable (String) async -> UUID?
-    private let sourceRootsProvider: (@Sendable () async -> [URL])?
+    private let sourceRootsProvider: (@Sendable () async throws -> [URL])?
     private let prepareStore: (@Sendable () async throws -> Void)?
     private let clock: @Sendable () -> Date
 
@@ -70,7 +70,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         cache: RestoreObjectCache? = nil,
         git: GitCapturing? = nil,
         snapshotProjectProvider: @escaping @Sendable (String) async -> UUID?,
-        sourceRootsProvider: (@Sendable () async -> [URL])? = nil,
+        sourceRootsProvider: (@Sendable () async throws -> [URL])? = nil,
         prepareStore: (@Sendable () async throws -> Void)? = nil,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -200,7 +200,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         }
         let projectID = try await projectID(for: snapshotID)
         if let sourceRootsProvider {
-            let sourceRoots = await sourceRootsProvider()
+            let sourceRoots = try await sourceRootsProvider()
             if sourceRoots.contains(where: { CloudRestoreEngine.pathsOverlap(destination, $0) }) {
                 throw CodeTimeError.pathOverlap(
                     path: destination.path,
@@ -238,20 +238,19 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         let projectID = try await projectID(for: snapshotID)
         let reader = restorer()
         let manifest = try await reader.manifest(projectID: projectID, snapshotID: snapshotID)
-        let files = try await reader.recursiveFiles(rootNodeID: manifest.rootNodeID)
         let needle = query.lowercased()
         var entries: [FileEntry] = []
         var visited = 0
         var truncated = false
         var reason: String?
-        for (path, file) in files.sorted(by: { $0.key < $1.key }) {
+        try await reader.forEachFile(rootNodeID: manifest.rootNodeID) { path, file in
             visited += 1
             if visited > limits.maxFiles {
                 truncated = true
                 reason = "已达到文件上限 \(limits.maxFiles)"
-                break
+                return false
             }
-            guard path.lowercased().contains(needle) else { continue }
+            guard path.lowercased().contains(needle) else { return true }
             entries.append(FileEntry(
                 path: file.path,
                 name: MerkleTreeBuilder.lastComponent(of: file.path),
@@ -264,9 +263,11 @@ public struct CloudFirstEngineAdapter: BackupEngine {
             if entries.count >= limits.maxResults {
                 truncated = true
                 reason = "已达到结果上限 \(limits.maxResults)"
-                break
+                return false
             }
+            return true
         }
+        entries.sort { $0.path < $1.path }
         return FileSearchResult(
             entries: entries,
             truncated: truncated,
@@ -287,21 +288,15 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         let left = try await reader.manifest(projectID: projectA, snapshotID: snapshotA)
         let right = try await reader.manifest(projectID: projectB, snapshotID: snapshotB)
 
-        let leftFiles = try await reader.recursiveFiles(rootNodeID: left.rootNodeID)
-        let rightFiles = try await reader.recursiveFiles(rootNodeID: right.rootNodeID)
-
+        // Keep only the left map in memory. The right tree is streamed, and a
+        // matched path is removed from the left map; whatever remains at the end
+        // is exactly the removed set. This halves peak memory versus loading two
+        // full dictionaries.
+        var leftFiles = try await reader.recursiveFiles(rootNodeID: left.rootNodeID)
         var diff = SnapshotDiff()
         let limit = 500
-        for (path, file) in leftFiles where rightFiles[path] == nil {
-            diff.removed += 1
-            if diff.files.count < limit {
-                diff.files.append(ChangedFile(path: path, kind: .removed))
-            } else {
-                diff.isTruncated = true
-            }
-        }
-        for (path, file) in rightFiles {
-            if let previous = leftFiles[path] {
+        try await reader.forEachFile(rootNodeID: right.rootNodeID) { path, file in
+            if let previous = leftFiles.removeValue(forKey: path) {
                 if previous.contentHash != file.contentHash
                     || previous.kind != file.kind
                     || previous.linkTarget != file.linkTarget {
@@ -325,6 +320,15 @@ public struct CloudFirstEngineAdapter: BackupEngine {
                 } else {
                     diff.isTruncated = true
                 }
+            }
+            return true
+        }
+        diff.removed = leftFiles.count
+        for path in leftFiles.keys.sorted() {
+            if diff.files.count < limit {
+                diff.files.append(ChangedFile(path: path, kind: .removed))
+            } else {
+                diff.isTruncated = true
             }
         }
         return diff
@@ -423,16 +427,34 @@ extension CloudRestoreEngine {
     /// All non-directory nodes in a tree, keyed by relative path.
     public func recursiveFiles(rootNodeID: String) async throws -> [String: FileNode] {
         var result: [String: FileNode] = [:]
+        try await forEachFile(rootNodeID: rootNodeID) { path, file in
+            result[path] = file
+            return true
+        }
+        return result
+    }
+
+    /// Streaming tree walk. Only one directory node is held at a time, and the
+    /// visitor can stop early so search/diff limits never load the whole tree.
+    public func forEachFile(
+        rootNodeID: String,
+        visit: (String, FileNode) async throws -> Bool
+    ) async throws {
+        var keepGoing = true
         func walk(_ node: DirectoryNode) async throws {
-            for file in node.files {
-                result[file.path] = file
+            guard keepGoing else { return }
+            for file in node.files.sorted(by: { $0.path < $1.path }) {
+                guard try await visit(file.path, file) else {
+                    keepGoing = false
+                    return
+                }
             }
-            for directory in node.directories {
+            for directory in node.directories.sorted(by: { $0.name < $1.name }) {
+                guard keepGoing else { return }
                 try await walk(try await source.readNode(directory.nodeID))
             }
         }
         try await walk(try await source.readNode(rootNodeID))
-        return result
     }
 
     /// True when the path names a directory in this snapshot.

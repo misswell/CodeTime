@@ -57,6 +57,36 @@ public struct UploadJournalReconciler: Sendable {
         self.clock = clock
     }
 
+    /// Upload-confirmed state only. A local file name is not proof that iCloud
+    /// accepted the bytes; an in-progress upload is waited on briefly.
+    private func remoteConfirmed(kind: String, id: String) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(30)
+        while true {
+            let state: CloudObjectState
+            switch kind {
+            case UploadQueue.objectKind:
+                state = try await cloud.objectState(id)
+            case UploadQueue.packKind:
+                state = try await cloud.packState(id)
+            default:
+                return false
+            }
+            switch state {
+            case .uploaded, .verified, .packed:
+                return true
+            case .absent, .staged:
+                return false
+            case .uploading:
+                if Date() >= deadline { return false }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            case .failed(let detail):
+                throw CloudObjectLifecycleError.writerFailed(objectID: id, detail: detail)
+            case .inaccessible(let detail):
+                throw CloudObjectLifecycleError.stateUnavailable(objectID: id, detail: detail)
+            }
+        }
+    }
+
     public func reconcile() async -> UploadReconcileReport {
         var report = UploadReconcileReport()
         let tasks: [PendingUploadV3]
@@ -148,24 +178,11 @@ public struct UploadJournalReconciler: Sendable {
             guard fileManager.fileExists(atPath: url.path) else {
                 report.missingFiles += 1
                 do {
-                    switch task.remotePath {
-                    case UploadQueue.objectKind:
-                        if try await cloud.hasObject(task.objectID) {
-                            try await index.removeUpload(task.taskID)
-                            report.removedConfirmedTasks += 1
-                        } else {
-                            try await index.updateUploadState(task.taskID, state: .failed, bumpRetry: true)
-                            report.failedTasks += 1
-                        }
-                    case UploadQueue.packKind:
-                        if try await cloud.hasPack(task.objectID) {
-                            try await index.removeUpload(task.taskID)
-                            report.removedConfirmedTasks += 1
-                        } else {
-                            try await index.updateUploadState(task.taskID, state: .failed, bumpRetry: true)
-                            report.failedTasks += 1
-                        }
-                    default:
+                    let kind = task.remotePath
+                    if try await remoteConfirmed(kind: kind, id: task.objectID) {
+                        try await index.removeUpload(task.taskID)
+                        report.removedConfirmedTasks += 1
+                    } else {
                         try await index.updateUploadState(task.taskID, state: .failed, bumpRetry: true)
                         report.failedTasks += 1
                     }

@@ -126,6 +126,31 @@ final class CloudFirstEngineAdapterTests: XCTestCase {
         XCTAssertEqual(corrupted.outcome, .failed, "损坏的数据块必须让校验失败")
     }
 
+    func testCT258_SearchStopsBeforeLoadingTheWholeTree() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let projects = SnapshotProjects()
+        let adapter = makeAdapter(cloud: cloud, index: index, projects: projects)
+        let snapshot = try await adapter.createSnapshot(
+            project: project(), policy: policy(), trigger: .manual
+        )
+        await projects.set(snapshot.id, projectID)
+        cloud.resetReadCounts()
+
+        let result = try await adapter.searchFiles(
+            snapshotID: snapshot.id,
+            query: "",
+            limits: SearchLimits(maxFiles: 1, maxResults: 10)
+        )
+        XCTAssertTrue(result.truncated)
+        XCTAssertLessThanOrEqual(result.visitedFiles, 2)
+        XCTAssertLessThanOrEqual(
+            cloud.readNodeCount,
+            2,
+            "达到 maxFiles 后不得继续递归加载整个目录树"
+        )
+    }
+
     func testCT160_UnknownSnapshotIsRejected() async throws {
         let cloud = InMemoryCloud()
         let index = InMemoryIndex()

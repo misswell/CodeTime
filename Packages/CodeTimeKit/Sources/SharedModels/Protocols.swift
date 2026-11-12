@@ -171,11 +171,49 @@ public protocol CloudSnapshotIndex: Sendable {
     /// Durable upload journal: everything still owed to the cloud, including
     /// tasks that failed or were interrupted mid-upload.
     func pendingUploads(state: UploadTaskState?, limit: Int) async throws -> [PendingUploadV3]
+    /// Stable cursor pagination. Recovery must not stop at the first 10k tasks.
+    func pendingUploads(
+        after cursor: UploadTaskCursor?,
+        state: UploadTaskState?,
+        limit: Int
+    ) async throws -> [PendingUploadV3]
     func uploadTask(_ taskID: String) async throws -> PendingUploadV3?
     func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws
     func pendingUploadBytes() async throws -> Int64
     /// Snapshots that are still publishing. GC must abort while any exists.
     func inFlightSnapshotCount() async throws -> Int
+}
+
+public struct UploadTaskCursor: Sendable, Equatable {
+    public var createdAt: Date
+    public var taskID: String
+
+    public init(createdAt: Date, taskID: String) {
+        self.createdAt = createdAt
+        self.taskID = taskID
+    }
+
+    public init(_ upload: PendingUploadV3) {
+        self.createdAt = upload.createdAt
+        self.taskID = upload.taskID
+    }
+}
+
+public extension CloudSnapshotIndex {
+    /// Generic fallback for small/test indexes. Production SQLite overrides this
+    /// with a true (created_at, task_id) cursor query.
+    func pendingUploads(
+        after cursor: UploadTaskCursor?,
+        state: UploadTaskState?,
+        limit: Int
+    ) async throws -> [PendingUploadV3] {
+        let page = try await pendingUploads(state: state, limit: limit)
+        guard let cursor else { return page }
+        return page.filter {
+            $0.createdAt > cursor.createdAt
+                || ($0.createdAt == cursor.createdAt && $0.taskID > cursor.taskID)
+        }
+    }
 }
 
 /// Read side of Cloud Format v3, used by restore and verification.
