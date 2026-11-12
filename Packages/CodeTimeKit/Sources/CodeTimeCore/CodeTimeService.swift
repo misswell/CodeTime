@@ -774,6 +774,14 @@ public actor CodeTimeService {
                 }
                 return nil
             },
+            // Defense in depth: the service validates all destinations before a
+            // job exists, and the adapter refuses source overlaps again so a
+            // direct adapter caller cannot stage files inside a project.
+            sourceRootsProvider: { [database] in
+                ((try? await database.projects()) ?? []).map {
+                    URL(fileURLWithPath: $0.rootPath, isDirectory: true)
+                }
+            },
             prepareStore: { [store, logger] in
                 do {
                     try await store.prepare(deviceName: Host.current().localizedName ?? "Mac")
@@ -1846,6 +1854,11 @@ public actor CodeTimeService {
         defer { runtimeLease.release() }
         let owner = ProcessIdentity.current(isAgent: Self.isAgentProcess)
         let leaseDuration: TimeInterval = 90
+        let settings = try await currentSettings()
+        // A backup may only ever read the project. Every path that will receive
+        // writes (app data, spool/cache, recovery, repository, mirror) must be
+        // disjoint from the source; otherwise refuse before creating a job.
+        try await assertSourceProjectIsIndependent(project, settings: settings)
         // Check the project and claim the job in one SQLite write transaction.
         // No stale job object is written back before the lease is acquired.
         guard let claimed = try await database.claimBackupJob(
@@ -1859,7 +1872,6 @@ public actor CodeTimeService {
         }
         let job = claimed.job
         let leaseState = LeaseState()
-        let settings = try await currentSettings()
         let usesCloudFirst = settings.engineMode == .cloudFirst
         let work = Task { [self] in
             if usesCloudFirst {
@@ -2168,6 +2180,43 @@ public actor CodeTimeService {
             }
         }
 
+        // Original projects are permanently read-only. Overwrite-restore is the
+        // one mode that intentionally writes into a project, so it is refused
+        // outright rather than being an opt-in that can still damage sources.
+        if request.mode == .overwrite {
+            throw CodeTimeError.unsupported(
+                "CodeTime 对原始项目永久只读，不允许覆盖项目中的文件；请选择独立的新目录执行恢复副本"
+            )
+        }
+        // Reject before creating a job, lease, or target lock. The check is
+        // bidirectional against every registered source project, so neither the
+        // project itself, a child of it, nor an ancestor of it can be a restore
+        // destination.
+        if request.mode != .preview {
+            let sourceRoots = try await database.projects().map {
+                URL(fileURLWithPath: $0.rootPath, isDirectory: true)
+            }
+            do {
+                try SafePath.validateRestoreDestination(
+                    request.destination,
+                    protectedRoots: [paths.root, paths.lifecycleDir],
+                    sourceRoots: sourceRoots
+                )
+            } catch let error as SafePath.SafePathError {
+                switch error {
+                case .overlapsSource(let path, let source):
+                    throw CodeTimeError.pathOverlap(
+                        path: path,
+                        conflictsWith: "该位置与原始项目 \(source) 重叠；恢复只能写入独立目录"
+                    )
+                case .overlapsProtectedRoot(let path, let root):
+                    throw CodeTimeError.pathOutsideProject("\(path)（与 CodeTime 数据目录 \(root) 重叠）")
+                default:
+                    throw error
+                }
+            }
+        }
+
         try beginWorkClaim()
         defer { endWorkClaim() }
         let runtimeLease = try operationLeases.acquire(.shared, timeout: 60)
@@ -2267,59 +2316,20 @@ public actor CodeTimeService {
             case .preview:
                 break
             case .overwrite:
-                guard let relativePath = request.relativePath, !relativePath.isEmpty else {
-                    throw CodeTimeError.unsupported("覆盖恢复必须指定单个文件")
-                }
-                try await withProject(project) { resolved in
-                    let target = try Self.safeTargetURL(projectRoot: resolved.rootPath, relativePath: relativePath)
-                    if FileManager.default.fileExists(atPath: target.path) {
-                        let receipt: ProtectedCopyStore.CopyReceipt
-                        do {
-                            receipt = try ProtectedCopyStore.createCopy(
-                                target: target,
-                                projectID: project.id,
-                                projectRoot: URL(fileURLWithPath: resolved.rootPath),
-                                recoveryRoot: paths.recovery
-                            )
-                        } catch {
-                            // CT-117: an overwrite without a working protection
-                            // copy must never proceed — fail loudly instead.
-                            await logger.error("覆盖前保护副本创建失败，已中止覆盖恢复：\(error.localizedDescription)")
-                            throw error
-                        }
-                        // CT-122: the restore below references this copy, so it
-                        // stays protected from every prune until the restore ends.
-                        ProtectedCopyStore.registerActiveCopy(receipt.directory)
-                        defer { ProtectedCopyStore.unregisterActiveCopy(receipt.directory) }
-                        await logger.info(
-                            "覆盖前已保护当前文件：\(receipt.directory.path)（\(receipt.sizeBytes) 字节\(receipt.overBudget ? "，超出保护容量预算，副本已保留" : "")）"
-                        )
-                        for removal in receipt.removals {
-                            await logger.info(
-                                "保护副本清理：删除 \(removal.directory.lastPathComponent)（\(removal.bytes) 字节，原因 \(removal.reason.rawValue)）"
-                            )
-                        }
-                    }
-                    try await runRegisteredOperation(
-                        id: job.id,
-                        kind: .restore,
-                        projectID: request.projectID
-                    ) {
-                        try await engine.restore(
-                            snapshotID: request.snapshotID,
-                            path: relativePath,
-                            destination: target,
-                            overwrite: true
-                        )
-                    }
-                }
+                // Defense in depth: the early guard above already rejects this
+                // before a job exists, but the engine branch must never become a
+                // bypass if the request is refactored later.
+                throw CodeTimeError.unsupported(
+                    "CodeTime 对原始项目永久只读，覆盖恢复已禁用；请恢复到独立目录"
+                )
             case .copy, .wholeProject:
                 let path = request.mode == .wholeProject ? nil : request.relativePath
-                // CT-086: the user-chosen destination must not point into the
-                // app's data root (repositories / recovery / cache / database).
+                // CT-086: re-check immediately before the engine writes. The
+                // destination was already validated against every source root
+                // and CodeTime's data root before the job was created.
                 try SafePath.validateRestoreDestination(
                     request.destination,
-                    protectedRoots: [paths.root]
+                    protectedRoots: [paths.root, paths.lifecycleDir]
                 )
                 let destinationAccess = SecurityScopedAccess(url: request.destination)
                 defer { destinationAccess.stop() }
@@ -3261,6 +3271,47 @@ public actor CodeTimeService {
         var container: URL?
     }
 
+    /// Fails closed if any CodeTime write location (app data, spool/cache,
+    /// lifecycle locks, repository, mirror) overlaps an original project.
+    /// Backups may read sources; they may never create files in them.
+    private func assertSourceProjectIsIndependent(
+        _ project: Project,
+        settings: AppSettings
+    ) async throws {
+        let source = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+        var writeRoots: [(URL, String)] = [
+            (paths.root, "CodeTime 数据目录"),
+            (paths.lifecycleDir, "CodeTime 生命周期锁目录"),
+        ]
+        if let repository {
+            writeRoots.append((URL(fileURLWithPath: repository.path, isDirectory: true), "备份仓库"))
+        }
+        if let mirror = settings.localMirrorPath, !mirror.isEmpty {
+            writeRoots.append((URL(fileURLWithPath: mirror, isDirectory: true), "本地镜像目录"))
+        }
+        for (root, label) in writeRoots where SafePath.overlaps(source, root) {
+            throw CodeTimeError.pathOverlap(
+                path: source.path,
+                conflictsWith: "原始项目与\(label)（\(root.path)）重叠；备份只能读取原始项目"
+            )
+        }
+    }
+
+    /// Cloud/mirror roots receive uploads, indexes and staging files. Refuse a
+    /// root that overlaps any registered source project before creating it.
+    private func assertManagedWriteRootIsIndependent(_ root: URL) async throws {
+        let projects = (try? await database.projects()) ?? []
+        for project in projects {
+            let source = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+            if SafePath.overlaps(root, source) {
+                throw CodeTimeError.pathOverlap(
+                    path: root.path,
+                    conflictsWith: "备份写入目录与原始项目 \(source.path) 重叠"
+                )
+            }
+        }
+    }
+
     /// Resolves the configured cloud/mirror root exactly once for both the v2
     /// mirror and the v3 store. A configured-but-unavailable iCloud is an error,
     /// never a silent fallback to another directory.
@@ -3270,6 +3321,7 @@ public actor CodeTimeService {
             guard status.isReady, let iCloud = status.storageRoot else {
                 throw CodeTimeError.cloudSetupUnavailable(state: status.state.rawValue, detail: status.detail)
             }
+            try await assertManagedWriteRootIsIndependent(iCloud)
             let container = await CloudLocation.iCloudDocuments()
             return CloudRoot(
                 root: iCloud,
@@ -3282,6 +3334,7 @@ public actor CodeTimeService {
             if let bookmark = settings.localMirrorBookmark {
                 do {
                     let resolved = try SecurityScopedBookmarks.resolve(bookmark)
+                    try await assertManagedWriteRootIsIndependent(resolved.url)
                     if mirrorAccess?.url.standardizedFileURL.path != resolved.url.standardizedFileURL.path {
                         mirrorAccess?.stop()
                         mirrorAccess = SecurityScopedAccess(url: resolved.url)
@@ -3293,6 +3346,7 @@ public actor CodeTimeService {
                 }
             }
             let url = URL(fileURLWithPath: custom, isDirectory: true)
+            try await assertManagedWriteRootIsIndependent(url)
             do {
                 try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             } catch {
@@ -3394,6 +3448,30 @@ public actor CodeTimeService {
         // context depends on it), so refuse before downloading anything.
         if try await database.project(id: candidate.projectID) != nil {
             throw CodeTimeError.unsupported("该项目的恢复目标已存在，请使用普通恢复功能")
+        }
+        // Disaster recovery is still a restore: it must land in an independent
+        // directory, never inside or above a project that already exists locally.
+        let recoverySourceRoots = try await database.projects().map {
+            URL(fileURLWithPath: $0.rootPath, isDirectory: true)
+        }
+        do {
+            try SafePath.validateRestoreDestination(
+                destination,
+                protectedRoots: [paths.root, paths.lifecycleDir],
+                sourceRoots: recoverySourceRoots
+            )
+        } catch let error as SafePath.SafePathError {
+            switch error {
+            case .overlapsSource(let path, let source):
+                throw CodeTimeError.pathOverlap(
+                    path: path,
+                    conflictsWith: "该位置与原始项目 \(source) 重叠；恢复只能写入独立目录"
+                )
+            case .overlapsProtectedRoot(let path, let root):
+                throw CodeTimeError.pathOutsideProject("\(path)（与 CodeTime 数据目录 \(root) 重叠）")
+            default:
+                throw error
+            }
         }
 
         // Recovery is a restore path too: a GC candidate protected by a device

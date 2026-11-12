@@ -9,7 +9,6 @@ struct RestoreSheet: View {
 
     @State private var mode: RestoreMode
     @State private var copyDestination: URL?
-    @State private var confirmedOverwrite = false
     @State private var isRestoring = false
     @State private var errorMessage: String?
 
@@ -19,22 +18,11 @@ struct RestoreSheet: View {
     }
 
     private var availableModes: [RestoreMode] {
-        context.relativePath == nil ? [.wholeProject] : [.copy, .overwrite]
-    }
-
-    private var overwriteURL: URL? {
-        guard let relativePath = context.relativePath else { return nil }
-        return URL(fileURLWithPath: context.project.rootPath).appendingPathComponent(relativePath)
-    }
-
-    private var effectiveDestination: URL? {
-        mode == .overwrite ? overwriteURL : copyDestination
+        context.relativePath == nil ? [.wholeProject] : [.copy]
     }
 
     private var canRestore: Bool {
-        guard !isRestoring, effectiveDestination != nil else { return false }
-        if mode == .overwrite { return confirmedOverwrite }
-        return true
+        !isRestoring && copyDestination != nil
     }
 
     var body: some View {
@@ -89,60 +77,34 @@ struct RestoreSheet: View {
                                 .foregroundStyle(.secondary)
                                 .textCase(.uppercase)
 
-                            if mode == .overwrite, let overwriteURL {
-                                HStack {
-                                    Image(systemName: "doc")
-                                        .foregroundStyle(.secondary)
-                                    Text(overwriteURL.path)
-                                        .font(.system(size: 11.5, design: .monospaced))
-                                        .lineLimit(2)
-                                        .truncationMode(.middle)
-                                }
-                            } else {
-                                HStack {
-                                    Image(systemName: copyDestination == nil ? "folder.badge.questionmark" : "folder")
-                                        .foregroundStyle(copyDestination == nil ? .secondary : CT.accent)
-                                    Text(copyDestination?.path ?? "尚未选择位置")
-                                        .font(.system(size: 11.5, design: .monospaced))
-                                        .foregroundStyle(copyDestination == nil ? .secondary : .primary)
-                                        .lineLimit(2)
-                                        .truncationMode(.middle)
-                                    Spacer()
-                                    Button("选择…") { chooseDestination() }
-                                        .controlSize(.small)
-                                }
+                            HStack {
+                                Image(systemName: copyDestination == nil ? "folder.badge.questionmark" : "folder")
+                                    .foregroundStyle(copyDestination == nil ? .secondary : CT.accent)
+                                Text(copyDestination?.path ?? "尚未选择位置")
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .foregroundStyle(copyDestination == nil ? .secondary : .primary)
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
+                                Spacer()
+                                Button("选择…") { chooseDestination() }
+                                    .controlSize(.small)
                             }
 
                             if mode == .wholeProject {
-                                Text("请选择一个空目录或新建目录。CodeTime 不会覆盖已有文件。")
+                                Text("请选择一个独立的新目录。CodeTime 不会覆盖已有项目，也不会写入原始项目。")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
 
-                    if mode == .overwrite {
-                        CTCard(padding: 16) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label("覆盖保护", systemImage: "shield.lefthalf.filled")
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(CT.warning)
-                                Text("恢复前会先把当前文件复制到 CodeTime 的 recovery 目录；如果保护失败，覆盖操作会中止。")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Toggle("我了解这会替换项目中的当前文件", isOn: $confirmedOverwrite)
-                                    .toggleStyle(.checkbox)
-                            }
-                        }
-                    } else {
-                        CTCard(padding: 16) {
-                            HStack(spacing: 10) {
-                                Image(systemName: "checkmark.shield")
-                                    .foregroundStyle(CT.success)
-                                Text("推荐使用恢复副本：写入新位置，不改变当前开发代码。")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    CTCard(padding: 16) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.shield")
+                                .foregroundStyle(CT.success)
+                            Text("CodeTime 对原始项目永久只读：恢复只写入你选择的独立位置，不改变当前开发代码。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
@@ -173,11 +135,11 @@ struct RestoreSheet: View {
                     if isRestoring {
                         HStack { ProgressView().controlSize(.small); Text("恢复中…") }
                     } else {
-                        Text(mode == .overwrite ? "覆盖恢复" : "开始恢复")
+                        Text("开始恢复")
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(mode == .overwrite ? CT.warning : CT.accent)
+                .tint(CT.accent)
                 .disabled(!canRestore)
             }
             .padding(18)
@@ -185,7 +147,6 @@ struct RestoreSheet: View {
         .frame(width: 620, height: 620)
         .onChange(of: mode) { _ in
             errorMessage = nil
-            confirmedOverwrite = false
         }
     }
 
@@ -196,7 +157,7 @@ struct RestoreSheet: View {
         case .copy:
             return "把历史版本写入你选择的新位置，项目中的当前文件保持不变。"
         case .overwrite:
-            return "用历史版本替换项目中的当前文件。CodeTime 会先保护当前文件并要求二次确认。"
+            return "已禁用：CodeTime 对原始项目永久只读，不会覆盖项目中的任何文件。"
         case .wholeProject:
             return "把整个项目在指定目录中展开，包含源代码、目录结构与 .git 元数据。"
         }
@@ -226,7 +187,7 @@ struct RestoreSheet: View {
     }
 
     private func performRestore() {
-        guard let destination = effectiveDestination else { return }
+        guard let destination = copyDestination else { return }
         isRestoring = true
         errorMessage = nil
         Task {

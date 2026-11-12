@@ -10,12 +10,17 @@ public enum RestoreMode: String, Codable, Sendable, CaseIterable {
         switch self {
         case .preview: return "仅预览"
         case .copy: return "恢复副本"
-        case .overwrite: return "覆盖原文件"
+        case .overwrite: return "覆盖原文件（已禁用）"
         case .wholeProject: return "恢复整个项目"
         }
     }
 
     public var isDestructive: Bool { self == .overwrite }
+
+    /// Restore modes that may write to disk. `overwrite` is retained only so
+    /// historical jobs still decode; the service always rejects it because
+    /// original projects are permanently read-only.
+    public var writesToDisk: Bool { self == .copy || self == .overwrite || self == .wholeProject }
 }
 
 public enum RestoreStatus: String, Codable, Sendable {

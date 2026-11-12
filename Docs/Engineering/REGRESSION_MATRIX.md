@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-233）
+# 回归测试矩阵（CT-001 … CT-249）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -237,3 +237,19 @@
 | CT-231 | `testCT231_TwoHostsCannotPassSingleMacGate` | 单机验收不得接受重复/多 Host 证据 | 是 | 否 |
 | CT-232 | `testCT232_CompleteSingleMacEvidenceGeneratesReportAndPassesGate` | 完整单机证据生成报告并通过发布门禁 | 是 | 否 |
 | CT-233 | `testCT233_HandWrittenPassWithoutEvidenceIsRejected` | 手写 PASS 缺少全部场景证据必须拒绝 | 是 | 否 |
+| CT-234 | `testCT234_BackupLeavesOriginalBytesAndStructureUnchanged` | 备份不修改原始项目的字节或目录结构 | 是 | 否 |
+| CT-235 | `testCT235_BackupLeavesModesMtimesXattrsAndSymlinksUnchanged` | 备份不修改权限、mtime、xattr 或符号链接 | 是 | 否 |
+| CT-236 | `testCT236_UploadFailureDoesNotModifyOriginals` | 上传失败不修改原始项目 | 是 | 否 |
+| CT-237 | `testCT237_UploadRetryAfterFailureDoesNotModifyOriginals` | 上传失败后的重试不修改原始项目 | 是 | 否 |
+| CT-238 | `testCT238_BackupCancellationDoesNotModifyOriginals` | 取消备份不修改原始项目且不提交云端版本 | 是 | 否 |
+| CT-239 | `testCT239_RestoreCopyDoesNotOverwriteOrHardLinkOriginals` | 恢复副本不覆盖原始项目且不与源文件共享 inode | 是 | 否 |
+| CT-240 | `testCT240_RestoreDestinationOverlappingProjectIsRejected` | 恢复目标等于/位于/包含原始项目时必须拒绝 | 是 | 否 |
+| CT-241 | `testCT241_OverwriteRestoreModeIsRejected` | 覆盖恢复原始项目必须拒绝 | 是 | 否 |
+| CT-242 | `testCT242_DeletingLocalSourceKeepsCloudHistoryRestorable` | 删除本地源不删除云端历史且仍可恢复 | 是 | 否 |
+| CT-243 | `testCT243_DeletingCloudObjectsDoesNotModifyOriginals` | 删除云端对象不得反向修改原始项目 | 是 | 否 |
+| CT-244 | `testCT244_GarbageCollectionNeverTouchesSourceDirectory` | GC 只操作云端仓库，绝不触碰源目录 | 是 | 否 |
+| CT-245 | `testCT245_InterruptedRestoreDoesNotDamageOriginals` | 恢复中断与续传均不损坏原始项目 | 是 | 否 |
+| CT-246 | `testCT246_ServiceRestoreWritesOnlyToIndependentDestination` | 服务恢复只写入独立目标目录 | 是 | 否 |
+| CT-247 | `testCT247_ServiceRejectsEqualChildAndAncestorDestinations` | 服务拒绝等于/子目录/祖先恢复目标 | 是 | 否 |
+| CT-248 | `testCT248_ServiceRejectsOverwriteMode` | 服务拒绝覆盖恢复模式 | 是 | 否 |
+| CT-249 | `testCT249_MirrorInsideSourceIsRejectedBeforeBackup` | 镜像目录位于原始项目内时备份必须拒绝 | 是 | 否 |

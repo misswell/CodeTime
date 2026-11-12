@@ -55,17 +55,23 @@ public struct RestoreOptions: Sendable {
     /// Bounded chunk cache; nil disables caching (every chunk downloaded).
     public var cache: RestoreObjectCache?
     public var readPolicy: ObjectReadPolicy
+    /// Original project roots this restore must never write into. The service
+    /// always supplies every registered project; direct engine callers can use
+    /// this to keep the same read-only-source invariant.
+    public var sourceRoots: [URL]
 
     public init(
         overwriteDestination: Bool = false,
         verifyHashes: Bool = true,
         cache: RestoreObjectCache? = nil,
-        readPolicy: ObjectReadPolicy = .cachePreferred
+        readPolicy: ObjectReadPolicy = .cachePreferred,
+        sourceRoots: [URL] = []
     ) {
         self.overwriteDestination = overwriteDestination
         self.verifyHashes = verifyHashes
         self.cache = cache
         self.readPolicy = readPolicy
+        self.sourceRoots = sourceRoots
     }
 
     public static let `default` = RestoreOptions()
@@ -181,6 +187,13 @@ public struct CloudRestoreEngine: Sendable {
         destination: URL,
         isCancelled: @Sendable () -> Bool = { false }
     ) async throws -> CloudRestoreReport {
+        // Refuse before reading the manifest: a destination that equals, lives
+        // inside, or contains an original project can never be written to.
+        if options.sourceRoots.contains(where: { Self.pathsOverlap(destination, $0) }) {
+            throw CloudRestoreError.invalidPath(
+                "恢复目标与原始项目重叠，已拒绝写入：\(destination.path)"
+            )
+        }
         let manifest = try await loadManifest(projectID: projectID, snapshotID: snapshotID)
         var report = CloudRestoreReport(snapshotID: snapshotID)
 
@@ -696,6 +709,16 @@ public struct CloudRestoreEngine: Sendable {
                 )
             }
         }
+    }
+
+    /// Bidirectional, component-wise overlap check on resolved paths. Kept local
+    /// to BackupEngine so the engine enforces the invariant even when called
+    /// without CodeTimeCore's SafePath helper.
+    static func pathsOverlap(_ lhs: URL, _ rhs: URL) -> Bool {
+        let left = lhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let right = rhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let shared = min(left.count, right.count)
+        return Array(left.prefix(shared)) == Array(right.prefix(shared))
     }
 
     static func stagingURL(for destination: URL, snapshotID: String) -> URL {

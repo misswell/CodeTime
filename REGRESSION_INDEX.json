@@ -2328,5 +2328,165 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "不得硬编码发布通过"
+  },
+  {
+    "id": "CT-234",
+    "test": "testCT234_BackupLeavesOriginalBytesAndStructureUnchanged",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "备份不修改原始项目的字节或目录结构",
+    "required": true,
+    "invariant": "备份不修改原始项目的字节或目录结构",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-235",
+    "test": "testCT235_BackupLeavesModesMtimesXattrsAndSymlinksUnchanged",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "备份不修改权限、mtime、xattr 或符号链接",
+    "required": true,
+    "invariant": "备份不修改权限、mtime、xattr 或符号链接",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-236",
+    "test": "testCT236_UploadFailureDoesNotModifyOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "上传失败不修改原始项目",
+    "required": true,
+    "invariant": "上传失败不修改原始项目",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-237",
+    "test": "testCT237_UploadRetryAfterFailureDoesNotModifyOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "上传失败后的重试不修改原始项目",
+    "required": true,
+    "invariant": "上传失败后的重试不修改原始项目",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-238",
+    "test": "testCT238_BackupCancellationDoesNotModifyOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "取消备份不修改原始项目且不提交云端版本",
+    "required": true,
+    "invariant": "取消备份不修改原始项目且不提交云端版本",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-239",
+    "test": "testCT239_RestoreCopyDoesNotOverwriteOrHardLinkOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "恢复副本不覆盖原始项目且不与源文件共享 inode",
+    "required": true,
+    "invariant": "恢复副本不覆盖原始项目且不与源文件共享 inode",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-240",
+    "test": "testCT240_RestoreDestinationOverlappingProjectIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "恢复目标等于/位于/包含原始项目时必须拒绝",
+    "required": true,
+    "invariant": "恢复目标等于/位于/包含原始项目时必须拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-241",
+    "test": "testCT241_OverwriteRestoreModeIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "覆盖恢复原始项目必须拒绝",
+    "required": true,
+    "invariant": "覆盖恢复原始项目必须拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-242",
+    "test": "testCT242_DeletingLocalSourceKeepsCloudHistoryRestorable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "删除本地源不删除云端历史且仍可恢复",
+    "required": true,
+    "invariant": "删除本地源不删除云端历史且仍可恢复",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-243",
+    "test": "testCT243_DeletingCloudObjectsDoesNotModifyOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "删除云端对象不得反向修改原始项目",
+    "required": true,
+    "invariant": "删除云端对象不得反向修改原始项目",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-244",
+    "test": "testCT244_GarbageCollectionNeverTouchesSourceDirectory",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "GC 只操作云端仓库，绝不触碰源目录",
+    "required": true,
+    "invariant": "GC 只操作云端仓库，绝不触碰源目录",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-245",
+    "test": "testCT245_InterruptedRestoreDoesNotDamageOriginals",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "恢复中断与续传均不损坏原始项目",
+    "required": true,
+    "invariant": "恢复中断与续传均不损坏原始项目",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-246",
+    "test": "testCT246_ServiceRestoreWritesOnlyToIndependentDestination",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "服务恢复只写入独立目标目录",
+    "required": true,
+    "invariant": "服务恢复只写入独立目标目录",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-247",
+    "test": "testCT247_ServiceRejectsEqualChildAndAncestorDestinations",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "服务拒绝等于/子目录/祖先恢复目标",
+    "required": true,
+    "invariant": "服务拒绝等于/子目录/祖先恢复目标",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-248",
+    "test": "testCT248_ServiceRejectsOverwriteMode",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "服务拒绝覆盖恢复模式",
+    "required": true,
+    "invariant": "服务拒绝覆盖恢复模式",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-249",
+    "test": "testCT249_MirrorInsideSourceIsRejectedBeforeBackup",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "镜像目录位于原始项目内时备份必须拒绝",
+    "required": true,
+    "invariant": "镜像目录位于原始项目内时备份必须拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
   }
 ]

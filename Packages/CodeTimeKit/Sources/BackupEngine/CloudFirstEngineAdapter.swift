@@ -56,6 +56,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
     private let cache: RestoreObjectCache?
     private let git: GitCapturing?
     private let snapshotProjectProvider: @Sendable (String) async -> UUID?
+    private let sourceRootsProvider: (@Sendable () async -> [URL])?
     private let prepareStore: (@Sendable () async throws -> Void)?
     private let clock: @Sendable () -> Date
 
@@ -69,6 +70,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         cache: RestoreObjectCache? = nil,
         git: GitCapturing? = nil,
         snapshotProjectProvider: @escaping @Sendable (String) async -> UUID?,
+        sourceRootsProvider: (@Sendable () async -> [URL])? = nil,
         prepareStore: (@Sendable () async throws -> Void)? = nil,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -81,6 +83,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         self.cache = cache
         self.git = git
         self.snapshotProjectProvider = snapshotProjectProvider
+        self.sourceRootsProvider = sourceRootsProvider
         self.prepareStore = prepareStore
         self.clock = clock
     }
@@ -188,7 +191,23 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         destination: URL,
         overwrite: Bool
     ) async throws {
+        // Original projects are permanently read-only. This public entry point
+        // must never become a bypass around the service-level policy.
+        guard !overwrite else {
+            throw CodeTimeError.unsupported(
+                "CodeTime 对原始项目永久只读，覆盖恢复已禁用；请恢复到独立目录"
+            )
+        }
         let projectID = try await projectID(for: snapshotID)
+        if let sourceRootsProvider {
+            let sourceRoots = await sourceRootsProvider()
+            if sourceRoots.contains(where: { CloudRestoreEngine.pathsOverlap(destination, $0) }) {
+                throw CodeTimeError.pathOverlap(
+                    path: destination.path,
+                    conflictsWith: "恢复目标与原始项目重叠；恢复只能写入独立目录"
+                )
+            }
+        }
         let target: RestoreTarget
         if let path, !path.isEmpty {
             target = (try? await restorer().directoryNodeForTarget(

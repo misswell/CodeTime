@@ -26,6 +26,11 @@ public enum SafePath {
         case notADirectory(path: String)
         case isSymlink(path: String)
         case derivationMismatch(expected: String, actual: String)
+        /// A restore/write target equals, contains, or lives inside an original
+        /// project. CodeTime treats source projects as permanently read-only.
+        case overlapsSource(path: String, source: String)
+        /// A write target overlaps CodeTime's own data roots in either direction.
+        case overlapsProtectedRoot(path: String, root: String)
     }
 
     // MARK: - Raw validation
@@ -65,6 +70,17 @@ public enum SafePath {
         let r = components(of: resolvedRoot)
         guard p.count == r.count + 1 else { return false }
         return Array(p.prefix(r.count)) == r
+    }
+
+    /// True when the two paths are equal, or either one contains the other.
+    /// This is deliberately bidirectional: restoring into an ancestor of a
+    /// source project is just as destructive as restoring into the project.
+    public static func overlaps(_ lhs: URL, _ rhs: URL) -> Bool {
+        let left = resolved(lhs).path
+        let right = resolved(rhs).path
+        return left == right
+            || isContained(left, within: right)
+            || isContained(right, within: left)
     }
 
     /// Full validation of a persisted path against a root:
@@ -151,22 +167,32 @@ public enum SafePath {
     }
 
     /// Validates a restore destination chosen by the user (`.copy` /
-    /// `.wholeProject`): raw-valid and NOT inside the app's internal roots
-    /// (repositories, recovery, mirrors), so a restore can never write into
-    /// backup internals. Returns the resolved URL.
+    /// `.wholeProject`): raw-valid, no traversal, and completely disjoint from
+    /// both CodeTime's internal roots and every original project root.
+    ///
+    /// The source check is bidirectional (equal / inside / ancestor). A restore
+    /// must never be able to write into an original project, replace one, or
+    /// stage temporary files inside one. Returns the resolved URL.
     @discardableResult
     public static func validateRestoreDestination(
-        _ destination: URL, protectedRoots: [URL]
+        _ destination: URL,
+        protectedRoots: [URL],
+        sourceRoots: [URL] = []
     ) throws -> URL {
         try validateRaw(destination.path)
         if components(of: destination.path).contains("..") { throw SafePathError.traversal }
         let real = resolved(destination)
-        for protected in protectedRoots {
-            let resolvedProtected = resolved(protected)
-            if real.path == resolvedProtected.path
-                || isContained(real.path, within: resolvedProtected.path) {
-                throw SafePathError.outsideRoot(path: destination.path, root: resolvedProtected.path)
-            }
+        for protected in protectedRoots where overlaps(real, protected) {
+            throw SafePathError.overlapsProtectedRoot(
+                path: destination.path,
+                root: resolved(protected).path
+            )
+        }
+        for source in sourceRoots where overlaps(real, source) {
+            throw SafePathError.overlapsSource(
+                path: destination.path,
+                source: resolved(source).path
+            )
         }
         return real
     }
