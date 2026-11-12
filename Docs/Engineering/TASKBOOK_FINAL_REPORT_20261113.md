@@ -1,7 +1,7 @@
 # CodeTime 全仓库可靠性加固任务书 — 最终实施报告
 
 - 任务书：`CodeTime 全仓库可靠性加固与缺陷彻底修复实施任务书.md`
-- 完成提交：`4ca9d34`（最终门禁绑定 `96fa958`）
+- 完成提交：`c26e920`（最终门禁绑定本提交）
 - 门禁：`Scripts/regression_gate.sh`，`CODETIME_SCALE_TESTS=1`
 - 结果：**416 tests / 0 failures / 3 skipped**
 - 回归索引：CT-001 … CT-316（314 required）
