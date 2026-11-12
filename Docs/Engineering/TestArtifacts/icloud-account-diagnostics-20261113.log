@@ -1,0 +1,11 @@
+ICLOUD_ACCOUNT_DIAGNOSTICS 2026-11-12T16:36:59Z
+--- brctl status ---
+1 containers matching '*'
+<c{1}m.a{3}e.C{7}s[1] [0;1;30mbackground[0m {client:0x100200 server:full-sync|fetched-recents|fetched-favorites|ever-full-sync sync:oob-sync-ack last-sync:2026-11-12 23:19:05.932, requestID:9526, caught-up, token:unkown-token-size:34 (HwoECLq6JhgAIhUIkozJlYqejKYeEIvW2ZjqkqnijAEoAA==) zoneActiveState:{rid:9527} appuninstalled:(null)}>
+
+Desktop & Documents: current=NO lastEnabled=(never) lastDisabled=(never)
+--- MobileMeAccounts ---
+--- CloudDocs path ---
+drwxr-xr-x@ 42 guofeng  staff  1344 Nov 11 21:59 /Users/guofeng/Library/Mobile Documents/com~apple~CloudDocs
+--- app container ---
+drwx------  3 guofeng  staff  96 Nov 11 23:06 /Users/guofeng/Library/Mobile Documents/iCloud~com~codetime~app

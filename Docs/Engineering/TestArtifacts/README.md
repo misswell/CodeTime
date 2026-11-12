@@ -19,6 +19,7 @@
 | `taskbook-10gb-benchmark-20261113.log` | 10 GB 稀疏 V3 基准：首次 357.4s，增量 290.2s，增量上传约 1MB，峰值 RSS 1.91GiB | 本次任务书提交 |
 | `icloud-preflight-4355-20261113.log` | 2026-11-13 预检：token/signing/ASC 正常，真实上传仍为 NSCocoaErrorDomain 4355 | `c26e920` 后工作区 |
 | `icloud-preflight-recheck-4355-20261113.log` | 复检：仍未重新授权，真实上传继续 4355，LOCAL_ICLOUD_PREFLIGHT_BLOCKED | `c26e920` 后工作区 |
+| `icloud-account-diagnostics-20261113.log` | 只读诊断：CloudDocs/App 容器存在，brctl 仅显示 app 容器 background，MobileMeAccounts 无输出；账户侧仍需用户重新登录 | `c26e920` 后工作区 |
 | `icloud-preflight-blocked-20261111.log` | 真实 iCloud 预检：PLA 未同意、iCloud Drive 上传报 4355 | 本机 macOS 27.2.1 |
 | `icloud-preflight-recheck-20261111T1348Z.log` | 复检：PLA、Xcode 账号、iCloud 4355、第二台 Mac 均未变化 | 本机 macOS 27.2.1 |
 | `icloud-preflight-after-bird-restart-20261111.log` | 重启 bird 后仍报 iCloud 4355，排除同步进程卡死 | 本机 macOS 27.2.1 |
