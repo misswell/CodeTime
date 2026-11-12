@@ -1,0 +1,7 @@
+Building for debugging...
+[Pre-planning 1 / 211]
+[Planning deferred tasks]
+[1 / 14]
+Build complete! (0.98秒)
+V3PERF_RESULT {"backupPeakResidentBytes":1097449472,"backupSeconds":357.41881203651428,"cloudBytes":1903887143,"committed":true,"createSeconds":312.35606098175049,"databaseBytes":1720320,"files":1,"firstBytesRead":10737418240,"firstBytesUploaded":1901425797,"firstObjectsUploaded":2056,"incrementalBytesRead":10737418240,"incrementalBytesUploaded":1026542,"incrementalObjectsUploaded":1,"incrementalPeakResidentBytes":2053865472,"incrementalSeconds":290.21702110767365,"logicalBytes":10737418240,"peakMemoryBytes":2056126464,"scenario":"single-large-file-sparse-0.25","sourcePhysicalBytes":9453961216,"spoolBytesAfter":0}
+V3PERF_WORKROOT /tmp/codetime-v3-10gb-taskbook
