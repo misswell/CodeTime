@@ -1,14 +1,14 @@
-test-report check: PASS (executed=416, failures=0, skipped=3, commit=d531db855365da67f6667f354525be3d6a238fcd, run=202611122154)
+test-report check: PASS (executed=416, failures=0, skipped=3, commit=3749b68a842ec9503c0a5b12699c4b520cc503cc, run=202611122356)
 regression gate: building CodeTimeCrashChild…
 Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT288_RetryDoesNotDamageAlreadyUploadedObject]' started.
 Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT288_RetryDoesNotDamageAlreadyUploadedObject]' passed (0.001 seconds).
 Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT289_FailedStateTransitionsToUploadedAndContinues]' started.
 Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT289_FailedStateTransitionsToUploadedAndContinues]' passed (0.002 seconds).
-Test Suite 'UploadLifecycleTests' passed at 2026-11-12 23:56:56.479.
-	 Executed 23 tests, with 0 failures (0 unexpected) in 0.305 (0.308) seconds
-Test Suite 'UploadQueueTests' started at 2026-11-12 23:56:56.479.
+Test Suite 'UploadLifecycleTests' passed at 2026-11-13 00:03:58.161.
+	 Executed 23 tests, with 0 failures (0 unexpected) in 0.314 (0.318) seconds
+Test Suite 'UploadQueueTests' started at 2026-11-13 00:03:58.161.
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' started.
-Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' passed (0.019 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' passed (0.020 seconds).
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' started.
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' passed (0.002 seconds).
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' started.
@@ -16,23 +16,23 @@ Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhose
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' started.
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' passed (0.002 seconds).
 Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' started.
-Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' passed (0.284 seconds).
-Test Suite 'UploadQueueTests' passed at 2026-11-12 23:56:56.787.
-	 Executed 5 tests, with 0 failures (0 unexpected) in 0.308 (0.308) seconds
-Test Suite 'CodeTimeKitTests.xctest' passed at 2026-11-12 23:56:56.787.
-	 Executed 416 tests, with 3 tests skipped and 0 failures (0 unexpected) in 270.238 (270.288) seconds
-Test Suite 'All tests' passed at 2026-11-12 23:56:56.788.
-	 Executed 416 tests, with 3 tests skipped and 0 failures (0 unexpected) in 270.238 (270.290) seconds
-PERF: files=200 backup=1757ms restore=1708ms
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' passed (0.291 seconds).
+Test Suite 'UploadQueueTests' passed at 2026-11-13 00:03:58.478.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.316 (0.317) seconds
+Test Suite 'CodeTimeKitTests.xctest' passed at 2026-11-13 00:03:58.478.
+	 Executed 416 tests, with 3 tests skipped and 0 failures (0 unexpected) in 262.361 (262.413) seconds
+Test Suite 'All tests' passed at 2026-11-13 00:03:58.478.
+	 Executed 416 tests, with 3 tests skipped and 0 failures (0 unexpected) in 262.361 (262.415) seconds
+PERF: files=200 backup=1740ms restore=1760ms
 PERF_METRICS:
   files: 300
   totalBytes: 259000
-  backupDurationMs: 1737
-  restoreDurationMs: 2477
-  peakMemoryMB: 244.1
-  cpuUserSec: 7.33
-  cpuSysSec: 3.50
-  cpuPercent: 623.8
+  backupDurationMs: 1741
+  restoreDurationMs: 2509
+  peakMemoryMB: 253.5
+  cpuUserSec: 7.40
+  cpuSysSec: 3.31
+  cpuPercent: 614.9
   concurrencyBackup: 2
   concurrentTasks: 1
   verifyFiles: 300 (all content-verified)
