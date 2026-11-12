@@ -1,0 +1,48 @@
+test-report check: PASS (executed=332, failures=0, skipped=3, commit=01bf82bf36e80b6556b107d4f4a9d73bda76c25f, run=202611120900)
+regression gate: building CodeTimeCrashChild…
+Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT213_UploadLockFilesRemainBounded]' started.
+Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT213_UploadLockFilesRemainBounded]' passed (0.038 seconds).
+Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT214_RetryExhaustionKeepsSpoolAndJournal]' started.
+Test Case '-[CodeTimeKitTests.UploadLifecycleTests testCT214_RetryExhaustionKeepsSpoolAndJournal]' passed (0.002 seconds).
+Test Suite 'UploadLifecycleTests' passed at 2026-11-12 13:18:54.584.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.044 (0.045) seconds
+Test Suite 'UploadQueueTests' started at 2026-11-12 13:18:54.584.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_EngineOfflineKeepsSpoolAndCommitsAfterResume]' passed (0.021 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_FailedUploadKeepsSpooledBytesAndResumeCompletes]' passed (0.002 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_ResumeCleansOrphanWhoseUploadActuallySucceeded]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT159_SoftLimitPausesInsteadOfDeletingStagedData]' passed (0.001 seconds).
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' started.
+Test Case '-[CodeTimeKitTests.UploadQueueTests testCT177_RetryBackoffIsDurableAcrossQueueInstances]' passed (0.288 seconds).
+Test Suite 'UploadQueueTests' passed at 2026-11-12 13:18:54.898.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.314 (0.314) seconds
+Test Suite 'CodeTimeKitTests.xctest' passed at 2026-11-12 13:18:54.898.
+	 Executed 348 tests, with 3 tests skipped and 0 failures (0 unexpected) in 248.247 (248.292) seconds
+Test Suite 'All tests' passed at 2026-11-12 13:18:54.899.
+	 Executed 348 tests, with 3 tests skipped and 0 failures (0 unexpected) in 248.247 (248.292) seconds
+PERF: files=200 backup=1687ms restore=1696ms
+PERF_METRICS:
+  files: 300
+  totalBytes: 259000
+  backupDurationMs: 1746
+  restoreDurationMs: 2513
+  peakMemoryMB: 173.6
+  cpuUserSec: 6.19
+  cpuSysSec: 3.25
+  cpuPercent: 540.5
+  concurrencyBackup: 2
+  concurrentTasks: 1
+  verifyFiles: 300 (all content-verified)
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+regression gate: PASS
+  executed: 348 tests, 0 failures
+  skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
+testCT044_DiskFullLeavesRepositoryUntouched
+testSingleMacICloudRoundTrip
+  index: CT-001 … CT-249 (247 required)
