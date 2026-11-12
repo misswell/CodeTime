@@ -815,6 +815,7 @@ public actor CodeTimeService {
             sourceRootsProvider: { [database] in
                 try (await database.projects()).compactMap(Self.availableSourceRootURL(for:))
             },
+            protectedRoots: [paths.root, paths.lifecycleDir],
             prepareStore: { [store, logger] in
                 do {
                     try await store.prepare(deviceName: Host.current().localizedName ?? "Mac")

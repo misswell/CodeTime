@@ -57,6 +57,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
     private let git: GitCapturing?
     private let snapshotProjectProvider: @Sendable (String) async -> UUID?
     private let sourceRootsProvider: (@Sendable () async throws -> [URL])?
+    private let protectedRoots: [URL]
     private let prepareStore: (@Sendable () async throws -> Void)?
     private let clock: @Sendable () -> Date
 
@@ -71,6 +72,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         git: GitCapturing? = nil,
         snapshotProjectProvider: @escaping @Sendable (String) async -> UUID?,
         sourceRootsProvider: (@Sendable () async throws -> [URL])? = nil,
+        protectedRoots: [URL] = [],
         prepareStore: (@Sendable () async throws -> Void)? = nil,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -84,6 +86,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         self.git = git
         self.snapshotProjectProvider = snapshotProjectProvider
         self.sourceRootsProvider = sourceRootsProvider
+        self.protectedRoots = protectedRoots
         self.prepareStore = prepareStore
         self.clock = clock
     }
@@ -410,7 +413,8 @@ public struct CloudFirstEngineAdapter: BackupEngine {
             options: RestoreOptions(
                 verifyHashes: true,
                 cache: cache,
-                sourceRoots: sourceRoots
+                sourceRoots: sourceRoots,
+                protectedRoots: protectedRoots
             )
         )
     }
