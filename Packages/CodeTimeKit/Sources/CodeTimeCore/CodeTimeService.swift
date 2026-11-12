@@ -778,9 +778,7 @@ public actor CodeTimeService {
             // job exists, and the adapter refuses source overlaps again so a
             // direct adapter caller cannot stage files inside a project.
             sourceRootsProvider: { [database] in
-                ((try? await database.projects()) ?? []).map {
-                    URL(fileURLWithPath: $0.rootPath, isDirectory: true)
-                }
+                ((try? await database.projects()) ?? []).map(Self.sourceRootURL(for:))
             },
             prepareStore: { [store, logger] in
                 do {
@@ -2193,9 +2191,7 @@ public actor CodeTimeService {
         // project itself, a child of it, nor an ancestor of it can be a restore
         // destination.
         if request.mode != .preview {
-            let sourceRoots = try await database.projects().map {
-                URL(fileURLWithPath: $0.rootPath, isDirectory: true)
-            }
+            let sourceRoots = try await database.projects().map(Self.sourceRootURL(for:))
             do {
                 try SafePath.validateRestoreDestination(
                     request.destination,
@@ -3271,6 +3267,16 @@ public actor CodeTimeService {
         var container: URL?
     }
 
+    /// The real on-disk source root. A security-scoped bookmark is authoritative
+    /// when the project was moved; a stored `rootPath` can otherwise be stale.
+    private static func sourceRootURL(for project: Project) -> URL {
+        if let bookmark = project.bookmark,
+           let resolved = try? SecurityScopedBookmarks.resolve(bookmark) {
+            return resolved.url
+        }
+        return URL(fileURLWithPath: project.rootPath, isDirectory: true)
+    }
+
     /// Fails closed if any CodeTime write location (app data, spool/cache,
     /// lifecycle locks, repository, mirror) overlaps an original project.
     /// Backups may read sources; they may never create files in them.
@@ -3278,7 +3284,7 @@ public actor CodeTimeService {
         _ project: Project,
         settings: AppSettings
     ) async throws {
-        let source = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+        let source = Self.sourceRootURL(for: project)
         var writeRoots: [(URL, String)] = [
             (paths.root, "CodeTime 数据目录"),
             (paths.lifecycleDir, "CodeTime 生命周期锁目录"),
@@ -3302,7 +3308,7 @@ public actor CodeTimeService {
     private func assertManagedWriteRootIsIndependent(_ root: URL) async throws {
         let projects = (try? await database.projects()) ?? []
         for project in projects {
-            let source = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+            let source = Self.sourceRootURL(for: project)
             if SafePath.overlaps(root, source) {
                 throw CodeTimeError.pathOverlap(
                     path: root.path,
@@ -3451,9 +3457,7 @@ public actor CodeTimeService {
         }
         // Disaster recovery is still a restore: it must land in an independent
         // directory, never inside or above a project that already exists locally.
-        let recoverySourceRoots = try await database.projects().map {
-            URL(fileURLWithPath: $0.rootPath, isDirectory: true)
-        }
+        let recoverySourceRoots = try await database.projects().map(Self.sourceRootURL(for:))
         do {
             try SafePath.validateRestoreDestination(
                 destination,
