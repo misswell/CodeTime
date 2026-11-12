@@ -363,17 +363,17 @@ jobs:
           # dependency where the candidate must contain its own acceptance).
           git fetch --force origin release-acceptance:refs/remotes/origin/release-acceptance \
             || { echo "缺少 release-acceptance 分支（验收报告存储位置）" >&2; exit 1; }
-          REPORT="Docs/releases/${TAG}-icloud-acceptance.md"
+          REPORT="Docs/releases/${TAG}-single-mac-acceptance.md"
           git show "origin/release-acceptance:$REPORT" > acceptance-report.md \
             || { echo "release-acceptance 分支缺少 $REPORT" >&2; exit 1; }
-          EVIDENCE="Docs/releases/${TAG}-icloud-evidence"
+          EVIDENCE="Docs/releases/${TAG}-single-mac-evidence"
           mkdir -p acceptance-evidence
           git archive origin/release-acceptance "$EVIDENCE" 2>/dev/null \
             | tar -x -C acceptance-evidence --strip-components=3 \
             || { echo "release-acceptance 分支缺少 $EVIDENCE" >&2; exit 1; }
-          echo "ICLOUD_ACCEPTANCE_REPORT=$PWD/acceptance-report.md" >> "$GITHUB_ENV"
-          echo "ICLOUD_ACCEPTANCE_EVIDENCE_DIR=$PWD/acceptance-evidence" >> "$GITHUB_ENV"
-      - name: Verify candidate SHA-256 and require two-Mac iCloud acceptance report
+          echo "SINGLE_MAC_ACCEPTANCE_REPORT=$PWD/acceptance-report.md" >> "$GITHUB_ENV"
+          echo "SINGLE_MAC_ACCEPTANCE_EVIDENCE_DIR=$PWD/acceptance-evidence" >> "$GITHUB_ENV"
+      - name: Verify candidate SHA-256 and require single-Mac iCloud acceptance report
         env:
           TAG: ${{ needs.classify.outputs.tag }}
         run: |
@@ -383,7 +383,7 @@ jobs:
           ZIP="$(ls candidate/CodeTime-*-macos-universal.zip)"
           export EXPECTED_ARTIFACT_SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
           echo "candidate artifact: $(basename "$ZIP") sha256=$EXPECTED_ARTIFACT_SHA"
-          ./Scripts/require_icloud_acceptance.sh "$TAG"
+          ./Scripts/require_single_mac_acceptance.sh "$TAG"
       - name: Verify tag matches build commit
         run: |
           set -euo pipefail

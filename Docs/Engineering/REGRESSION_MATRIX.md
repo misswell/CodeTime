@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-229）
+# 回归测试矩阵（CT-001 … CT-233）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -233,3 +233,7 @@
 | CT-227 | `testGCBarrierCreatedWithPreparedAckAndReleasedOnlyAfterCompletion` | GC Prepared ACK 建立持久 Barrier，完成后才释放 | 是 | 否 |
 | CT-228 | `testGCLegacyEpochWithoutBarrierCannotDelete` | 旧 Epoch 无 Barrier 不得删除 | 是 | 否 |
 | CT-229 | `testGCAckRefusedWhileLocalWorkIsActive` | 本机有活动任务时拒绝写 ACK/Barrier | 是 | 否 |
+| CT-230 | `testCT230_MissingSingleMacScenarioBlocksReport` | 单机验收缺少场景证据必须拒绝报告 | 是 | 否 |
+| CT-231 | `testCT231_TwoHostsCannotPassSingleMacGate` | 单机验收不得接受重复/多 Host 证据 | 是 | 否 |
+| CT-232 | `testCT232_CompleteSingleMacEvidenceGeneratesReportAndPassesGate` | 完整单机证据生成报告并通过发布门禁 | 是 | 否 |
+| CT-233 | `testCT233_HandWrittenPassWithoutEvidenceIsRejected` | 手写 PASS 缺少全部场景证据必须拒绝 | 是 | 否 |

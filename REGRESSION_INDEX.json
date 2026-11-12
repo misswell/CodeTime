@@ -2288,5 +2288,45 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "恢复入口与 ACK 屏障"
+  },
+  {
+    "id": "CT-230",
+    "test": "testCT230_MissingSingleMacScenarioBlocksReport",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SingleMacAcceptanceEvidenceTests.swift",
+    "purpose": "单机验收缺少场景证据必须拒绝报告",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "单机范围证据完整性"
+  },
+  {
+    "id": "CT-231",
+    "test": "testCT231_TwoHostsCannotPassSingleMacGate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SingleMacAcceptanceEvidenceTests.swift",
+    "purpose": "单机验收不得接受重复/多 Host 证据",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "单机证据只能来自同一设备"
+  },
+  {
+    "id": "CT-232",
+    "test": "testCT232_CompleteSingleMacEvidenceGeneratesReportAndPassesGate",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SingleMacAcceptanceEvidenceTests.swift",
+    "purpose": "完整单机证据生成报告并通过发布门禁",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "报告由证据生成且候选哈希绑定"
+  },
+  {
+    "id": "CT-233",
+    "test": "testCT233_HandWrittenPassWithoutEvidenceIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SingleMacAcceptanceEvidenceTests.swift",
+    "purpose": "手写 PASS 缺少全部场景证据必须拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "不得硬编码发布通过"
   }
 ]
