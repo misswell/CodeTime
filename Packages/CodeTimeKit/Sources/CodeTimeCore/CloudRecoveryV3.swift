@@ -85,6 +85,12 @@ public enum CloudRecoveryV3 {
                     restorable = false
                     detail = "最新版本不可读：\(error)"
                 }
+                if restorable,
+                   let blocked = try? await store.blockedSnapshotIDs(),
+                   blocked.contains(latest.snapshotID) {
+                    restorable = false
+                    detail = "最新版本处于 GC 清理屏障中，恢复已阻止"
+                }
                 results.append(V3RecoveryProject(
                     projectID: projectID,
                     sourceDeviceID: deviceID,

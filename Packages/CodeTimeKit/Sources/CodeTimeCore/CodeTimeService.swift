@@ -3396,6 +3396,13 @@ public actor CodeTimeService {
             throw CodeTimeError.unsupported("该项目的恢复目标已存在，请使用普通恢复功能")
         }
 
+        // Recovery is a restore path too: a GC candidate protected by a device
+        // barrier must not be downloaded/restored on this Mac.
+        if try await store.blockedSnapshotIDs().contains(target.snapshotID) {
+            throw CodeTimeError.gcUnsafe(
+                reason: "版本 \(target.snapshotID) 正在 GC 清理计划中，恢复已被安全阻止"
+            )
+        }
         let reader = CloudRestoreEngine(masterKey: key, source: store)
         _ = try await reader.restore(
             projectID: candidate.projectID,
