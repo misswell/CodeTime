@@ -438,6 +438,7 @@ final class SourceImmutabilityTests: XCTestCase {
             project.appendingPathComponent("restored-inside", isDirectory: true),
             workspace,
             projectLink,
+            URL(fileURLWithPath: workspace.appendingPathComponent("PROJECT").path, isDirectory: true),
         ]
         for destination in candidates {
             XCTAssertThrowsError(

@@ -75,9 +75,14 @@ public enum SafePath {
     /// True when the two paths are equal, or either one contains the other.
     /// This is deliberately bidirectional: restoring into an ancestor of a
     /// source project is just as destructive as restoring into the project.
+    ///
+    /// Comparison is case-insensitive because macOS volumes are case-insensitive
+    /// by default. Rejecting a case-only sibling on a case-sensitive volume is a
+    /// safe false positive; missing a case-variant source path would permit a
+    /// write into the original project.
     public static func overlaps(_ lhs: URL, _ rhs: URL) -> Bool {
-        let left = resolved(lhs).path
-        let right = resolved(rhs).path
+        let left = resolved(lhs).path.lowercased()
+        let right = resolved(rhs).path.lowercased()
         return left == right
             || isContained(left, within: right)
             || isContained(right, within: left)

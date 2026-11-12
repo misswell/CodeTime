@@ -715,8 +715,10 @@ public struct CloudRestoreEngine: Sendable {
     /// to BackupEngine so the engine enforces the invariant even when called
     /// without CodeTimeCore's SafePath helper.
     static func pathsOverlap(_ lhs: URL, _ rhs: URL) -> Bool {
-        let left = lhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents
-        let right = rhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        // Case-fold: default macOS volumes are case-insensitive, and a false
+        // positive is safer than writing through a case-variant source path.
+        let left = lhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents.map { $0.lowercased() }
+        let right = rhs.standardizedFileURL.resolvingSymlinksInPath().pathComponents.map { $0.lowercased() }
         let shared = min(left.count, right.count)
         return Array(left.prefix(shared)) == Array(right.prefix(shared))
     }
