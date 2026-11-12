@@ -13,6 +13,8 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
     private let masterKey: Data
     private let access: CloudFileAccess
     private let tracker: CloudUploadTracking
+    private let eviction: ICloudEvictionManager?
+    private let leaseManager: LocalCopyLeaseManager
     private let cloudAccess: CloudAccessCoordinator
     /// A device list is a cache with a short lifetime, not a session constant:
     /// another Mac may come online, be reset, or disappear while this process runs.
@@ -27,6 +29,7 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
         masterKey: Data,
         access: CloudFileAccess = LocalFileAccess(),
         tracker: CloudUploadTracking = NoopUploadTracker(),
+        eviction: ICloudEvictionManager? = nil,
         deviceListTTL: TimeInterval = 60
     ) {
         self.root = root
@@ -34,10 +37,14 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
         self.masterKey = masterKey
         self.access = access
         self.tracker = tracker
+        self.eviction = eviction
+        self.leaseManager = LocalCopyLeaseManager()
         self.cloudAccess = CloudAccessCoordinator(
             access: access,
             tracker: tracker,
-            eviction: nil
+            eviction: eviction,
+            leaseManager: leaseManager,
+            expectsUbiquitous: eviction != nil
         )
         self.deviceListTTL = max(0, deviceListTTL)
     }
@@ -48,7 +55,9 @@ public actor CloudMultiDeviceStoreV3: CloudObjectSource {
             deviceID: deviceID,
             masterKey: masterKey,
             access: access,
-            tracker: tracker
+            tracker: tracker,
+            eviction: eviction,
+            leaseManager: leaseManager
         )
     }
 

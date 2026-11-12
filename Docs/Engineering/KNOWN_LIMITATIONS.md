@@ -16,11 +16,11 @@
 | 安装、升级、回退、卸载重装 | 需要真实安装环境与上一版本包 | 按 `RELEASE_CHECKLIST.md` 第 7 节执行 |
 | SwiftUI 界面视觉/交互验收 | 未在本环境启动应用逐屏检查 | 使用 Release 构建在 macOS 14/15 上人工检查 |
 
-全量默认测试结果：**295 个测试，0 失败，3 跳过**。跳过项即单机 iCloud 验收、CT-044 磁盘写满
+全量默认测试结果：**328 个测试，0 失败，3 跳过**。跳过项即单机 iCloud 验收、CT-044 磁盘写满
 与 CT-037 百万文件；它们不计入“通过”。CT-036 及 CT-117 的 3GiB 变体在门禁中由 `CODETIME_SCALE_TESTS=1` 启用；
 CT-037 百万文件与 3GiB 变体需 `CODETIME_STRESS_TESTS=1`（夜间/手动）下真实执行（CI 不设
 该变量，规模项在 CI 中跳过，两处口径在 TEST_REPORT 分开陈述）。
-CT-045…CT-057、CT-058…CT-116、CT-117…CT-128、CT-129…CT-146、CT-147…CT-167、CT-168…CT-196 全部通过。
+CT-045…CT-057、CT-058…CT-116、CT-117…CT-128、CT-129…CT-146、CT-147…CT-167、CT-168…CT-196、CT-197…CT-229 全部通过。
 统计口径以 `TEST_REPORT.md` 的机器可读块为唯一事实源（`Scripts/check_test_report.py` 强制校验）。
 
 ## 2. 功能边界

@@ -202,12 +202,17 @@ public struct CloudFirstBackupEngine: Sendable {
         )
 
         let encoder = ObjectEncoder(masterKey: masterKey)
-        let packBuffer = options.packObjectsUpTo.map {
-            PackBuffer(threshold: $0, sink: sink, builder: ObjectPackBuilder())
-        }
         let registry = ObjectRegistry(
             known: try await index.knownChunks(previousFiles.flatMap { $0.chunks.map(\.objectID) })
         )
+        let packBuffer = options.packObjectsUpTo.map {
+            PackBuffer(
+                threshold: $0,
+                sink: sink,
+                builder: ObjectPackBuilder(),
+                registry: registry
+            )
+        }
 
         // Reuse: unchanged size+mtime lets the previous node's chunk list stand.
         // At least once per day every file is re-read (periodic full verification).
@@ -292,24 +297,23 @@ public struct CloudFirstBackupEngine: Sendable {
         // and deleting them would only waste work; it must not publish, though.
         if let packBuffer {
             do {
-                try await packBuffer.flush()
+                let locations = try await packBuffer.finalize()
+                report.packsUploaded = await packBuffer.uploadedPackCount
+                if !locations.isEmpty {
+                    produced = produced.map { node in
+                        var copy = node
+                        copy.chunks = node.chunks.map { ref in
+                            guard let location = locations[ref.objectID] else { return ref }
+                            var updated = ref
+                            updated.packID = location.packID
+                            updated.packOffset = location.offset
+                            return updated
+                        }
+                        return copy.withComputedID()
+                    }
+                }
             } catch let error as UploadQueueError {
                 throw Self.mapUploadError(error)
-            }
-            let locations = await packBuffer.locations
-            report.packsUploaded = await packBuffer.uploadedPackCount
-            if !locations.isEmpty {
-                produced = produced.map { node in
-                    var copy = node
-                    copy.chunks = node.chunks.map { ref in
-                        guard let location = locations[ref.objectID] else { return ref }
-                        var updated = ref
-                        updated.packID = location.packID
-                        updated.packOffset = Int64(location.offset)
-                        return updated
-                    }
-                    return copy.withComputedID()
-                }
             }
         }
 
@@ -558,7 +562,7 @@ public struct CloudFirstBackupEngine: Sendable {
                     outcome.bytesRead += Int64(chunk.size)
 
                     let objectID = encoder.objectID(for: chunk.data)
-                    if let known = registry.chunk(objectID) {
+                    if let ready = await registry.readyLocation(objectID) {
                         outcome.bytesDeduped += Int64(chunk.size)
                         outcome.objectsReused += 1
                         // A packed chunk must keep its pack reference: the object
@@ -567,10 +571,10 @@ public struct CloudFirstBackupEngine: Sendable {
                             ChunkRef(
                                 objectID: objectID,
                                 plaintextSize: chunk.size,
-                                storedSize: known.storedSize,
+                                storedSize: ready.storedSize,
                                 compression: 0,
-                                packID: known.packID,
-                                packOffset: known.packOffset
+                                packID: ready.packID,
+                                packOffset: ready.packOffset
                             )
                         )
                         continue
@@ -578,43 +582,89 @@ public struct CloudFirstBackupEngine: Sendable {
                     let encoded = try encoder.encode(chunk: chunk.data)
                     if let packBuffer, let threshold = options.packObjectsUpTo,
                        encoded.storedSize <= threshold {
-                        // Small objects go into an immutable pack; the reference
-                        // gets its pack offset after the flush. The pack buffer is
-                        // itself idempotent per object ID. No remote existence
-                        // probe: the local chunk index is the dedup source, and a
-                        // directory listing per tiny chunk would dominate a large
-                        // project's time and memory.
-                        try await packBuffer.append(objectID: objectID, payload: encoded.payload)
-                    } else {
-                        if try await sink.hasObject(objectID) {
-                            registry.insert(objectID, storedSize: encoded.storedSize)
-                            outcome.bytesDeduped += Int64(chunk.size)
-                            outcome.objectsReused += 1
-                            refs.append(Self.reusedRef(objectID: objectID, size: chunk.size))
-                            continue
+                        // If a standalone writer already owns this ID, wait for its
+                        // confirmed location instead of creating a second copy.
+                        if await registry.isUploading(objectID) {
+                            if let ready = try await registry.waitForReady(objectID) {
+                                outcome.bytesDeduped += Int64(chunk.size)
+                                outcome.objectsReused += 1
+                                refs.append(
+                                    ChunkRef(
+                                        objectID: objectID,
+                                        plaintextSize: chunk.size,
+                                        storedSize: ready.storedSize,
+                                        compression: 0,
+                                        packID: ready.packID,
+                                        packOffset: ready.packOffset
+                                    )
+                                )
+                                continue
+                            }
                         }
-                        // A concurrent file may hold the same chunk: only one task
-                        // uploads it. Encryption uses a random nonce, so two writers
-                        // would otherwise race with different valid ciphertexts.
-                        guard registry.reserve(objectID) else {
-                            outcome.bytesDeduped += Int64(chunk.size)
-                            outcome.objectsReused += 1
-                            refs.append(Self.reusedRef(objectID: objectID, size: chunk.size))
-                            continue
-                        }
-                        try await sink.putObject(encoded.payload, objectID: objectID)
-                    }
-                    registry.insert(objectID, storedSize: encoded.storedSize)
-                    outcome.bytesUploaded += Int64(encoded.storedSize)
-                    outcome.objectsUploaded += 1
-                    refs.append(
-                        ChunkRef(
+                        // Small objects go into an immutable pack. The reference is
+                        // a placeholder until finalize() confirms the pack; the
+                        // pack buffer deduplicates the same object ID across files.
+                        let staged = try await packBuffer.append(
                             objectID: objectID,
-                            plaintextSize: encoded.originalSize,
-                            storedSize: encoded.storedSize,
-                            compression: encoded.compression.rawValue
+                            payload: encoded.payload
                         )
-                    )
+                        if staged {
+                            outcome.bytesUploaded += Int64(encoded.storedSize)
+                            outcome.objectsUploaded += 1
+                        } else {
+                            outcome.bytesDeduped += Int64(chunk.size)
+                            outcome.objectsReused += 1
+                        }
+                        refs.append(
+                            ChunkRef(
+                                objectID: objectID,
+                                plaintextSize: encoded.originalSize,
+                                storedSize: encoded.storedSize,
+                                compression: encoded.compression.rawValue
+                            )
+                        )
+                        continue
+                    }
+
+                    switch try await registry.acquireStandalone(objectID) {
+                    case .ready(let ready):
+                        outcome.bytesDeduped += Int64(chunk.size)
+                        outcome.objectsReused += 1
+                        refs.append(
+                            ChunkRef(
+                                objectID: objectID,
+                                plaintextSize: chunk.size,
+                                storedSize: ready.storedSize,
+                                compression: 0,
+                                packID: ready.packID,
+                                packOffset: ready.packOffset
+                            )
+                        )
+                    case .upload:
+                        do {
+                            let location = try await sink.ensureObjectReady(
+                                objectID,
+                                payload: encoded.payload,
+                                storedSize: encoded.storedSize
+                            )
+                            await registry.complete(objectID, location: location)
+                            outcome.bytesUploaded += Int64(encoded.storedSize)
+                            outcome.objectsUploaded += 1
+                            refs.append(
+                                ChunkRef(
+                                    objectID: objectID,
+                                    plaintextSize: encoded.originalSize,
+                                    storedSize: location.storedSize,
+                                    compression: encoded.compression.rawValue,
+                                    packID: location.packID,
+                                    packOffset: location.packOffset
+                                )
+                            )
+                        } catch {
+                            await registry.fail(objectID, error: error)
+                            throw error
+                        }
+                    }
                 }
             } catch let error as ChunkerError {
                 if case .cancelled = error {
@@ -692,93 +742,5 @@ public struct CloudFirstBackupEngine: Sendable {
         // and mtime match alone must never be treated as proof.
         guard let previousIdentity = previous.identity else { return false }
         return previousIdentity.matches(entry.identity)
-    }
-}
-
-/// Object IDs already handled in this run: duplicate chunks within one snapshot
-/// (and across files) are uploaded exactly once. For known chunks the record is
-/// kept, because a packed object must be referenced through its pack.
-final class ObjectRegistry: @unchecked Sendable {
-    struct Known: Sendable {
-        var storedSize: Int
-        var packID: String?
-        var packOffset: Int64?
-    }
-
-    private var known: [String: Known]
-    private let lock = NSLock()
-
-    init(known: [String: ChunkRecordV3]) {
-        self.known = known.mapValues {
-            Known(storedSize: $0.storedSize, packID: $0.packID, packOffset: $0.packOffset)
-        }
-    }
-
-    func chunk(_ id: String) -> Known? {
-        lock.lock()
-        defer { lock.unlock() }
-        return known[id]
-    }
-
-    func insert(_ id: String, storedSize: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        known[id] = Known(storedSize: storedSize, packID: nil, packOffset: nil)
-    }
-
-    /// Atomically claims an object for upload. Returns false when another task
-    /// already owns it (or it is known), so only one writer touches the cloud.
-    func reserve(_ id: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard known[id] == nil else { return false }
-        known[id] = Known(storedSize: 0, packID: nil, packOffset: nil)
-        return true
-    }
-}
-
-/// Accumulates small encrypted objects and flushes them into immutable packs.
-/// Bounded by the pack builder's target size, so memory stays constant even for
-/// projects with hundreds of thousands of tiny files.
-actor PackBuffer {
-    private let threshold: Int
-    private let sink: CloudObjectSink
-    private let builder: ObjectPackBuilder
-    private var pending: [(objectID: String, payload: Data)] = []
-    private var pendingBytes = 0
-    /// Concurrent files can produce the same chunk before either consults the
-    /// registry; a pack must contain each object exactly once.
-    private var stagedIDs: Set<String> = []
-    private(set) var locations: [String: (packID: String, offset: Int)] = [:]
-    private(set) var uploadedPackCount = 0
-
-    init(threshold: Int, sink: CloudObjectSink, builder: ObjectPackBuilder) {
-        self.threshold = threshold
-        self.sink = sink
-        self.builder = builder
-    }
-
-    func append(objectID: String, payload: Data) async throws {
-        guard locations[objectID] == nil, stagedIDs.insert(objectID).inserted else { return }
-        pending.append((objectID, payload))
-        pendingBytes += payload.count
-        if pendingBytes >= builder.options.targetBytes {
-            try await flush()
-        }
-    }
-
-    func flush() async throws {
-        guard !pending.isEmpty else { return }
-        let packs = try builder.build(pending.map { (objectID: $0.objectID, payload: $0.payload) })
-        for pack in packs {
-            try await sink.putPack(pack.payload, packID: pack.packID)
-            uploadedPackCount += 1
-            for entry in pack.entries {
-                locations[entry.objectID] = (pack.packID, entry.offset)
-            }
-        }
-        pending.removeAll(keepingCapacity: true)
-        pendingBytes = 0
-        stagedIDs.removeAll(keepingCapacity: true)
     }
 }

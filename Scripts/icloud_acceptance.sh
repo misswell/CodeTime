@@ -183,12 +183,78 @@ sys.exit(0 if verified else 1)
 PY
     ;;
 
+  record)
+    SCENARIO=""; RESULT=""; DEVICE_ID=""; HOST="$(hostname)"
+    MODEL="$(sysctl -n hw.model 2>/dev/null || echo unknown)"
+    MACOS="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
+    APP_VERSION="${CODETIME_APP_VERSION:-1.0.0}"
+    CANDIDATE=""; COMMIT=""; STARTED=""; FINISHED=""; ASSERTIONS=""; OUT=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --scenario) SCENARIO="$2"; shift 2 ;;
+        --result) RESULT="$2"; shift 2 ;;
+        --device-id) DEVICE_ID="$2"; shift 2 ;;
+        --host) HOST="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        --macos) MACOS="$2"; shift 2 ;;
+        --app-version) APP_VERSION="$2"; shift 2 ;;
+        --candidate-sha) CANDIDATE="$2"; shift 2 ;;
+        --commit) COMMIT="$2"; shift 2 ;;
+        --started-at) STARTED="$2"; shift 2 ;;
+        --finished-at) FINISHED="$2"; shift 2 ;;
+        --assertions) ASSERTIONS="$2"; shift 2 ;;
+        --out) OUT="$2"; shift 2 ;;
+        *) usage ;;
+      esac
+    done
+    for required in SCENARIO RESULT DEVICE_ID CANDIDATE COMMIT ASSERTIONS OUT; do
+      [ -n "${!required}" ] || fail "--${required,,} is required"
+    done
+    case "$RESULT" in passed|failed|blocked) ;; *) fail "result must be passed/failed/blocked" ;; esac
+    python3 - "$SCENARIO" "$RESULT" "$DEVICE_ID" "$HOST" "$MODEL" "$MACOS" "$APP_VERSION" \
+      "$CANDIDATE" "$COMMIT" "$STARTED" "$FINISHED" "$ASSERTIONS" "$OUT" <<'PY'
+import json, sys, datetime
+(scenario, result, device, host, model, macos, app_version,
+ candidate, commit, started, finished, assertions_raw, out) = sys.argv[1:14]
+try:
+    assertions = json.loads(assertions_raw)
+except json.JSONDecodeError as error:
+    print(f"REFUSED: --assertions is not valid JSON: {error}", file=sys.stderr)
+    sys.exit(1)
+if not isinstance(assertions, dict) or not assertions:
+    print("REFUSED: assertions must be a non-empty object", file=sys.stderr)
+    sys.exit(1)
+if not all(isinstance(k, str) and isinstance(v, (bool, int, float, str)) for k, v in assertions.items()):
+    print("REFUSED: assertion keys must be strings and values scalar", file=sys.stderr)
+    sys.exit(1)
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+payload = {
+    "scenario": scenario,
+    "result": result,
+    "device_id": device,
+    "host": host,
+    "model": model,
+    "macOS": macos,
+    "app_version": app_version,
+    "candidate_sha256": candidate,
+    "commit": commit,
+    "started_at": started or now,
+    "finished_at": finished or now,
+    "assertions": assertions,
+}
+with open(out, "w") as fh:
+    json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=True)
+print(f"wrote {out} ({scenario}: {result})")
+PY
+    ;;
+
   report)
-    A=""; B=""; TAG=""; COMMIT=""; SHA=""; NAME=""; RUN=""; OPERATOR=""; OUT=""
+    A=""; B=""; EVIDENCE_DIR=""; TAG=""; COMMIT=""; SHA=""; NAME=""; RUN=""; OPERATOR=""; OUT=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --a) A="$2"; shift 2 ;;
         --b) B="$2"; shift 2 ;;
+        --evidence-dir) EVIDENCE_DIR="$2"; shift 2 ;;
         --tag) TAG="$2"; shift 2 ;;
         --commit) COMMIT="$2"; shift 2 ;;
         --candidate-sha) SHA="$2"; shift 2 ;;
@@ -199,14 +265,16 @@ PY
         *) usage ;;
       esac
     done
-    for required in A B TAG COMMIT SHA NAME RUN OPERATOR OUT; do
+    for required in A B EVIDENCE_DIR TAG COMMIT SHA NAME RUN OPERATOR OUT; do
       [ -n "${!required}" ] || fail "--${required,,} is required"
     done
     [ -f "$A" ] || fail "missing evidence A: $A"
     [ -f "$B" ] || fail "missing evidence B: $B"
-    python3 - "$A" "$B" "$TAG" "$COMMIT" "$SHA" "$NAME" "$RUN" "$OPERATOR" "$OUT" <<'PY'
-import json, sys, datetime
-a_path, b_path, tag, commit, sha, name, run, operator, out = sys.argv[1:10]
+    [ -d "$EVIDENCE_DIR" ] || fail "missing scenario evidence dir: $EVIDENCE_DIR"
+    python3 - "$A" "$B" "$EVIDENCE_DIR" "$TAG" "$COMMIT" "$SHA" "$NAME" "$RUN" "$OPERATOR" "$OUT" <<'PY'
+import glob, json, os, sys, datetime
+(a_path, b_path, evidence_dir, tag, commit, sha, name, run, operator,
+ out) = sys.argv[1:11]
 a, b = json.load(open(a_path)), json.load(open(b_path))
 if not b.get("verified"):
     print("REFUSED: recovery verification did not pass (B.verified != true)", file=sys.stderr)
@@ -214,8 +282,73 @@ if not b.get("verified"):
 if a.get("fileCount") != b.get("expectedFiles") or b.get("checkedFiles") != b.get("expectedFiles"):
     print("REFUSED: evidence A/B file counts disagree", file=sys.stderr)
     sys.exit(1)
-def device(e):
-    return f"{e.get('model','unknown')} / macOS {e.get('macOS','unknown')} / 构建 1.0.0"
+if not a.get("host") or not b.get("host") or a.get("host") == b.get("host"):
+    print("REFUSED: A and B must be different hosts", file=sys.stderr)
+    sys.exit(1)
+
+# Every scenario must have its own real evidence file. The report generator never
+# invents a PASS for a scenario it did not receive.
+required = {
+    "first_backup": {"upload_confirmed": True, "spool_empty": True},
+    "cross_device_discovery": {"discovered": True},
+    "metadata_only_read": {"object_body_downloaded": False},
+    "repeat_backup": {"no_redownload": True},
+    "interrupted_upload": {"snapshot_not_published": True, "spool_preserved": True},
+    "upload_recovery": {"retry_completed": True},
+    "full_restore": {"verified": True},
+    "wrong_key": {"blocked": True},
+    "gc_barrier": {"restore_blocked": True, "ack_durable": True},
+    "gc_resume": {"resumed": True},
+    "migration": {"legacy_readable": True},
+}
+seen = {}
+for path in sorted(glob.glob(os.path.join(evidence_dir, "*.json"))):
+    try:
+        entry = json.load(open(path))
+    except Exception as error:
+        print(f"REFUSED: {path}: invalid JSON: {error}", file=sys.stderr)
+        sys.exit(1)
+    scenario = entry.get("scenario")
+    if scenario not in required:
+        print(f"REFUSED: {path}: unknown scenario {scenario!r}", file=sys.stderr)
+        sys.exit(1)
+    if scenario in seen:
+        print(f"REFUSED: duplicate scenario evidence {scenario}", file=sys.stderr)
+        sys.exit(1)
+    for key in ("result", "device_id", "host", "app_version", "candidate_sha256", "commit", "assertions"):
+        if not entry.get(key):
+            print(f"REFUSED: {path}: missing {key}", file=sys.stderr)
+            sys.exit(1)
+    if entry["result"] != "passed":
+        print(f"REFUSED: {scenario} result is {entry['result']}", file=sys.stderr)
+        sys.exit(1)
+    if entry["commit"] != commit:
+        print(f"REFUSED: {scenario} commit {entry['commit']} != {commit}", file=sys.stderr)
+        sys.exit(1)
+    if entry["candidate_sha256"] != sha:
+        print(f"REFUSED: {scenario} candidate hash mismatch", file=sys.stderr)
+        sys.exit(1)
+    assertions = entry["assertions"]
+    for key, expected in required[scenario].items():
+        if key not in assertions or assertions[key] != expected:
+            print(f"REFUSED: {scenario} assertion {key} must be {expected!r}, got {assertions.get(key)!r}", file=sys.stderr)
+            sys.exit(1)
+    if scenario == "full_restore":
+        if assertions.get("checked_files") != assertions.get("expected_files"):
+            print("REFUSED: full_restore did not check every expected file", file=sys.stderr)
+            sys.exit(1)
+    seen[scenario] = entry
+missing = sorted(set(required) - set(seen))
+if missing:
+    print("REFUSED: missing scenario evidence: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+hosts = {entry["host"] for entry in seen.values()} | {a["host"], b["host"]}
+if len(hosts) < 2:
+    print("REFUSED: scenario evidence does not prove two different Macs", file=sys.stderr)
+    sys.exit(1)
+
+def device(entry):
+    return f"{entry.get('model','unknown')} / macOS {entry.get('macOS','unknown')}"
 when = datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 lines = [
  "# iCloud 双 Mac 验收记录",
@@ -233,23 +366,23 @@ lines = [
  f"- Mac A：{device(a)}（host {a.get('host','?')}）",
  f"- Mac B：{device(b)}（host {b.get('host','?')}）",
  "",
- "## 场景与结果",
+ "## 场景与结果（由真实证据生成）",
  "",
- "| 场景 | 操作 | 结果 |",
- "|---|---|---|",
- f"| 首次上传 | Mac A 备份 {a.get('fileCount')} 个文件并确认已上传到 iCloud | PASS |",
- "| 第二台发现 | Mac B 在恢复页看到 Mac A 的设备与版本 | PASS |",
- "| 未下载读取 | Mac B 在对象未下载时读取元数据 | PASS |",
- "| 上传中断 | 断网/退出后重试，未确认上传不报告成功 | PASS |",
- f"| 恢复 | Mac B 恢复后逐个校验 SHA-256（{b.get('checkedFiles')}/{b.get('expectedFiles')}） | PASS |",
- "| 迁移 | Beta → Release 后项目、快照、仓库可用 | PASS |",
- "| 密钥不匹配 | 使用错误恢复密钥时明确阻塞 | PASS |",
+ "| 场景 | 设备 | Host | 断言 | 结果 |",
+ "|---|---|---|---|---|",
+]
+for scenario in required:
+    entry = seen[scenario]
+    assertion_text = ", ".join(f"{k}={v}" for k, v in sorted(entry["assertions"].items()))
+    lines.append(f"| {scenario} | {entry['device_id']} | {entry['host']} | {assertion_text} | PASS |")
+lines += [
  "",
  "## 证据",
  "",
  f"- A 证据：{a.get('fileCount')} 个文件，host {a.get('host')}，{a.get('generatedAt')}",
  f"- B 证据：校验 {b.get('checkedFiles')} 个文件，missing={len(b.get('missing',[]))}，"
  f"mismatched={len(b.get('mismatched',[]))}，verified={b.get('verified')}",
+ f"- 场景证据目录：{os.path.abspath(evidence_dir)}",
  "",
  "- 结果：PASS",
  "- 未通过项与原因：无",

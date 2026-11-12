@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-196）
+# 回归测试矩阵（CT-001 … CT-229）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -200,3 +200,36 @@
 | CT-194 | `testCT194_SweepRefusesWhileDataIsStagedOrPublishing` | 有暂存上传或发布中快照时 GC 拒绝清扫 | 是 | 否 |
 | CT-195 | `testCT195_MissingReferencedObjectAbortsBeforeAnyTombstone` | 引用图不完整时在任何删除前中止 GC | 是 | 否 |
 | CT-196 | `testCT196_RetentionPlannerKeepsNewestAndBuckets` | 保留策略：最新版本与时间桶保留 | 是 | 否 |
+| CT-197 | `testCT197_MissingScenarioEvidenceBlocksReport` | 双 Mac 验收缺少场景证据必须拒绝生成报告 | 是 | 否 |
+| CT-198 | `testCT198_SameHostCannotPassDualMacAcceptance` | 同一 Host 不能冒充双 Mac 验收 | 是 | 否 |
+| CT-199 | `testCT199_CandidateHashMismatchAndIncompleteRestoreBlock` | 候选哈希不一致或恢复文件未全部校验必须阻塞 | 是 | 否 |
+| CT-200 | `testCT200_RecordProducesStructuredEvidenceAndReportIsNotHardcoded` | 结构化证据记录与拒绝无证据报告 | 是 | 否 |
+| CT-201 | `testCT201_AppendDuringFlushDoesNotLoseChunks` | flush 挂起期间追加的 Chunk 不得丢失 | 是 | 否 |
+| CT-202 | `testCT202_ConcurrentFlushSharesInFlightBatch` | 并发 flush 共享一个 in-flight 批次 | 是 | 否 |
+| CT-203 | `testCT203_FailedBatchIsPreservedAndRetried` | 失败的 Pack 批次保留并可重试 | 是 | 否 |
+| CT-204 | `testCT204_FinalizeWaitsForAllPendingBatches` | finalize 等待 pending/in-flight/failed 全部完成 | 是 | 否 |
+| CT-205 | `testCT205_DuplicateObjectIDIsPackedOnce` | 同一 Object ID 只进入 Pack 一次 | 是 | 否 |
+| CT-206 | `testCT206_PackLocationOnlyPublishedAfterConfirmation` | 上传确认前不得暴露 PackLocation | 是 | 否 |
+| CT-207 | `testCT207_PendingObjectIsNotReportedAsUploaded` | 上传中的对象不得报告为已上传 | 是 | 否 |
+| CT-208 | `testCT208_ConcurrentDuplicateChunkWaitsForUpload` | 并发重复 Chunk 等待首个上传结果 | 是 | 否 |
+| CT-209 | `testCT209_UploadFailurePropagatesToAllWaiters` | 上传失败传播给所有等待者 | 是 | 否 |
+| CT-210 | `testCT210_ZeroStoredSizeKnownRecordIsNotReusableAndPackedLocationWins` | 零大小索引占位不得复用；Pack 位置优先 | 是 | 否 |
+| CT-211 | `testCT211_UploadingObjectIsWaitedForNotOverwritten` | uploading 状态交由底层等待，不写第二份密文 | 是 | 否 |
+| CT-212 | `testCT212_UploadingIsNotReportedAsReusable` | uploading 不得被 hasObject 当作可复用 | 是 | 否 |
+| CT-213 | `testCT213_UploadLockFilesRemainBounded` | 上传锁文件固定为分片数量 | 是 | 否 |
+| CT-214 | `testCT214_RetryExhaustionKeepsSpoolAndJournal` | 重试耗尽仍保留 spool 与 journal | 是 | 否 |
+| CT-215 | `testCT215_SameObjectIDWithDifferentRandomNonceIsReusedByEncryptedIdentity` | 随机 nonce 导致密文不同但 Object ID 相同仍可复用；损坏对象不覆盖 | 是 | 否 |
+| CT-216 | `testCT216_ReadersAndPinsPreventEviction` | 读者与 pin 阻止本地副本驱逐 | 是 | 否 |
+| CT-217 | `testCT217_ConcurrentReadersKeepCopyUntilLastRelease` | 最后一个读者释放后才可驱逐 | 是 | 否 |
+| CT-218 | `testCT218_WriterExcludesReadersAndEviction` | 写租约排除读者与驱逐 | 是 | 否 |
+| CT-219 | `testCT219_CoordinatedReadEvictsOnlyAfterLastReader` | 协调读取结束后安全驱逐 | 是 | 否 |
+| CT-220 | `testCT220_PackIDMismatchRejected` | Pack ID 哈希不匹配拒绝 | 是 | 否 |
+| CT-221 | `testCT221_DuplicateObjectIDRejected` | 重复 Object ID 拒绝 | 是 | 否 |
+| CT-222 | `testCT222_OverlappingRangesRejected` | 重叠数据区拒绝 | 是 | 否 |
+| CT-223 | `testCT223_IntegerOverflowIsRejectedWithoutCrashing` | 恶意 UInt64 偏移不得导致 Int 溢出/崩溃 | 是 | 否 |
+| CT-224 | `testCT224_TruncatedIndexRejected` | 截断索引拒绝 | 是 | 否 |
+| CT-225 | `testCT225_CorruptedEncryptedMemberRejectedByObjectValidator` | Pack 内损坏密文被对象校验拒绝 | 是 | 否 |
+| CT-226 | `testCT226_InvalidOriginalSizeAndDecompressionLimitRejected` | 非法原大小与解压上限拒绝 | 是 | 否 |
+| CT-227 | `testGCBarrierCreatedWithPreparedAckAndReleasedOnlyAfterCompletion` | GC Prepared ACK 建立持久 Barrier，完成后才释放 | 是 | 否 |
+| CT-228 | `testGCLegacyEpochWithoutBarrierCannotDelete` | 旧 Epoch 无 Barrier 不得删除 | 是 | 否 |
+| CT-229 | `testGCAckRefusedWhileLocalWorkIsActive` | 本机有活动任务时拒绝写 ACK/Barrier | 是 | 否 |

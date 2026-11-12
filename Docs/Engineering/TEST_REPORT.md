@@ -5,7 +5,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"3ab6bde74e32deb511dc2ac501d1565a01c20206","run":"202611112125","executed":295,"failures":0,"skipped":3,"passed":292,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
+{"commit":"3ab6bde74e32deb511dc2ac501d1565a01c20206","run":"202611112125","executed":328,"failures":0,"skipped":3,"passed":325,"gate":"PASS","notRun":["双 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
 -->
 
 ## 1. 绑定信息
@@ -15,8 +15,8 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | 交付 Commit SHA | `3ab6bde`（可靠性加固代码提交） |
 | CI Run | `202611112125`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
-| 门禁结果 | `PASS`，295 tests / 0 failures / 3 skipped |
-| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-196（194 required） |
+| 门禁结果 | `PASS`，328 tests / 0 failures / 3 skipped |
+| 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-229（227 required） |
 | 运行标识 | `202611112125`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
 | 门禁日志 | `Docs/Engineering/TestArtifacts/3ab6bde-reliability-gate.log`（原始输出归档） |
 
@@ -32,7 +32,7 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 
 ## 3. 测试规模
 
-- **全量门禁**：295 个 XCTest，292 通过，0 失败，3 跳过。
+- **全量门禁**：328 个 XCTest，325 通过，0 失败，3 跳过。
 - 跳过项均为人工/规模验收，登记在 `REGRESSION_INDEX.json` 的
   `manualAcceptance=true`：CT-037 百万文件、CT-044 磁盘写满、单机真实 iCloud 往返。
 - 规模测试（`CODETIME_SCALE_TESTS=1`）在门禁中真实执行 CT-036/CT-117 的规模变体。
@@ -64,7 +64,20 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | CT-166 | 恢复续传 | 中断保留 staging；重试复用已校验文件；成功后原子移走 |
 | CT-167 | FSEvents 变化监听 | 事件去抖；最小变化间隔生效；FSEvents 仅优化，完整扫描兜底 |
 
-## 5. 可靠性修复与加固覆盖（CT-168 … CT-196）
+## 5. 全仓库可靠性修复覆盖（CT-197 … CT-229）
+
+| 编号 | 覆盖内容 | 关键断言 |
+|---|---|---|
+| CT-197–CT-200 | 双 Mac 验收证据 | 报告只能由逐场景证据生成；缺场景、同 Host、候选哈希不符、恢复未全量校验均拒绝 |
+| CT-201–CT-206 | PackBuffer 批次隔离 | flush 期间追加不丢失；并发 flush 共享批次；失败批次保留；finalize 等待全部；重复 ID 只打包一次 |
+| CT-207–CT-210 | ObjectRegistry 状态机 | uploading 不当作 uploaded；重复 Chunk 等待同一结果；失败传播；零大小占位不复用 |
+| CT-211–CT-214 | UploadQueue 生命周期 | uploading 等待而非覆盖；锁文件固定分片；重试耗尽保留 spool/journal |
+| CT-215 | 随机 nonce 对象复用 | 同 Object ID 不同密文按身份复用；损坏已有对象拒绝覆盖 |
+| CT-216–CT-219 | 本地副本租约 | 读者/pin/写入阻止驱逐；最后读者释放后才驱逐；协调读取联动 |
+| CT-220–CT-226 | Pack/Encoder 校验 | Pack ID、重复、重叠、整数溢出、截断、损坏密文、非法尺寸/解压上限全部拒绝 |
+| CT-227–CT-229 | GC Device Barrier | Prepared ACK 持久 Barrier；旧 Epoch 禁止删除；本地活动任务拒绝 ACK |
+
+## 6. 可靠性修复与加固覆盖（CT-168 … CT-196）
 
 | 编号 | 覆盖内容 | 关键断言 |
 |---|---|---|
@@ -82,14 +95,14 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | CT-190–CT-193 | UploadJournalReconciler / Spool 租约 | 孤儿收养或隔离；缺文件对云端判定；同 Object 唯一写者 |
 | CT-194–CT-196 | GC 失败关闭 | 暂存/发布中不清扫；引用缺失先中止；保留策略保护最新版本 |
 
-## 6. 可靠性与兼容回归
+## 7. 可靠性与兼容回归
 
 - CT-001 … CT-146：v2 云端发布、GC 安全、恢复、租约、并发、迁移、Schema、发布门禁全部保持通过。
 - v2/v3 并存：按版本归属选择引擎；跨格式 Diff 明确拒绝；v2 数据不被新引擎改写。
 - 加密：所有数据块、Manifest、目录节点均为 AEAD；恢复密钥丢失无法通过哈希恢复。
 - 节点加密在本轮加入，CT-151 重新覆盖 idempotent put/read。
 
-## 7. 未执行项（NOT RUN）
+## 8. 未执行项（NOT RUN）
 
 | 项目 | 原因 | 执行方式 |
 |---|---|---|
@@ -102,19 +115,19 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 | v3 iCloud 本地副本驱逐真实行为 | **NOT RUN**：本地镜像不是 ubiquitous item | 真实 iCloud 容器中观察 `evictUbiquitousItem` 与空间变化 |
 | v3 100 GB 性能验收 | **NOT RUN**：本机无 100 GB 标准数据集 | 按任务书 §17 数据集执行并记录 |
 
-## 8. 门禁输出
+## 9. 门禁输出
 
 ```
 regression gate: PASS
-  executed: 295 tests, 0 failures
+  executed: 328 tests, 0 failures
   skipped (manual acceptance only): testCT037_MillionFilesBoundedByLimit
 testCT044_DiskFullLeavesRepositoryUntouched
 testSingleMacICloudRoundTrip
-  index: CT-001 … CT-196 (194 required)
+  index: CT-001 … CT-229 (227 required)
   test-report check: PASS
 ```
 
-## 9. 性能与空间（真实执行，详见 V3_ACCEPTANCE_REPORT §2.2）
+## 10. 性能与空间（真实执行，详见 V3_ACCEPTANCE_REPORT §2.2）
 
 `Packages/CodeTimeKit/Sources/V3Acceptance` 是独立的验收工具（不属于门禁测试）。在根卷
 仅 11–23 GB 可用、外接卷 ACL 不可写的环境下，使用逻辑大小达标、部分物理随机数据的稀疏

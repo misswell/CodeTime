@@ -148,7 +148,8 @@ final class ObjectPackTests: XCTestCase {
         let buffer = PackBuffer(
             threshold: 1024,
             sink: raceCloud,
-            builder: ObjectPackBuilder(options: .init(targetBytes: 1 << 20))
+            builder: ObjectPackBuilder(options: .init(targetBytes: 1 << 20)),
+            registry: ObjectRegistry(known: [:])
         )
         let raceID = objectID(7)
         let racePayload = payload(7, bytes: 100)

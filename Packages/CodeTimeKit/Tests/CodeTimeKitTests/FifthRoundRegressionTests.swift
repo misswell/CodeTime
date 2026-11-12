@@ -171,15 +171,20 @@ final class FifthRoundRegressionTests: XCTestCase {
         - Mac A：MacBook Pro / macOS 15.0 / 构建 1.0.0
         - Mac B：Mac mini / macOS 15.0 / 构建 1.0.0
 
-        | 场景 | 操作 | 结果 |
-        |---|---|---|
-        | 首次上传 | 发布 | PASS |
-        | 第二台发现 | 列出 | PASS |
-        | 未下载读取 | 读取 | PASS |
-        | 上传中断 | 重试 | PASS |
-        | 恢复 | 校验 | PASS |
-        | 迁移 | 迁移 | PASS |
-        | 密钥不匹配 | 阻塞 | PASS |
+        | 场景 | 设备 | Host | 断言 | 结果 |
+        |---|---|---|---|---|
+        | first_backup | device | host | fixture | PASS |
+        | cross_device_discovery | device | host | fixture | PASS |
+        | metadata_only_read | device | host | fixture | PASS |
+        | repeat_backup | device | host | fixture | PASS |
+        | interrupted_upload | device | host | fixture | PASS |
+        | upload_recovery | device | host | fixture | PASS |
+        | full_restore | device | host | fixture | PASS |
+        | wrong_key | device | host | fixture | PASS |
+        | gc_barrier | device | host | fixture | PASS |
+        | gc_resume | device | host | fixture | PASS |
+        | migration | device | host | fixture | PASS |
+        - 场景证据目录：/tmp/icloud-evidence
 
         - 结果：PASS
         """

@@ -366,7 +366,13 @@ jobs:
           REPORT="Docs/releases/${TAG}-icloud-acceptance.md"
           git show "origin/release-acceptance:$REPORT" > acceptance-report.md \
             || { echo "release-acceptance 分支缺少 $REPORT" >&2; exit 1; }
+          EVIDENCE="Docs/releases/${TAG}-icloud-evidence"
+          mkdir -p acceptance-evidence
+          git archive origin/release-acceptance "$EVIDENCE" 2>/dev/null \
+            | tar -x -C acceptance-evidence --strip-components=3 \
+            || { echo "release-acceptance 分支缺少 $EVIDENCE" >&2; exit 1; }
           echo "ICLOUD_ACCEPTANCE_REPORT=$PWD/acceptance-report.md" >> "$GITHUB_ENV"
+          echo "ICLOUD_ACCEPTANCE_EVIDENCE_DIR=$PWD/acceptance-evidence" >> "$GITHUB_ENV"
       - name: Verify candidate SHA-256 and require two-Mac iCloud acceptance report
         env:
           TAG: ${{ needs.classify.outputs.tag }}

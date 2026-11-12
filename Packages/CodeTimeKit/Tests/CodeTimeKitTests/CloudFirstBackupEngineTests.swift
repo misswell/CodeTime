@@ -190,7 +190,12 @@ final class CloudFirstBackupEngineTests: XCTestCase {
             )
         }
 
-        func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws {
+        func uploadTask(_ taskID: String) async throws -> PendingUploadV3? {
+        lock.lock(); defer { lock.unlock() }
+        return uploads.first { $0.taskID == taskID }
+    }
+
+    func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws {
             lock.lock(); defer { lock.unlock() }
             guard let index = uploads.firstIndex(where: { $0.taskID == taskID }) else { return }
             uploads[index].state = state

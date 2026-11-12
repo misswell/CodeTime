@@ -42,6 +42,8 @@ public enum ObjectCodecError: Error, Sendable, Equatable {
     case decryptionFailed
     case compressionFailed
     case decompressionFailed
+    case sizeLimitExceeded(Int)
+    case invalidSize
 
     public var diagnosticCode: String { "ICLOUD_OBJECT_CORRUPTED" }
 }
@@ -60,6 +62,22 @@ public struct EncodedObject: Sendable, Equatable {
     public var wasCompressed: Bool { compression != .none }
 }
 
+public struct ObjectEncoderLimits: Sendable, Equatable {
+    /// Largest plaintext object this build will decode.
+    public var maxObjectBytes: Int
+    /// Hard cap on a chunk's decompressed size. This is separate from the
+    /// originalSize header so a corrupt/hostile header cannot force a huge
+    /// allocation before authentication.
+    public var maxDecompressedBytes: Int
+
+    public init(maxObjectBytes: Int = 256 * 1024 * 1024, maxDecompressedBytes: Int = 256 * 1024 * 1024) {
+        self.maxObjectBytes = max(1, maxObjectBytes)
+        self.maxDecompressedBytes = max(1, maxDecompressedBytes)
+    }
+
+    public static let `default` = ObjectEncoderLimits()
+}
+
 public struct ObjectEncoder: Sendable {
     private let masterKey: Data
     private let hasher: ContentHasher
@@ -67,12 +85,19 @@ public struct ObjectEncoder: Sendable {
     public let keyVersion: UInt16
     /// Chunks below this size are not worth compressing (header/FSE overhead).
     public let compressionThreshold: Int
+    public let limits: ObjectEncoderLimits
 
-    public init(masterKey: Data, keyVersion: UInt16 = 1, compressionThreshold: Int = 1024) {
+    public init(
+        masterKey: Data,
+        keyVersion: UInt16 = 1,
+        compressionThreshold: Int = 1024,
+        limits: ObjectEncoderLimits = .default
+    ) {
         self.masterKey = masterKey
         self.hasher = ContentHasher(masterKey: masterKey)
         self.keyVersion = keyVersion
         self.compressionThreshold = compressionThreshold
+        self.limits = limits
     }
 
     public func objectID(for chunk: Data) -> String {
@@ -176,7 +201,15 @@ public struct ObjectEncoder: Sendable {
             throw ObjectCodecError.unsupportedCompression(payload[base + 5])
         }
         let storedKeyVersion = UInt16(payload[base + 6]) << 8 | UInt16(payload[base + 7])
-        let originalSize = Self.readUInt64(payload, at: base + 8)
+        let rawOriginalSize = Self.readUInt64(payload, at: base + 8)
+        guard let originalSize = Int(exactly: rawOriginalSize),
+              originalSize >= 0,
+              originalSize <= limits.maxObjectBytes,
+              originalSize <= limits.maxDecompressedBytes else {
+            throw ObjectCodecError.sizeLimitExceeded(
+                rawOriginalSize > UInt64(Int.max) ? Int.max : Int(rawOriginalSize)
+            )
+        }
         let headerSize = formatVersion == 1
             ? ObjectEnvelope.legacyHeaderSize
             : ObjectEnvelope.headerSize
@@ -223,14 +256,15 @@ public struct ObjectEncoder: Sendable {
         case .none:
             chunk = body
         case .lzfse:
-            guard let inflated = Self.lzfseDecompress(body, originalSize: Int(originalSize)) else {
+            guard originalSize <= limits.maxDecompressedBytes,
+                  let inflated = Self.lzfseDecompress(body, originalSize: originalSize) else {
                 throw ObjectCodecError.decompressionFailed
             }
             chunk = inflated
         }
 
-        guard chunk.count == Int(originalSize) else {
-            throw ObjectCodecError.sizeMismatch(expected: Int(originalSize), actual: chunk.count)
+        guard chunk.count == originalSize else {
+            throw ObjectCodecError.sizeMismatch(expected: originalSize, actual: chunk.count)
         }
         guard Data(SHA256.hash(data: chunk)) == expectedHash else {
             throw ObjectCodecError.plaintextHashMismatch

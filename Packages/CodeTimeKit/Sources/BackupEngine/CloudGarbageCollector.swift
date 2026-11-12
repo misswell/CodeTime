@@ -257,6 +257,17 @@ public struct CloudGarbageCollector: Sendable {
             acknowledgedBy: acknowledged
         )
         try await store.writeEpoch(epoch)
+        // The initiator also takes a durable restore barrier before it claims
+        // the epoch is prepared. Every other required device will do the same
+        // in acknowledgePendingEpochs().
+        try await store.writeDeviceBarrier(GCDeviceBarrier(
+            epochID: epochID,
+            planDigest: epoch.planDigest,
+            deviceID: deviceID,
+            candidateSnapshotIDs: epoch.candidates.snapshots.map(\.snapshotID),
+            createdAt: at,
+            phase: .prepared
+        ))
         try await store.writeEpochAck(GCEpochAck(
             epochID: epochID, deviceID: deviceID, acknowledgedAt: at
         ))
@@ -287,15 +298,76 @@ public struct CloudGarbageCollector: Sendable {
     public func acknowledgePendingEpochs(now: Date? = nil) async throws -> [String] {
         let at = now ?? clock()
         let epochs = try await store.epochsStrict()
+
+        // A completed epoch releases this device's barrier; the data is gone and
+        // the promise no longer needs to block restores.
+        for epoch in epochs where epoch.isTerminal {
+            if try await store.deviceBarrier(epochID: epoch.id, deviceID: deviceID) != nil {
+                try await store.deleteDeviceBarrier(epochID: epoch.id, deviceID: deviceID)
+            }
+        }
+
+        guard await isSafeToCollect() else {
+            throw V3GCError.unsafe("本机仍有备份或恢复任务，不能确认 GC Epoch")
+        }
+
         var acknowledged: [String] = []
         for epoch in epochs where !epoch.isTerminal {
-            guard epoch.requiredDeviceIDs.contains(deviceID) else { continue }
+            guard epoch.requiredDeviceIDs.contains(deviceID),
+                  epoch.supportsDeviceBarriers else { continue }
             let acks = try await store.epochAcks(epochID: epoch.id)
-            guard acks[deviceID] == nil else { continue }
-            try await store.writeEpochAck(GCEpochAck(
-                epochID: epoch.id, deviceID: deviceID, acknowledgedAt: at
-            ))
-            acknowledged.append(epoch.id)
+            let hiddenAcks = try await store.hiddenEpochAcks(epochID: epoch.id)
+
+            switch epoch.state {
+            case .planned, .awaitsDeviceAcks, .gracePeriod:
+                guard acks[deviceID] == nil else { continue }
+                guard epoch.planDigest == epoch.candidates.planDigest else {
+                    throw V3GCError.planChanged("GC Epoch 计划摘要不一致")
+                }
+                try await store.writeDeviceBarrier(GCDeviceBarrier(
+                    epochID: epoch.id,
+                    planDigest: epoch.planDigest,
+                    deviceID: deviceID,
+                    candidateSnapshotIDs: epoch.candidates.snapshots.map(\.snapshotID),
+                    createdAt: at,
+                    phase: .prepared
+                ))
+                try await store.writeEpochAck(GCEpochAck(
+                    epochID: epoch.id, deviceID: deviceID, acknowledgedAt: at
+                ))
+                acknowledged.append(epoch.id)
+            case .commitsHidden, .awaitsHiddenAcks:
+                guard hiddenAcks[deviceID] == nil else { continue }
+                // Only acknowledge after observing that every candidate commit is
+                // no longer visible. An unreadable namespace aborts the ack.
+                for snapshot in epoch.candidates.snapshots {
+                    let visible = try await store.strictCommits(projectID: snapshot.projectID)
+                    guard !visible.contains(where: { $0.snapshotID == snapshot.snapshotID }) else {
+                        throw V3GCError.unsafe("提交标记仍然可见：\(snapshot.snapshotID)")
+                    }
+                }
+                let hidden = Set(try await store.hiddenCommitIDs(epochID: epoch.id))
+                for snapshot in epoch.candidates.snapshots {
+                    guard hidden.contains(snapshot.snapshotID) else {
+                        throw V3GCError.unsafe("隐藏提交标记缺失：\(snapshot.snapshotID)")
+                    }
+                }
+                try await store.writeDeviceBarrier(GCDeviceBarrier(
+                    epochID: epoch.id,
+                    planDigest: epoch.planDigest,
+                    deviceID: deviceID,
+                    candidateSnapshotIDs: epoch.candidates.snapshots.map(\.snapshotID),
+                    createdAt: at,
+                    phase: .commitsHiddenObserved
+                ))
+                try await store.writeHiddenEpochAck(
+                    epochID: epoch.id, deviceID: deviceID, at: at
+                )
+                acknowledged.append(epoch.id)
+            case .manifestsCleaned, .nodesCleaned, .packsCleaned, .objectsCleaned,
+                 .completed, .failed:
+                break
+            }
         }
         return acknowledged
     }
@@ -321,8 +393,23 @@ public struct CloudGarbageCollector: Sendable {
 
         var latest = V3GCReport(phase: "sweep", skippedReason: "没有到期的 GC Epoch")
         for candidate in epochs {
+            guard candidate.supportsDeviceBarriers else {
+                latest = V3GCReport(
+                    phase: "sweep",
+                    epochID: candidate.id,
+                    epochState: .failed,
+                    skippedReason: "旧版 GC Epoch 缺少设备 Barrier，必须重新计划"
+                )
+                continue
+            }
             let acks = try await store.epochAcks(epochID: candidate.id)
-            let missing = candidate.requiredDeviceIDs.filter { acks[$0] == nil }
+            let barriers = try await store.deviceBarriers(epochID: candidate.id)
+            let prepared = Set(barriers.filter {
+                $0.phase == .prepared || $0.phase == .commitsHiddenObserved
+            }.map(\.deviceID))
+            let missing = candidate.requiredDeviceIDs.filter {
+                acks[$0] == nil || !prepared.contains($0)
+            }
             if !missing.isEmpty {
                 latest = V3GCReport(
                     phase: "sweep",
@@ -368,9 +455,21 @@ public struct CloudGarbageCollector: Sendable {
             orphanNodes: epoch.candidates.nodes.count
         )
 
+        guard epoch.supportsDeviceBarriers else {
+            epoch.state = .failed
+            epoch.lastError = "旧版 GC Epoch 缺少设备 Barrier，必须重新计划"
+            try await store.writeEpoch(epoch)
+            report.epochState = .failed
+            report.failures.append(epoch.lastError ?? "旧版 GC Epoch")
+            return report
+        }
+
         // 1. Hide commit markers first; they remain on disk under gc/hidden until
         //    all data deletion has been verified.
-        if epoch.state.rank < GCOperationState.commitsHidden.rank {
+        let hiddenNow = Set(try await store.hiddenCommitIDs(epochID: epoch.id))
+        let alreadyHidden = !epoch.candidates.snapshots.isEmpty
+            && epoch.candidates.snapshots.allSatisfy { hiddenNow.contains($0.snapshotID) }
+        if epoch.state.rank < GCOperationState.commitsHidden.rank, !alreadyHidden {
             for snapshot in epoch.candidates.snapshots {
                 do {
                     try await store.hideCommit(
@@ -396,9 +495,58 @@ public struct CloudGarbageCollector: Sendable {
                     throw V3GCError.unsafe(epoch.lastError ?? "提交标记仍然可见")
                 }
             }
-            epoch.state = .commitsHidden
+            // Hidden commits are observable but nothing is deleted yet. Every
+            // required device must confirm this state before the first delete.
+            // On a retry after a failed deletion the ack set is already complete;
+            // in that case continue directly instead of regressing the epoch.
+            try await store.writeDeviceBarrier(GCDeviceBarrier(
+                epochID: epoch.id,
+                planDigest: epoch.planDigest,
+                deviceID: deviceID,
+                candidateSnapshotIDs: epoch.candidates.snapshots.map(\.snapshotID),
+                createdAt: now,
+                phase: .commitsHiddenObserved
+            ))
+            try await store.writeHiddenEpochAck(epochID: epoch.id, deviceID: deviceID, at: now)
+            let hiddenAcks = try await store.hiddenEpochAcks(epochID: epoch.id)
+            let observed = Set(try await store.deviceBarriers(epochID: epoch.id)
+                .filter { $0.phase == .commitsHiddenObserved }
+                .map(\.deviceID))
+            let missing = epoch.requiredDeviceIDs.filter {
+                hiddenAcks[$0] == nil || !observed.contains($0)
+            }
+            epoch.state = .awaitsHiddenAcks
             try await store.writeEpoch(epoch)
             report.epochState = epoch.state
+            report.awaitingDevices = missing
+            report.skippedReason = "等待所有设备确认 Commit 已隐藏"
+            return report
+        }
+
+        // A retry after a failed deletion already has hidden commits but a
+        // `.failed` state; normalize it to the hidden-ack phase instead of
+        // trying to hide the same commits again.
+        if alreadyHidden, epoch.state.rank < GCOperationState.commitsHidden.rank {
+            epoch.state = .awaitsHiddenAcks
+            try await store.writeEpoch(epoch)
+        }
+
+        if epoch.state == .awaitsHiddenAcks || epoch.state == .commitsHidden {
+            var hiddenAcks = try await store.hiddenEpochAcks(epochID: epoch.id)
+            // The epoch is the authority for which devices are still required;
+            // an ack file for a device outside that set never counts.
+            hiddenAcks = hiddenAcks.filter { epoch.requiredDeviceIDs.contains($0.key) }
+            let barriers = try await store.deviceBarriers(epochID: epoch.id)
+            let observed = Set(barriers.filter { $0.phase == .commitsHiddenObserved }.map(\.deviceID))
+            let missing = epoch.requiredDeviceIDs.filter {
+                hiddenAcks[$0] == nil || !observed.contains($0)
+            }
+            guard missing.isEmpty else {
+                report.epochState = .awaitsHiddenAcks
+                report.awaitingDevices = missing
+                report.skippedReason = "等待设备确认 Commit 已隐藏：\(missing.joined(separator: ", "))"
+                return report
+            }
         }
 
         // 2. Rebuild the reference graph from all CURRENTLY visible commits. New
@@ -490,17 +638,38 @@ public struct CloudGarbageCollector: Sendable {
             return report
         }
 
+        var cleanupFailures: [String] = []
         for snapshot in candidateSnapshots {
-            try? await store.deleteHiddenCommit(
-                projectID: snapshot.projectID,
-                snapshotID: snapshot.snapshotID,
-                epochID: epoch.id
-            )
+            do {
+                try await store.deleteHiddenCommit(
+                    projectID: snapshot.projectID,
+                    snapshotID: snapshot.snapshotID,
+                    epochID: epoch.id
+                )
+            } catch {
+                cleanupFailures.append("删除隐藏提交失败：\(snapshot.snapshotID)：\(error)")
+            }
         }
         // Tombstones are the very last thing removed.
         for tombstone in try await loadTombstones() where tombstone.epochID == epoch.id {
-            try? await store.deleteTombstone(id: tombstone.id)
+            do {
+                try await store.deleteTombstone(id: tombstone.id)
+            } catch {
+                cleanupFailures.append("删除墓碑失败：\(tombstone.id)：\(error)")
+            }
         }
+        guard cleanupFailures.isEmpty else {
+            epoch.state = .failed
+            epoch.lastError = cleanupFailures.joined(separator: "; ")
+            try await store.writeEpoch(epoch)
+            report.epochState = .failed
+            report.failures.append(contentsOf: cleanupFailures)
+            report.tombstonesPending = try await loadTombstones()
+                .filter { $0.epochID == epoch.id }.count
+            return report
+        }
+        // Only a terminal, fully verified epoch releases this device's barrier.
+        try await store.deleteDeviceBarrier(epochID: epoch.id, deviceID: deviceID)
         epoch.state = .completed
         epoch.lastError = nil
         epoch.acknowledgedBy = try await store.epochAcks(epochID: epoch.id)
@@ -848,11 +1017,12 @@ extension GCOperationState {
         case .awaitsDeviceAcks: return 1
         case .gracePeriod: return 2
         case .commitsHidden: return 3
-        case .manifestsCleaned: return 4
-        case .nodesCleaned: return 5
-        case .packsCleaned: return 6
-        case .objectsCleaned: return 7
-        case .completed: return 8
+        case .awaitsHiddenAcks: return 4
+        case .manifestsCleaned: return 5
+        case .nodesCleaned: return 6
+        case .packsCleaned: return 7
+        case .objectsCleaned: return 8
+        case .completed: return 9
         case .failed: return -1
         }
     }

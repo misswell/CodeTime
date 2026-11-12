@@ -144,13 +144,16 @@ private func runBackup(
     spool: URL,
     objectCacheLimit: Int64
 ) async throws -> (report: BackupRunReport, seconds: Double) {
+    let encoder = ObjectEncoder(masterKey: masterKey)
     let store = CloudObjectStoreV3(
         root: cloudRoot,
         deviceID: "acceptance-device",
-        masterKey: masterKey
+        masterKey: masterKey,
+        objectValidator: { payload, id in
+            (try? encoder.decode(payload, objectID: id)) != nil
+        }
     )
     try await store.prepare(deviceName: "V3Acceptance")
-    let encoder = ObjectEncoder(masterKey: masterKey)
     let queue = UploadQueue(
         base: store,
         index: database,
@@ -161,10 +164,16 @@ private func runBackup(
         ),
         validate: { payload, id, isPack in
             if isPack {
-                guard let entries = try? ObjectPackReader().entries(in: payload) else { return false }
-                return entries.allSatisfy {
-                    $0.offset >= ObjectPackFormat.headerSize
-                        && $0.offset + $0.length <= payload.count
+                guard let entries = try? ObjectPackValidator.validate(payload: payload, packID: id) else {
+                    return false
+                }
+                return entries.allSatisfy { entry in
+                    let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+                    guard !overflow, end <= payload.count else { return false }
+                    return (try? encoder.decode(
+                        payload.subdata(in: entry.offset..<end),
+                        objectID: entry.objectID
+                    )) != nil
                 }
             }
             return (try? encoder.decode(payload, objectID: id)) != nil
@@ -344,6 +353,7 @@ private func commandICloud(_ arguments: [String]) async throws {
     try Data(repeating: 0x5A, count: 2 * 1024 * 1024).write(to: source.appendingPathComponent("medium.bin"))
 
     let database = try SQLiteStore(path: appData.appendingPathComponent("codetime.sqlite").path)
+    let encoder = ObjectEncoder(masterKey: masterKey)
     let store = CloudObjectStoreV3(
         root: cloudRoot,
         deviceID: "icloud-acceptance-device",
@@ -351,10 +361,12 @@ private func commandICloud(_ arguments: [String]) async throws {
         access: ICloudCoordinatedFileAccess(),
         tracker: UbiquitousUploadTracker(containerURL: container),
         uploadTimeout: 300,
-        eviction: ICloudEvictionManager()
+        eviction: ICloudEvictionManager(),
+        objectValidator: { payload, id in
+            (try? encoder.decode(payload, objectID: id)) != nil
+        }
     )
     try await store.prepare(deviceName: "V3 Acceptance")
-    let encoder = ObjectEncoder(masterKey: masterKey)
     let queue = UploadQueue(
         base: store,
         index: database,
@@ -365,7 +377,17 @@ private func commandICloud(_ arguments: [String]) async throws {
         ),
         validate: { payload, id, isPack in
             if isPack {
-                return (try? ObjectPackReader().entries(in: payload)) != nil
+                guard let entries = try? ObjectPackValidator.validate(payload: payload, packID: id) else {
+                    return false
+                }
+                return entries.allSatisfy { entry in
+                    let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+                    guard !overflow, end <= payload.count else { return false }
+                    return (try? encoder.decode(
+                        payload.subdata(in: entry.offset..<end),
+                        objectID: entry.objectID
+                    )) != nil
+                }
             }
             return (try? encoder.decode(payload, objectID: id)) != nil
         }

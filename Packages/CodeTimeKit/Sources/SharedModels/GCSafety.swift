@@ -93,12 +93,48 @@ public enum GCOperationState: String, Codable, Sendable, CaseIterable {
     case awaitsDeviceAcks
     case gracePeriod
     case commitsHidden
+    /// Commits are hidden; every required device must now observe that state
+    /// before any irreversible deletion starts.
+    case awaitsHiddenAcks
     case manifestsCleaned
     case nodesCleaned
     case packsCleaned
     case objectsCleaned
     case completed
     case failed
+}
+
+public enum GCBarrierPhase: String, Codable, Sendable, Hashable {
+    case prepared
+    case commitsHiddenObserved
+    case released
+}
+
+/// Durable proof that this device has drained readers and will refuse restores
+/// of the candidate snapshots for the lifetime of the epoch.
+public struct GCDeviceBarrier: Codable, Hashable, Sendable {
+    public var epochID: String
+    public var planDigest: String
+    public var deviceID: String
+    public var candidateSnapshotIDs: [String]
+    public var createdAt: Date
+    public var phase: GCBarrierPhase
+
+    public init(
+        epochID: String,
+        planDigest: String,
+        deviceID: String,
+        candidateSnapshotIDs: [String],
+        createdAt: Date,
+        phase: GCBarrierPhase = .prepared
+    ) {
+        self.epochID = epochID
+        self.planDigest = planDigest
+        self.deviceID = deviceID
+        self.candidateSnapshotIDs = candidateSnapshotIDs
+        self.createdAt = createdAt
+        self.phase = phase
+    }
 }
 
 public struct GCEpochAck: Codable, Hashable, Sendable {
@@ -129,6 +165,11 @@ public struct GCEpoch: Codable, Hashable, Sendable {
     public var planDigest: String
     public var requiredDeviceIDs: [String]
     public var acknowledgedBy: [String: Date]
+    /// Hidden-commit acknowledgements, written only after a device observed that
+    /// every candidate commit is no longer visible.
+    public var hiddenAcknowledgedBy: [String: Date]
+    /// 1 = legacy epoch without device barriers; 2 = barrier protocol.
+    public var protocolVersion: Int?
     public var lastError: String?
 
     public init(
@@ -142,6 +183,8 @@ public struct GCEpoch: Codable, Hashable, Sendable {
         planDigest: String,
         requiredDeviceIDs: [String],
         acknowledgedBy: [String: Date] = [:],
+        hiddenAcknowledgedBy: [String: Date] = [:],
+        protocolVersion: Int? = 2,
         lastError: String? = nil
     ) {
         self.id = id
@@ -154,6 +197,8 @@ public struct GCEpoch: Codable, Hashable, Sendable {
         self.planDigest = planDigest
         self.requiredDeviceIDs = requiredDeviceIDs
         self.acknowledgedBy = acknowledgedBy
+        self.hiddenAcknowledgedBy = hiddenAcknowledgedBy
+        self.protocolVersion = protocolVersion
         self.lastError = lastError
     }
 
@@ -161,9 +206,42 @@ public struct GCEpoch: Codable, Hashable, Sendable {
         requiredDeviceIDs.filter { acknowledgedBy[$0] == nil }
     }
 
+    public func missingHiddenAcknowledgements() -> [String] {
+        requiredDeviceIDs.filter { hiddenAcknowledgedBy[$0] == nil }
+    }
+
+    public var supportsDeviceBarriers: Bool { (protocolVersion ?? 1) >= 2 }
+
     /// `failed` is retryable: a deletion that failed must be resumed later, not
     /// silently abandoned.
     public var isTerminal: Bool { state == .completed }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, initiatorDeviceID, createdAt, graceUntil, state, candidates
+        case retainedSnapshots, planDigest, requiredDeviceIDs, acknowledgedBy
+        case hiddenAcknowledgedBy, protocolVersion, lastError
+    }
+
+    /// Explicit decoding keeps old epochs readable: fields added with the device
+    /// barrier protocol default to "legacy" instead of failing the whole GC scan.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        initiatorDeviceID = try container.decode(String.self, forKey: .initiatorDeviceID)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        graceUntil = try container.decode(Date.self, forKey: .graceUntil)
+        state = try container.decode(GCOperationState.self, forKey: .state)
+        candidates = try container.decode(GCCandidateSet.self, forKey: .candidates)
+        retainedSnapshots = try container.decode([GCSnapshotCandidate].self, forKey: .retainedSnapshots)
+        planDigest = try container.decode(String.self, forKey: .planDigest)
+        requiredDeviceIDs = try container.decode([String].self, forKey: .requiredDeviceIDs)
+        acknowledgedBy = try container.decodeIfPresent([String: Date].self, forKey: .acknowledgedBy) ?? [:]
+        hiddenAcknowledgedBy = try container.decodeIfPresent(
+            [String: Date].self, forKey: .hiddenAcknowledgedBy
+        ) ?? [:]
+        protocolVersion = try container.decodeIfPresent(Int.self, forKey: .protocolVersion)
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+    }
 }
 
 public extension JSONEncoder {

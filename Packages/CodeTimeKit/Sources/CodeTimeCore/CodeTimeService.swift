@@ -643,10 +643,12 @@ public actor CodeTimeService {
         let eviction: ICloudEvictionManager? = location?.coordinated == true
             ? ICloudEvictionManager()
             : nil
+        let masterKey = try keychain.masterKey()
+        let objectValidatorEncoder = ObjectEncoder(masterKey: masterKey)
         let store = CloudObjectStoreV3(
             root: root,
             deviceID: try currentDevice().id.uuidString,
-            masterKey: try keychain.masterKey(),
+            masterKey: masterKey,
             access: access,
             tracker: location?.tracker ?? NoopUploadTracker(),
             eviction: eviction,
@@ -658,6 +660,9 @@ public actor CodeTimeService {
                         + "\(outcome.failed.count) 个失败，\(outcome.skippedNotUploaded.count) 个等待上传确认"
                     )
                 }
+            },
+            objectValidator: { payload, objectID in
+                (try? objectValidatorEncoder.decode(payload, objectID: objectID)) != nil
             }
         )
         v3StoreCache = store
@@ -683,7 +688,8 @@ public actor CodeTimeService {
             localDeviceID: try currentDevice().id.uuidString,
             masterKey: try keychain.masterKey(),
             access: access,
-            tracker: location?.tracker ?? NoopUploadTracker()
+            tracker: location?.tracker ?? NoopUploadTracker(),
+            eviction: location?.coordinated == true ? ICloudEvictionManager() : nil
         )
         v3SourceCache = source
         return source
@@ -706,11 +712,15 @@ public actor CodeTimeService {
             ),
             validate: { payload, id, isPack in
                 if isPack {
-                    guard let entries = try? ObjectPackReader().entries(in: payload) else { return false }
+                    guard let entries = try? ObjectPackValidator.validate(
+                        payload: payload,
+                        packID: id
+                    ) else { return false }
                     return entries.allSatisfy { entry in
-                        entry.offset >= ObjectPackFormat.headerSize
-                            && entry.length > 0
-                            && entry.offset + entry.length <= payload.count
+                        let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+                        guard !overflow, end <= payload.count else { return false }
+                        let encoded = payload.subdata(in: entry.offset..<end)
+                        return (try? encoder.decode(encoded, objectID: entry.objectID)) != nil
                     }
                 }
                 return (try? encoder.decode(payload, objectID: id)) != nil
@@ -994,7 +1004,16 @@ public actor CodeTimeService {
                 cloud: try await currentV3Store(),
                 validate: { payload, id, isPack in
                     if isPack {
-                        return (try? ObjectPackValidator.validate(payload: payload)) != nil
+                        guard let entries = try? ObjectPackValidator.validate(
+                            payload: payload,
+                            packID: id
+                        ) else { return false }
+                        return entries.allSatisfy { entry in
+                            let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+                            guard !overflow, end <= payload.count else { return false }
+                            let encoded = payload.subdata(in: entry.offset..<end)
+                            return (try? encoder.decode(encoded, objectID: entry.objectID)) != nil
+                        }
                     }
                     return (try? encoder.decode(payload, objectID: id)) != nil
                 }
@@ -2136,6 +2155,18 @@ public actor CodeTimeService {
               snapshotRecord.projectID == request.projectID else {
             throw CodeTimeError.snapshotNotFound(request.snapshotID)
         }
+        // A prepared GC barrier promises the other devices that this Mac will not
+        // start restoring a candidate snapshot. The check must happen before any
+        // job/lease is created, not only while holding a local shared lock.
+        let settingsForRestore = try await currentSettings()
+        if settingsForRestore.engineMode == .cloudFirst {
+            let blocked = try await currentV3Store().blockedSnapshotIDs()
+            if blocked.contains(request.snapshotID) {
+                throw CodeTimeError.gcUnsafe(
+                    reason: "快照 \(request.snapshotID) 正在 GC 清理计划中，恢复已被安全阻止"
+                )
+            }
+        }
 
         try beginWorkClaim()
         defer { endWorkClaim() }
@@ -2507,6 +2538,15 @@ public actor CodeTimeService {
         }
         defer { lease.release() }
 
+        // Legacy per-object lock files can only be removed while no backup or
+        // restore is running; this is the exclusive maintenance window.
+        if let queue = try? await currentUploadQueue() {
+            let removed = (try? await queue.removeLegacyPerObjectLocks()) ?? 0
+            if removed > 0 {
+                await logger.info("已清理 \(removed) 个旧版逐对象上传锁文件")
+            }
+        }
+
         let collector = CloudGarbageCollector(
             store: store,
             masterKey: try await keychain.masterKey(),
@@ -2556,7 +2596,10 @@ public actor CodeTimeService {
             let settings = try await currentSettings()
             guard settings.engineMode == .cloudFirst else { return [] }
             guard await isIdleForGarbageCollection() else { return [] }
-            let lease = try operationLeases.acquire(.shared, timeout: 0)
+            // Writing a prepared barrier must exclude backups/restores in this and
+            // every other process; a shared lease would allow a new restore after
+            // the ACK was written.
+            let lease = try operationLeases.acquire(.exclusive, timeout: 0)
             defer { lease.release() }
             let collector = CloudGarbageCollector(
                 store: try await currentV3Store(),

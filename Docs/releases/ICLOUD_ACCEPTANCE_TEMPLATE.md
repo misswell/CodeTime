@@ -17,21 +17,58 @@
 - Mac A：MACA_MODEL_PLACEHOLDER / macOS MACA_OS_PLACEHOLDER / 构建 MACA_BUILD_PLACEHOLDER
 - Mac B：MACB_MODEL_PLACEHOLDER / macOS MACB_OS_PLACEHOLDER / 构建 MACB_BUILD_PLACEHOLDER
 
+
+## 证据生成方式（必须使用）
+
+每个场景必须由实际执行人/实际 App 生成独立 JSON，不得手写 PASS：
+
+```bash
+Scripts/icloud_acceptance.sh record \
+  --scenario first_backup \
+  --result passed \
+  --device-id "<Mac-A-device-id>" \
+  --host "<Mac-A-hostname>" \
+  --candidate-sha "<zip sha256>" \
+  --commit "<git sha>" \
+  --assertions '{"upload_confirmed":true,"spool_empty":true}' \
+  --out Docs/releases/<tag>-icloud-evidence/first_backup.json
+```
+
+必须覆盖的场景（缺一不可）：
+
+`first_backup`、`cross_device_discovery`、`metadata_only_read`、`repeat_backup`、
+`interrupted_upload`、`upload_recovery`、`full_restore`、`wrong_key`、
+`gc_barrier`、`gc_resume`、`migration`。
+
+最后用证据目录生成报告：
+
+```bash
+Scripts/icloud_acceptance.sh report \
+  --a <Mac-A-prepare.json> --b <Mac-B-verify.json> \
+  --evidence-dir Docs/releases/<tag>-icloud-evidence \
+  --tag <tag> --commit <git sha> \
+  --candidate-sha <zip sha256> --candidate-name <zip name> \
+  --run <workflow-run-id> --operator "<name>" \
+  --out Docs/releases/<tag>-icloud-acceptance.md
+```
+
+报告生成器会拒绝缺失场景、同 Host、候选哈希不一致、恢复文件未全量校验和老式硬编码 PASS。
+
 ## 场景与结果
 
 | 场景 | 操作 | 结果 |
 |---|---|---|
-| v3 首次上传 | Mac A 添加项目并备份；确认 Dashboard 显示云端优先、spool 为 0 | RESULT_PLACEHOLDER |
-| v3 第二台发现 | Mac B「从云端恢复」列出 Mac A 的 v3 项目 | RESULT_PLACEHOLDER |
-| v3 按需恢复 | Mac B 只恢复一个文件，确认未下载完整项目/Kopia 仓库 | RESULT_PLACEHOLDER |
-| v3 历史版本 | Mac B 浏览多个时间点并恢复指定版本 | RESULT_PLACEHOLDER |
-| v3 离线/未上传 | Mac A 断网后备份；待上传数据保留；恢复网络后自动完成 | RESULT_PLACEHOLDER |
-| v3 本地副本驱逐 | Mac A 上传确认后观察本地空间；失败时显示“等待释放”而非成功 | RESULT_PLACEHOLDER |
-| v3 双设备并发 | 两台 Mac 同时修改并备份；双方历史均可读取，不互相覆盖 | RESULT_PLACEHOLDER |
-| v3 校验 | 两台 Mac 对同一版本执行云端完整性校验 | RESULT_PLACEHOLDER |
-| v2 兼容 | Mac B 读取并恢复一个旧 Kopia 版本 | RESULT_PLACEHOLDER |
-| 迁移 | v2→v3 基线验证、显式释放旧仓库、旧历史仍可恢复 | RESULT_PLACEHOLDER |
-| 密钥不匹配 | 使用错误恢复密钥时明确阻塞，不误用其他设备 | RESULT_PLACEHOLDER |
+| first_backup | Mac A 添加项目并备份；确认 Dashboard 显示云端优先、spool 为 0 | EVIDENCE_JSON_REQUIRED |
+| cross_device_discovery | Mac B「从云端恢复」列出 Mac A 的 v3 项目 | EVIDENCE_JSON_REQUIRED |
+| metadata_only_read / full_restore | Mac B 浏览元数据不下载正文，再全量恢复并校验每个文件 | EVIDENCE_JSON_REQUIRED |
+| repeat_backup / migration | 重复备份不重复下载；Beta→Release 后旧数据可读 | EVIDENCE_JSON_REQUIRED |
+| interrupted_upload / upload_recovery | 断网不发布快照；spool 保留；恢复网络后续传 | EVIDENCE_JSON_REQUIRED |
+| eviction | Mac A 上传确认后观察本地空间；失败时显示“等待释放”而非成功 | EVIDENCE_JSON_REQUIRED |
+| cross_device_discovery | 两台 Mac 同时修改并备份；双方历史均可读取 | EVIDENCE_JSON_REQUIRED |
+| full_restore | 两台 Mac 对同一版本执行云端完整性校验与 SHA-256 恢复校验 | EVIDENCE_JSON_REQUIRED |
+| migration | Mac B 读取并恢复一个旧 Kopia 版本 | EVIDENCE_JSON_REQUIRED |
+| migration | v2→v3 基线验证、显式释放旧仓库、旧历史仍可恢复 | EVIDENCE_JSON_REQUIRED |
+| wrong_key | 使用错误恢复密钥时明确阻塞 | EVIDENCE_JSON_REQUIRED |
 
 ## 原始证据
 
@@ -42,5 +79,5 @@
 
 ## 结论
 
-- 结果：RESULT_PLACEHOLDER
+- 结果：由 `icloud_acceptance.sh report` 生成，不得手填
 - 未通过项与原因：FAILURES_PLACEHOLDER

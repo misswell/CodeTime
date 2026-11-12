@@ -27,7 +27,11 @@ public enum RemoteIntegrityError: Error, Sendable, Equatable {
 
 /// Validates the on-wire Pack format, not just the index reader's successful parse.
 public enum ObjectPackValidator {
-    public static func validate(payload: Data, packID: String? = nil) throws -> [ObjectPackFormat.Entry] {
+    public static func validate(
+        payload: Data,
+        packID: String? = nil,
+        objectValidator: ((Data, String) -> Bool)? = nil
+    ) throws -> [ObjectPackFormat.Entry] {
         if let packID, CanonicalHashing.sha256Hex(payload) != packID {
             throw ObjectPackError.badMagic
         }
@@ -38,17 +42,27 @@ public enum ObjectPackValidator {
             guard seen.insert(entry.objectID).inserted else {
                 throw ObjectPackError.duplicateObject(entry.objectID)
             }
-            guard entry.offset >= ObjectPackFormat.headerSize,
+            let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+            guard !overflow,
+                  entry.offset >= ObjectPackFormat.headerSize,
                   entry.length > 0,
-                  entry.offset + entry.length <= payload.count else {
+                  end <= payload.count else {
                 throw ObjectPackError.invalidRange(objectID: entry.objectID)
             }
-            ranges.append((entry.offset, entry.offset + entry.length))
+            ranges.append((entry.offset, end))
         }
         ranges.sort { $0.0 < $1.0 }
         for index in 1..<max(1, ranges.count) where ranges.count > 1 {
             if ranges[index].0 < ranges[index - 1].1 {
                 throw ObjectPackError.invalidRange(objectID: "overlap")
+            }
+        }
+        if let objectValidator {
+            for entry in entries {
+                let encoded = payload.subdata(in: entry.offset..<(entry.offset + entry.length))
+                guard objectValidator(encoded, entry.objectID) else {
+                    throw ObjectPackError.objectNotFound(entry.objectID)
+                }
             }
         }
         return entries

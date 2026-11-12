@@ -138,3 +138,20 @@ Packages/CodeTimeKit/.build/out/Products/Release/V3Acceptance \
 `ICLOUD_PRECHECK_READY` 后才按 `Docs/releases/ICLOUD_ACCEPTANCE_TEMPLATE.md`
 执行；在完成前发布报告必须保持 `BLOCKED`。当前真实阻塞证据见
 `ICLOUD_ACCEPTANCE_STATUS.md`。
+
+## 14. 第二轮 P0/P1 修复（2026-11-12）
+
+以 `48dc246` 为基线完成以下代码级修复，新增测试 CT-197…CT-229：
+
+- **PackBuffer 批次隔离**：`ObjectLifecycle.swift` 使用不可变 `FlushBatch`；flush 期间的新 append 进入独立 pending；并发 flush 共享同一个 in-flight Task；失败批次保留并重试；`locations` 只在 Pack 上传确认后发布；`finalize()` 等待 pending/in-flight/failed。
+- **ObjectRegistry 状态机**：区分 idle/uploading/ready/failed；`reserve` 不再写入 `storedSize=0` 假记录；等待者共享首个 writer 的成功位置或失败；Pack 成员只有整包确认后才对后续文件可见。
+- **对象生命周期协议**：`CloudObjectState`、`objectState`、`ensureObjectReady` 成为 `CloudObjectSink` requirement；UploadQueue 在锁内执行 state → spool → validate → upload → confirm → cleanup；uploading 对象交给底层等待，不创建第二份密文。
+- **随机 nonce 复用**：同一 Object ID 的已有密文不再按字节比较；等待上传确认后按解密/身份校验复用；损坏对象拒绝覆盖。
+- **分片上传锁**：固定 1024 个 `stripe-XXXX.lock`（稳定 SHA-256 映射），锁文件数量不随对象增长；旧逐对象锁只在独占维护租约下清理。
+- **本地副本租约**：`LocalCopyLeaseManager` 记录 readers/writer/pins；读取使用 lease，最后一个读者释放后才驱逐；写入/上传确认期间排除读者与驱逐；多设备 Store 注入同一 lease/eviction manager。
+- **GC Device Barrier**：持久化 `GCDeviceBarrier`；Prepared ACK 前必须建立 barrier；隐藏 commit 后进入 `awaitsHiddenAcks`，所有必需设备写入 hidden ACK 与 observed barrier 后才删除；旧 Epoch 无 barrier 直接拒绝删除；恢复入口发现 barrier 时拒绝候选快照；删除/清理失败标记 failed 并可重试；完成后才释放 barrier。
+- **Pack/Encoder 安全**：Pack 解析使用 `Int(exactly:)` 和 `addingReportingOverflow`；统一 validator 校验 Pack ID、重复、重叠、边界、密文解密；Encoder 增加最大对象/解压尺寸。
+- **恢复统一读取**：`readVerifiedChunk` 成为预览与恢复共用路径；长度/SHA/AEAD/身份始终校验；目录权限/时间恢复失败计入 `metadataIncompleteCount` 与 `metadataWarnings`，不再静默忽略。
+- **验收证据**：`icloud_acceptance.sh record` 生成逐场景 JSON；`report` 只从证据生成，缺场景/同 Host/哈希不符/恢复未全量校验均拒绝；`preflight` 区分 `LOCAL_ICLOUD_PREFLIGHT_READY` 与 `DUAL_MAC_ACCEPTANCE_READY`；release workflow 同时校验报告与证据目录。
+
+当前测试结果：328 tests / 0 failures / 3 manual skips；真实双 Mac iCloud 验收仍因本机 iCloud 4355 与第二台 Mac 缺失而 **BLOCKED / NOT RUN**。

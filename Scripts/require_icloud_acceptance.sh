@@ -32,9 +32,17 @@ grep -Eq "执行人：[^[:space:]]+" "$REPORT" || fail "缺少执行人"
 grep -Eq "Mac A：.+macOS .+构建 .+" "$REPORT" || fail "缺少 Mac A 设备信息"
 grep -Eq "Mac B：.+macOS .+构建 .+" "$REPORT" || fail "缺少 Mac B 设备信息"
 
-for scenario in "首次上传" "第二台发现" "未下载读取" "上传中断" "恢复" "迁移" "密钥不匹配"; do
+grep -Eq "^- 场景证据目录：.+" "$REPORT" || fail "缺少场景证据目录"
+if [ -n "${ICLOUD_ACCEPTANCE_EVIDENCE_DIR:-}" ]; then
+  python3 "$ROOT/Scripts/check_icloud_evidence.py" \
+    "$ICLOUD_ACCEPTANCE_EVIDENCE_DIR" "$REPORT_SHA" "${GITHUB_SHA:-}" \
+    || fail "场景证据不一致"
+fi
+for scenario in first_backup cross_device_discovery metadata_only_read repeat_backup \
+                interrupted_upload upload_recovery full_restore wrong_key \
+                gc_barrier gc_resume migration; do
   line="$(grep -F "| $scenario |" "$REPORT" || true)"
-  [ -n "$line" ] || fail "缺少场景：$scenario"
+  [ -n "$line" ] || fail "缺少场景证据：$scenario"
   echo "$line" | grep -Eq "\\|[[:space:]]*PASS[[:space:]]*\\|" \
     || fail "场景未明确 PASS：$scenario"
 done

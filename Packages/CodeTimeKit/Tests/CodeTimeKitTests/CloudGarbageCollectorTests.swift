@@ -116,6 +116,9 @@ final class CloudGarbageCollectorTests: XCTestCase {
 
         // After 31 days the expired versions and their exclusive data are gone.
         let later = latestDate.addingTimeInterval(31 * 86_400)
+        let hidden = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(hidden.epochState, .awaitsHiddenAcks)
+        XCTAssertEqual(hidden.deletedSnapshots, 0)
         let swept = try await collector.sweep(policies: [projectID: policy], now: later)
         XCTAssertEqual(swept.deletedSnapshots, 3)
         XCTAssertGreaterThan(swept.deletedObjects, 0)
@@ -282,10 +285,23 @@ extension CloudGarbageCollectorTests {
         XCTAssertEqual(blocked.hiddenSnapshots, 0)
         XCTAssertEqual(cloud.commits.count, 4, "未知设备未确认时不得删除任何版本")
 
-        // The other device confirms; the initiator may then delete its own data.
-        try await cloud.writeEpochAck(GCEpochAck(
-            epochID: try XCTUnwrap(planned.epochID), deviceID: "device-B", acknowledgedAt: later
-        ))
+        // The other device confirms (barrier + prepared ack); it is not enough to
+        // write a bare ack file.
+        let collectorB = CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-B",
+            index: index,
+            gracePeriod: 30 * 86_400,
+            clock: { later }
+        )
+        _ = try await collectorB.acknowledgePendingEpochs(now: later)
+        let hidden = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(hidden.epochState, .awaitsHiddenAcks)
+        XCTAssertEqual(hidden.awaitingDevices, ["device-B"])
+        XCTAssertEqual(cloud.commits.count, 2, "删除前必须等待隐藏确认")
+
+        _ = try await collectorB.acknowledgePendingEpochs(now: later)
         let swept = try await collector.sweep(policies: [projectID: policy], now: later)
         XCTAssertEqual(swept.epochState, .completed)
         XCTAssertEqual(swept.deletedSnapshots, 2)
@@ -340,6 +356,8 @@ extension CloudGarbageCollectorTests {
         _ = try await collector.createTombstones(policies: [projectID: policy])
         cloud.failDeletes = true
         let later = now.addingTimeInterval(31 * 86_400)
+        let hidden = try await collector.sweep(policies: [projectID: policy], now: later)
+        XCTAssertEqual(hidden.epochState, .awaitsHiddenAcks)
         let report = try await collector.sweep(policies: [projectID: policy], now: later)
         XCTAssertEqual(report.epochState, .failed)
         XCTAssertFalse(report.failures.isEmpty)
@@ -374,10 +392,101 @@ extension CloudGarbageCollectorTests {
         try await cloud.writeEpoch(epoch)
 
         let later = now.addingTimeInterval(31 * 86_400)
+        _ = try await collector.acknowledgePendingEpochs(now: later)
         let resumed = try await collector.sweep(policies: [projectID: policy], now: later)
         XCTAssertEqual(resumed.epochState, .completed)
         XCTAssertEqual(resumed.deletedSnapshots, 2)
         XCTAssertEqual(cloud.commits.count, 2)
         XCTAssertTrue(cloud.hiddenCommits[epochID]?.isEmpty ?? true)
     }
+
+    func testGCBarrierCreatedWithPreparedAckAndReleasedOnlyAfterCompletion() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        let policy = RetentionPolicy(keepLatest: 2, keepDaily: 0, keepWeekly: 0, keepMonthly: 0)
+        let now = snapshots.last!.date
+        let collector = makeCollector(cloud, index, at: now)
+        let planned = try await collector.createTombstones(policies: [projectID: policy])
+        let epochID = try XCTUnwrap(planned.epochID)
+        let storedBarrier = try await cloud.deviceBarrier(epochID: epochID, deviceID: "device-A")
+        let barrier = try XCTUnwrap(storedBarrier)
+        XCTAssertEqual(barrier.phase, .prepared)
+        let plannedEpoch = try XCTUnwrap(cloud.epochs[epochID])
+        let expiredIDs = plannedEpoch.candidates.snapshots.map(\.snapshotID)
+        XCTAssertEqual(Set(barrier.candidateSnapshotIDs), Set(expiredIDs))
+        let blockedBefore = try await cloud.blockedSnapshotIDs()
+        XCTAssertTrue(blockedBefore.contains(try XCTUnwrap(expiredIDs.first)))
+
+        let later = now.addingTimeInterval(31 * 86_400)
+        _ = try await collector.sweep(policies: [projectID: policy], now: later)
+        _ = try await collector.sweep(policies: [projectID: policy], now: later)
+        let releasedBarrier = try await cloud.deviceBarrier(epochID: epochID, deviceID: "device-A")
+        XCTAssertNil(releasedBarrier)
+        let blockedAfter = try await cloud.blockedSnapshotIDs()
+        XCTAssertTrue(blockedAfter.isEmpty)
+    }
+
+    func testGCLegacyEpochWithoutBarrierCannotDelete() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        _ = try await makeSnapshots(count: 3, cloud: cloud, index: index)
+        let legacy = GCEpoch(
+            id: "legacy-epoch",
+            initiatorDeviceID: "device-A",
+            createdAt: Date(timeIntervalSince1970: 0),
+            graceUntil: Date(timeIntervalSince1970: 0),
+            state: .gracePeriod,
+            candidates: GCCandidateSet(snapshots: [GCSnapshotCandidate(projectID: projectID, snapshotID: "snapshot-0")]),
+            retainedSnapshots: [],
+            planDigest: "",
+            requiredDeviceIDs: ["device-A"],
+            acknowledgedBy: ["device-A": Date(timeIntervalSince1970: 0)],
+            protocolVersion: 1
+        )
+        try await cloud.writeEpoch(legacy)
+        let collector = makeCollector(cloud, index, at: Date())
+        let report = try await collector.sweep(
+            policies: [projectID: RetentionPolicy(keepLatest: 2)],
+            now: Date(timeIntervalSince1970: 100 * 86_400)
+        )
+        XCTAssertEqual(report.epochState, .failed)
+        XCTAssertEqual(report.deletedSnapshots, 0)
+        XCTAssertEqual(cloud.commits.count, 3)
+        let legacyBarriers = try await cloud.deviceBarriers(epochID: "legacy-epoch")
+        XCTAssertEqual(legacyBarriers.count, 0)
+    }
+
+    func testGCAckRefusedWhileLocalWorkIsActive() async throws {
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let snapshots = try await makeSnapshots(count: 4, cloud: cloud, index: index)
+        try await cloud.writeDeviceRecord(GCDeviceRecord(
+            deviceID: "device-B", name: "Mac B", createdAt: snapshots.last!.date, lastSeenAt: snapshots.last!.date
+        ))
+        let initiator = makeCollector(cloud, index, at: snapshots.last!.date)
+        let planned = try await initiator.createTombstones(
+            policies: [projectID: RetentionPolicy(keepLatest: 2)]
+        )
+        let busy = CloudGarbageCollector(
+            store: cloud,
+            masterKey: masterKey,
+            deviceID: "device-B",
+            index: index,
+            isSafeToCollect: { false },
+            clock: { snapshots.last!.date }
+        )
+        do {
+            _ = try await busy.acknowledgePendingEpochs(now: snapshots.last!.date)
+            XCTFail("本机有活动任务时不得写 GC ACK")
+        } catch {
+            // expected
+        }
+        let acks = try await cloud.epochAcks(epochID: try XCTUnwrap(planned.epochID))
+        XCTAssertNil(acks["device-B"])
+        let epochID = try XCTUnwrap(planned.epochID)
+        let busyBarrier = try await cloud.deviceBarrier(epochID: epochID, deviceID: "device-B")
+        XCTAssertNil(busyBarrier)
+    }
+
 }

@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 @testable import CloudMirrorStore
 @testable import SharedModels
+@testable import BackupEngine
 
 /// CT-151: Cloud Object Store v3 — publish order, idempotency and the rule that
 /// only a committed snapshot is visible.
@@ -186,5 +187,42 @@ final class CloudEngineV3StoreTests: XCTestCase {
         XCTAssertTrue(first)
         XCTAssertFalse(second)
         XCTAssertEqual(read, payload)
+    }
+
+    func testCT215_SameObjectIDWithDifferentRandomNonceIsReusedByEncryptedIdentity() async throws {
+        let encoder = ObjectEncoder(masterKey: Data("store-test-key".utf8))
+        let plaintext = Data("same plaintext, two nonces".utf8)
+        let objectID = encoder.objectID(for: plaintext)
+        let first = try encoder.encode(chunk: plaintext).payload
+        let second = try encoder.encode(chunk: plaintext).payload
+        XCTAssertNotEqual(first, second, "随机 nonce 必须让同一明文的密文不同")
+
+        let firstUpload = try await store.putObject(first, objectID: objectID)
+        XCTAssertTrue(firstUpload)
+        let secondUpload = try await store.putObject(second, objectID: objectID)
+        XCTAssertFalse(secondUpload, "密文不同但 Object ID 相同时必须复用")
+        let read = try await store.readObject(objectID)
+        XCTAssertEqual(read, first, "不得用第二个随机密文覆盖已有对象")
+
+        let validating = CloudObjectStoreV3(
+            root: root.appendingPathComponent("validating", isDirectory: true),
+            deviceID: deviceID,
+            masterKey: Data("store-test-key".utf8),
+            objectValidator: { payload, id in
+                (try? encoder.decode(payload, objectID: id)) != nil
+            }
+        )
+        try await validating.prepare(deviceName: "Mac A")
+        let validatingUpload = try await validating.putObject(first, objectID: objectID)
+        XCTAssertTrue(validatingUpload)
+        let url = root.appendingPathComponent("validating/devices/\(deviceID)/objects/\(objectID.prefix(2))/\(objectID)")
+        try Data("corrupted".utf8).write(to: url)
+        do {
+            _ = try await validating.putObject(second, objectID: objectID)
+            XCTFail("损坏的已有对象必须被拒绝，不能静默覆盖")
+        } catch let error as CloudObjectStoreV3Error {
+            XCTAssertEqual(error, .objectCorrupted(objectID))
+        }
+        XCTAssertEqual(try Data(contentsOf: url), Data("corrupted".utf8), "修复前不得覆盖损坏字节")
     }
 }

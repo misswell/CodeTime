@@ -275,6 +275,15 @@ extension SQLiteStore {
         }
     }
 
+    public func uploadTaskRecord(_ taskID: String) throws -> PendingUploadV3? {
+        let rows = try query(
+            "SELECT payload FROM v3_pending_uploads WHERE task_id = ?",
+            [.text(taskID)]
+        )
+        guard case .blob(let data)? = rows.first?.first else { return nil }
+        return try decode(PendingUploadV3.self, from: data)
+    }
+
     public func uploadTasks(state: UploadTaskState? = nil, limit: Int = 500) throws -> [PendingUploadV3] {
         let sql: String
         let params: [SQLValue]
@@ -639,6 +648,10 @@ extension SQLiteStore: CloudSnapshotIndex {
         limit: Int = 500
     ) async throws -> [PendingUploadV3] {
         try uploadTasks(state: state, limit: limit)
+    }
+
+    public func uploadTask(_ taskID: String) async throws -> PendingUploadV3? {
+        try uploadTaskRecord(taskID)
     }
 
     public func updateUploadState(

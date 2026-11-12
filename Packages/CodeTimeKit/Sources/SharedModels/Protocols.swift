@@ -132,6 +132,15 @@ public protocol CloudObjectSink: Sendable {
     @discardableResult
     func putPack(_ payload: Data, packID: String) async throws -> Bool
     func hasPack(_ packID: String) async throws -> Bool
+    /// Explicit lifecycle. These are requirements (not only extension helpers) so
+    /// a store's authoritative implementation is used through `any CloudObjectSink`.
+    func objectState(_ objectID: String) async throws -> CloudObjectState
+    func ensureObjectReady(
+        _ objectID: String,
+        payload: Data,
+        storedSize: Int
+    ) async throws -> StoredObjectLocation
+    func packState(_ packID: String) async throws -> CloudObjectState
     /// Returns the SHA-256 of the stored payload; the commit marker binds to it.
     func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String
     /// Must only succeed when the manifest exists and still matches its hash.
@@ -162,6 +171,7 @@ public protocol CloudSnapshotIndex: Sendable {
     /// Durable upload journal: everything still owed to the cloud, including
     /// tasks that failed or were interrupted mid-upload.
     func pendingUploads(state: UploadTaskState?, limit: Int) async throws -> [PendingUploadV3]
+    func uploadTask(_ taskID: String) async throws -> PendingUploadV3?
     func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws
     func pendingUploadBytes() async throws -> Int64
     /// Snapshots that are still publishing. GC must abort while any exists.
@@ -258,6 +268,16 @@ public protocol CloudGarbageCollectible: CloudObjectSource {
     func epochsStrict() async throws -> [GCEpoch]
     func writeEpochAck(_ ack: GCEpochAck) async throws
     func epochAcks(epochID: String) async throws -> [String: Date]
+    func writeHiddenEpochAck(epochID: String, deviceID: String, at: Date) async throws
+    func hiddenEpochAcks(epochID: String) async throws -> [String: Date]
+    /// Durable per-device restore barrier. A device with an active barrier must
+    /// refuse to restore any of the candidate snapshots.
+    func writeDeviceBarrier(_ barrier: GCDeviceBarrier) async throws
+    func deviceBarrier(epochID: String, deviceID: String) async throws -> GCDeviceBarrier?
+    func deviceBarriers(epochID: String) async throws -> [GCDeviceBarrier]
+    func deleteDeviceBarrier(epochID: String, deviceID: String) async throws
+    /// All snapshot IDs currently blocked by a prepared/observed barrier.
+    func blockedSnapshotIDs() async throws -> Set<String>
 
     /// Moves a commit marker out of the readable namespace without destroying it.
     func hideCommit(projectID: UUID, snapshotID: String, epochID: String) async throws

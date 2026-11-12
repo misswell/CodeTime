@@ -37,6 +37,9 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
     public var retryMaxDelay: TimeInterval
     /// ± fraction of random jitter, so two Macs do not retry in lockstep.
     public var retryJitterFraction: Double
+    /// Fixed lock stripes. Per-object lock files grow without bound on a large
+    /// backup; a stable hash maps every object into this fixed set.
+    public var lockStripeCount: Int
 
     public init(
         spoolRoot: URL,
@@ -46,7 +49,8 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
         leaseTimeout: TimeInterval = 120,
         retryBaseDelay: TimeInterval = 2,
         retryMaxDelay: TimeInterval = 300,
-        retryJitterFraction: Double = 0.2
+        retryJitterFraction: Double = 0.2,
+        lockStripeCount: Int = 1024
     ) {
         self.spoolRoot = spoolRoot
         self.softLimitBytes = max(0, softLimitBytes)
@@ -56,6 +60,7 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
         self.retryBaseDelay = max(0, retryBaseDelay)
         self.retryMaxDelay = max(0, retryMaxDelay)
         self.retryJitterFraction = min(1, max(0, retryJitterFraction))
+        self.lockStripeCount = min(65_536, max(1, lockStripeCount))
     }
 }
 
@@ -66,6 +71,9 @@ public struct SpoolStatus: Sendable, Equatable {
     public var softLimitBytes: Int64
     public var oldestPendingAt: Date?
     public var oversized: Bool
+    /// Fixed-size lock stripe directory accounting.
+    public var lockFileCount: Int
+    public var lockBytes: Int64
 
     public init(
         pendingTasks: Int = 0,
@@ -73,7 +81,9 @@ public struct SpoolStatus: Sendable, Equatable {
         spoolFileBytes: Int64 = 0,
         softLimitBytes: Int64 = 0,
         oldestPendingAt: Date? = nil,
-        oversized: Bool = false
+        oversized: Bool = false,
+        lockFileCount: Int = 0,
+        lockBytes: Int64 = 0
     ) {
         self.pendingTasks = pendingTasks
         self.pendingBytes = pendingBytes
@@ -81,6 +91,8 @@ public struct SpoolStatus: Sendable, Equatable {
         self.softLimitBytes = softLimitBytes
         self.oldestPendingAt = oldestPendingAt
         self.oversized = oversized
+        self.lockFileCount = lockFileCount
+        self.lockBytes = lockBytes
     }
 }
 
@@ -171,41 +183,145 @@ public actor UploadQueue: CloudObjectSink {
     // MARK: - CloudObjectSink
 
     public func hasObject(_ objectID: String) async throws -> Bool {
-        try await base.hasObject(objectID)
+        switch try await objectState(objectID) {
+        case .uploaded, .verified, .packed:
+            return true
+        case .absent, .staged, .uploading, .failed, .inaccessible:
+            return false
+        }
     }
 
     public func hasPack(_ packID: String) async throws -> Bool {
-        try await base.hasPack(packID)
+        // A pack has no random nonce, but it still must be upload-confirmed. The
+        // base store owns the provider-specific check.
+        try await base.packState(packID).isDurablyPresent
     }
 
-    @discardableResult
-    public func putObject(_ payload: Data, objectID: String) async throws -> Bool {
-        if try await base.hasObject(objectID) { return false }
+    /// Durable state, with the journal taking priority over a bare file name.
+    public func objectState(_ objectID: String) async throws -> CloudObjectState {
+        let taskID = Self.taskID(kind: Self.objectKind, id: objectID)
+        if let task = try? await index.uploadTask(taskID) {
+            switch task.state {
+            case .pending, .uploading:
+                return .staged
+            case .failed:
+                return .failed("上传任务失败：\(task.taskID)")
+            case .uploadedPendingCleanup, .uploaded, .completed:
+                return .uploaded(storedSize: Int(task.fileSize))
+            }
+        }
+        let url = spoolURL(kind: Self.objectKind, id: objectID)
+        if fileManager.fileExists(atPath: url.path) {
+            return .staged
+        }
+        do {
+            return try await base.objectState(objectID)
+        } catch {
+            return .inaccessible(error.localizedDescription)
+        }
+    }
+
+    /// The single write transaction for an object: lock → state → spool →
+    /// validate → upload → confirm → cleanup. No caller may publish a reference
+    /// until this returns.
+    public func ensureObjectReady(
+        _ objectID: String,
+        payload: Data,
+        storedSize: Int
+    ) async throws -> StoredObjectLocation {
         let taskID = Self.taskID(kind: Self.objectKind, id: objectID)
         let lease = try await acquireUploadLease(
             kind: Self.objectKind, id: objectID, timeout: configuration.leaseTimeout
         )
         defer { lease.release() }
-        // Another process may have finished while we waited for the lease.
-        if try await base.hasObject(objectID) { return false }
+
+        let state = try await objectState(objectID)
+        switch state {
+        case .uploaded(let size), .verified(let size):
+            return StoredObjectLocation(storedSize: size > 0 ? size : storedSize)
+        case .packed(let packID, let offset, let size):
+            return StoredObjectLocation(storedSize: size, packID: packID, packOffset: offset)
+        case .inaccessible(let detail):
+            throw CloudObjectLifecycleError.stateUnavailable(objectID: objectID, detail: detail)
+        case .failed(let detail):
+            // An explicit retry is allowed, but only after the backoff and retry
+            // budget allow it. The engine will otherwise fail the snapshot.
+            if let task = try? await index.uploadTask(taskID),
+               task.retryCount >= configuration.maxRetries {
+                throw CloudObjectLifecycleError.writerFailed(objectID: objectID, detail: detail)
+            }
+            if let task = try? await index.uploadTask(taskID),
+               let next = task.nextAttemptAt, next > Date() {
+                throw CloudObjectLifecycleError.uploadNotConfirmed(
+                    objectID: objectID,
+                    detail: "退避中，稍后重试"
+                )
+            }
+        case .uploading:
+            // A different writer owns this ID. Wait for its confirmed location
+            // (or its error); never create a second ciphertext/spool entry.
+            return try await base.ensureObjectReady(
+                objectID,
+                payload: payload,
+                storedSize: storedSize
+            )
+        case .absent, .staged:
+            break
+        }
+
         try await stage(taskID: taskID, kind: Self.objectKind, id: objectID, payload: payload)
-        return try await upload(
+        let uploaded = try await upload(
             taskID: taskID,
             kind: Self.objectKind,
             id: objectID,
             payload: payload
         )
+        _ = uploaded
+        return StoredObjectLocation(storedSize: payload.count)
+    }
+
+    @discardableResult
+    public func putObject(_ payload: Data, objectID: String) async throws -> Bool {
+        let before = try? await objectState(objectID)
+        let existed: Bool
+        switch before {
+        case .uploaded, .verified, .packed:
+            existed = true
+        default:
+            existed = false
+        }
+        _ = try await ensureObjectReady(objectID, payload: payload, storedSize: payload.count)
+        return !existed
     }
 
     @discardableResult
     public func putPack(_ payload: Data, packID: String) async throws -> Bool {
-        if try await base.hasPack(packID) { return false }
         let taskID = Self.taskID(kind: Self.packKind, id: packID)
+        // Lock first, then inspect: a check outside the lock can race another
+        // process that is writing the same pack.
         let lease = try await acquireUploadLease(
             kind: Self.packKind, id: packID, timeout: configuration.leaseTimeout
         )
         defer { lease.release() }
+        if let task = try? await index.uploadTask(taskID) {
+            switch task.state {
+            case .uploadedPendingCleanup, .uploaded, .completed:
+                return false
+            case .pending, .uploading, .failed:
+                break
+            }
+        }
         if try await base.hasPack(packID) { return false }
+        // Structural validation is unconditional; the injected validator adds
+        // object-level AEAD/identity checks (see CodeTimeService).
+        do {
+            _ = try ObjectPackValidator.validate(payload: payload, packID: packID)
+        } catch {
+            throw UploadQueueError.spoolReadFailed("Pack 结构校验失败：\(packID) \(error)")
+        }
+        if let validate, !validate(payload, packID, true) {
+            throw UploadQueueError.spoolReadFailed("Pack 内容校验失败：\(packID)")
+        }
         try await stage(taskID: taskID, kind: Self.packKind, id: packID, payload: payload)
         return try await upload(
             taskID: taskID,
@@ -531,13 +647,16 @@ public actor UploadQueue: CloudObjectSink {
         let tasks = (try? await index.pendingUploads(state: nil, limit: 100_000)) ?? []
         let fileBytes = (try? currentSpoolBytes()) ?? 0
         let dbBytes = tasks.reduce(Int64(0)) { $0 + $1.fileSize }
+        let locks = lockStats()
         return SpoolStatus(
             pendingTasks: tasks.count,
             pendingBytes: max(dbBytes, fileBytes),
             spoolFileBytes: fileBytes,
             softLimitBytes: configuration.softLimitBytes,
             oldestPendingAt: tasks.map(\.createdAt).min(),
-            oversized: max(dbBytes, fileBytes) > configuration.softLimitBytes
+            oversized: max(dbBytes, fileBytes) > configuration.softLimitBytes,
+            lockFileCount: locks.count,
+            lockBytes: locks.bytes
         )
     }
 
@@ -599,16 +718,19 @@ final class UploadLease: @unchecked Sendable {
 }
 
 extension UploadQueue {
-    /// Blocks until the object's writer slot is free. A timeout is an explicit
-    /// error; callers must not proceed and create a second ciphertext for one ID.
+    /// Fixed-size striped flock. A stable SHA-256 mapping (never Swift's
+    /// randomized Hasher) ensures every process chooses the same stripe for an
+    /// object without creating one file per object.
     func acquireUploadLease(kind: String, id: String, timeout: TimeInterval = 120) async throws -> UploadLease {
-        // Lock files live beside (not inside) the spool so the spool directory
-        // only contains encrypted payloads.
-        let directory = configuration.spoolRoot.deletingLastPathComponent()
-            .appendingPathComponent("upload-locks", isDirectory: true)
+        let directory = lockDirectory
         do { try fileManager.createDirectory(at: directory, withIntermediateDirectories: true) }
         catch { throw UploadQueueError.spoolWriteFailed("无法创建上传锁目录：\(error)") }
-        let path = directory.appendingPathComponent("\(kind)-\(id).lock").path
+
+        let digest = CanonicalHashing.sha256Hex(Data("\(kind):\(id)".utf8))
+        let prefix = digest.prefix(8)
+        let value = Int(prefix, radix: 16) ?? 0
+        let stripe = value % configuration.lockStripeCount
+        let path = directory.appendingPathComponent(String(format: "stripe-%04d.lock", stripe)).path
         let descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             throw UploadQueueError.spoolWriteFailed("无法打开上传锁：\(path)")
@@ -624,5 +746,41 @@ extension UploadQueue {
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+    }
+
+    var lockDirectory: URL {
+        configuration.spoolRoot.deletingLastPathComponent()
+            .appendingPathComponent("upload-locks", isDirectory: true)
+    }
+
+    /// Lock directory accounting, kept separate from spool payload bytes.
+    func lockStats() -> (count: Int, bytes: Int64) {
+        guard let enumerator = fileManager.enumerator(
+            at: lockDirectory,
+            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]
+        ) else { return (0, 0) }
+        var count = 0
+        var bytes: Int64 = 0
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            count += 1
+            bytes += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+        }
+        return (count, bytes)
+    }
+
+    /// Only call while holding the exclusive maintenance lease. Removes legacy
+    /// per-object lock files (never stripe files).
+    @discardableResult
+    public func removeLegacyPerObjectLocks() throws -> Int {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: lockDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return 0 }
+        var removed = 0
+        for url in entries where !url.lastPathComponent.hasPrefix("stripe-") {
+            do { try fileManager.removeItem(at: url); removed += 1 } catch {}
+        }
+        return removed
     }
 }

@@ -21,6 +21,8 @@ final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendab
     private(set) var deviceRecords: [String: GCDeviceRecord] = [:]
     private(set) var epochs: [String: GCEpoch] = [:]
     private(set) var epochAcksByEpoch: [String: [String: Date]] = [:]
+    private(set) var hiddenAcksByEpoch: [String: [String: Date]] = [:]
+    private(set) var barriers: [String: GCDeviceBarrier] = [:]
     private(set) var hiddenCommits: [String: [String: SnapshotCommit]] = [:]
     /// Test hook: make every GC enumeration throw.
     var failEnumeration = false
@@ -301,6 +303,48 @@ extension InMemoryCloud: CloudGarbageCollectible {
         return epochAcksByEpoch[epochID] ?? [:]
     }
 
+    func writeHiddenEpochAck(epochID: String, deviceID: String, at date: Date) async throws {
+        lock.lock(); defer { lock.unlock() }
+        var current = hiddenAcksByEpoch[epochID] ?? [:]
+        if current[deviceID] == nil { current[deviceID] = date }
+        hiddenAcksByEpoch[epochID] = current
+    }
+
+    func hiddenEpochAcks(epochID: String) async throws -> [String: Date] {
+        lock.lock(); defer { lock.unlock() }
+        if failEnumeration { throw Failure.objectMissing("hidden-acks") }
+        return hiddenAcksByEpoch[epochID] ?? [:]
+    }
+
+    func writeDeviceBarrier(_ barrier: GCDeviceBarrier) async throws {
+        lock.lock(); defer { lock.unlock() }
+        barriers["\(barrier.epochID):\(barrier.deviceID)"] = barrier
+    }
+
+    func deviceBarrier(epochID: String, deviceID: String) async throws -> GCDeviceBarrier? {
+        lock.lock(); defer { lock.unlock() }
+        return barriers["\(epochID):\(deviceID)"]
+    }
+
+    func deviceBarriers(epochID: String) async throws -> [GCDeviceBarrier] {
+        lock.lock(); defer { lock.unlock() }
+        return barriers.values.filter { $0.epochID == epochID }
+    }
+
+    func deleteDeviceBarrier(epochID: String, deviceID: String) async throws {
+        lock.lock(); defer { lock.unlock() }
+        barriers.removeValue(forKey: "\(epochID):\(deviceID)")
+    }
+
+    func blockedSnapshotIDs() async throws -> Set<String> {
+        lock.lock(); defer { lock.unlock() }
+        var result = Set<String>()
+        for barrier in barriers.values where barrier.phase != .released {
+            result.formUnion(barrier.candidateSnapshotIDs)
+        }
+        return result
+    }
+
     func hideCommit(projectID: UUID, snapshotID: String, epochID: String) async throws {
         lock.lock(); defer { lock.unlock() }
         if let commit = commits.removeValue(forKey: snapshotID) {
@@ -418,6 +462,11 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
                 .sorted { $0.createdAt < $1.createdAt }
                 .prefix(limit)
         )
+    }
+
+    func uploadTask(_ taskID: String) async throws -> PendingUploadV3? {
+        lock.lock(); defer { lock.unlock() }
+        return uploads.first { $0.taskID == taskID }
     }
 
     func updateUploadState(_ taskID: String, state: UploadTaskState, bumpRetry: Bool) async throws {

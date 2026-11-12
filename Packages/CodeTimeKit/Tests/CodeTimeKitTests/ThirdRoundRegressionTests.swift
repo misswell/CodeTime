@@ -89,12 +89,18 @@ final class ThirdRoundRegressionTests: XCTestCase {
         lines.append("- Mac A：MacBook Pro / macOS 15.0 / 构建 100")
         lines.append("- Mac B：Mac mini / macOS 15.0 / 构建 100")
         lines.append("")
-        lines.append("| 场景 | 操作 | 结果 |")
-        lines.append("|---|---|---|")
-        let operations = ["首次上传", "第二台发现", "未下载读取", "上传中断", "恢复", "迁移", "密钥不匹配"]
-        for (index, operation) in operations.enumerated() {
-            lines.append("| \(operation) | 执行场景 \(index + 1) | \(results[index]) |")
+        lines.append("| 场景 | 设备 | Host | 断言 | 结果 |")
+        lines.append("|---|---|---|---|---|")
+        let scenarios = [
+            "first_backup", "cross_device_discovery", "metadata_only_read",
+            "repeat_backup", "interrupted_upload", "upload_recovery",
+            "full_restore", "wrong_key", "gc_barrier", "gc_resume", "migration",
+        ]
+        for (index, scenario) in scenarios.enumerated() {
+            let result = index < results.count ? results[index] : "PASS"
+            lines.append("| \(scenario) | device | host | fixture | \(result) |")
         }
+        lines.append("- 场景证据目录：/tmp/icloud-evidence")
         lines.append("")
         lines.append("- 结果：\(conclusion)")
         lines.append("- 未通过项与原因：\(failures)")

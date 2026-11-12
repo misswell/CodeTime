@@ -12,6 +12,7 @@
 #
 # Exit codes: 0 = READY, 3 = BLOCKED, 2 = usage/environment error.
 set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 PEER=""
 while [ $# -gt 0 ]; do
@@ -55,14 +56,27 @@ else
   note "asc_api=unknown (asc not installed)"
 fi
 
-# 3. Real iCloud Drive upload state, independent of the app and its signing.
-CLOUD_DOCS="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
-if [ ! -d "$CLOUD_DOCS" ]; then
-  block "iCloud Drive directory not found: $CLOUD_DOCS"
+# 3. Real iCloud upload. Prefer the signed app: an unsigned CLI probe cannot
+# exercise the embedded iCloud entitlement and would under-report capability.
+APP_BIN="$ROOT/.build/DerivedData/Build/Products/BetaICloud/CodeTime.app/Contents/MacOS/CodeTime"
+if [ -x "$APP_BIN" ]; then
+  set +e
+  SELFTEST_OUT="$("$APP_BIN" --icloud-selftest 2>&1)"
+  SELFTEST_STATUS=$?
+  set -e
+  echo "$SELFTEST_OUT"
+  if [ "$SELFTEST_STATUS" -ne 0 ]; then
+    block "signed app iCloud self-test failed (exit $SELFTEST_STATUS)"
+  fi
 else
-  PROBE="$(mktemp /tmp/codetime-icloud-probe-XXXXXX.swift)"
-  trap 'rm -f "$PROBE"' EXIT
-  cat >"$PROBE" <<'SWIFT'
+  echo "signed_app=missing (falling back to unsigned iCloud Drive probe)"
+  CLOUD_DOCS="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
+  if [ ! -d "$CLOUD_DOCS" ]; then
+    block "iCloud Drive directory not found: $CLOUD_DOCS"
+  else
+    PROBE="$(mktemp /tmp/codetime-icloud-probe-XXXXXX.swift)"
+    trap 'rm -f "$PROBE"' EXIT
+    cat >"$PROBE" <<'SWIFT'
 import Foundation
 let folder = NSHomeDirectory() + "/Library/Mobile Documents/com~apple~CloudDocs"
 let url = URL(fileURLWithPath: folder).appendingPathComponent("codetime-preflight-\(UUID().uuidString).txt")
@@ -103,13 +117,14 @@ print("upload_timeout=true")
 if let lastError { print("last_error=\(lastError.localizedDescription)") }
 exit(3)
 SWIFT
-  set +e
-  PROBE_OUT="$(swift "$PROBE" 2>&1)"
-  PROBE_STATUS=$?
-  set -e
-  echo "$PROBE_OUT"
-  if [ "$PROBE_STATUS" -ne 0 ]; then
-    block "iCloud Drive upload was not confirmed (exit $PROBE_STATUS)"
+    set +e
+    PROBE_OUT="$(swift "$PROBE" 2>&1)"
+    PROBE_STATUS=$?
+    set -e
+    echo "$PROBE_OUT"
+    if [ "$PROBE_STATUS" -ne 0 ]; then
+      block "iCloud Drive upload was not confirmed (exit $PROBE_STATUS)"
+    fi
   fi
 fi
 
@@ -117,6 +132,7 @@ fi
 # the only accepted proof that a real second Mac participated.
 if [ -n "$PEER" ]; then
   if [ ! -f "$PEER" ]; then
+    PEER_BLOCKED=1
     block "missing second-Mac evidence: $PEER"
   else
     if ! python3 - "$PEER" "$(hostname)" <<'PY'
@@ -138,6 +154,7 @@ print(f"peer_host={peer}")
 print("peer_verified=true")
 PY
     then
+      PEER_BLOCKED=1
       BLOCKED=1
     fi
   fi
@@ -146,7 +163,17 @@ else
 fi
 
 if [ "$BLOCKED" -ne 0 ]; then
-  echo "ICLOUD_PRECHECK_BLOCKED"
+  if [ "${PEER_BLOCKED:-0}" -ne 0 ]; then
+    echo "DUAL_MAC_ACCEPTANCE_BLOCKED"
+  else
+    echo "LOCAL_ICLOUD_PREFLIGHT_BLOCKED"
+    echo "ICLOUD_PRECHECK_BLOCKED"
+  fi
   exit 3
 fi
-echo "ICLOUD_PRECHECK_READY"
+if [ -n "$PEER" ]; then
+  echo "DUAL_MAC_ACCEPTANCE_READY"
+else
+  echo "LOCAL_ICLOUD_PREFLIGHT_READY"
+  echo "（本机预检通过不等于双 Mac 验收通过；需要 --peer-evidence）"
+fi

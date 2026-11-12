@@ -1958,5 +1958,335 @@
     "manualAcceptance": false,
     "acceptanceReason": "",
     "invariant": "保留计划不得删除受保护版本"
+  },
+  {
+    "id": "CT-197",
+    "test": "testCT197_MissingScenarioEvidenceBlocksReport",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ICloudAcceptanceEvidenceTests.swift",
+    "purpose": "双 Mac 验收缺少场景证据必须拒绝生成报告",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "报告生成器不得为未收到的场景写 PASS"
+  },
+  {
+    "id": "CT-198",
+    "test": "testCT198_SameHostCannotPassDualMacAcceptance",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ICloudAcceptanceEvidenceTests.swift",
+    "purpose": "同一 Host 不能冒充双 Mac 验收",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "A/B 必须不同 host"
+  },
+  {
+    "id": "CT-199",
+    "test": "testCT199_CandidateHashMismatchAndIncompleteRestoreBlock",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ICloudAcceptanceEvidenceTests.swift",
+    "purpose": "候选哈希不一致或恢复文件未全部校验必须阻塞",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "证据必须绑定候选 SHA 与完整文件校验"
+  },
+  {
+    "id": "CT-200",
+    "test": "testCT200_RecordProducesStructuredEvidenceAndReportIsNotHardcoded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ICloudAcceptanceEvidenceTests.swift",
+    "purpose": "结构化证据记录与拒绝无证据报告",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "报告仅由真实证据生成"
+  },
+  {
+    "id": "CT-201",
+    "test": "testCT201_AppendDuringFlushDoesNotLoseChunks",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "flush 挂起期间追加的 Chunk 不得丢失",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "不可变批次隔离；新 pending 不被清空"
+  },
+  {
+    "id": "CT-202",
+    "test": "testCT202_ConcurrentFlushSharesInFlightBatch",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "并发 flush 共享一个 in-flight 批次",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "同一批次只上传一次 Pack"
+  },
+  {
+    "id": "CT-203",
+    "test": "testCT203_FailedBatchIsPreservedAndRetried",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "失败的 Pack 批次保留并可重试",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "失败批次不得产生 locations，重试成功"
+  },
+  {
+    "id": "CT-204",
+    "test": "testCT204_FinalizeWaitsForAllPendingBatches",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "finalize 等待 pending/in-flight/failed 全部完成",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "所有对象都有确认位置"
+  },
+  {
+    "id": "CT-205",
+    "test": "testCT205_DuplicateObjectIDIsPackedOnce",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "同一 Object ID 只进入 Pack 一次",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "并发暂存去重"
+  },
+  {
+    "id": "CT-206",
+    "test": "testCT206_PackLocationOnlyPublishedAfterConfirmation",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "上传确认前不得暴露 PackLocation",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "locations 只含已确认 Pack"
+  },
+  {
+    "id": "CT-207",
+    "test": "testCT207_PendingObjectIsNotReportedAsUploaded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "上传中的对象不得报告为已上传",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "ObjectRegistry 状态机"
+  },
+  {
+    "id": "CT-208",
+    "test": "testCT208_ConcurrentDuplicateChunkWaitsForUpload",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "并发重复 Chunk 等待首个上传结果",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "等待者得到同一位置"
+  },
+  {
+    "id": "CT-209",
+    "test": "testCT209_UploadFailurePropagatesToAllWaiters",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "上传失败传播给所有等待者",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "失败不得假成功"
+  },
+  {
+    "id": "CT-210",
+    "test": "testCT210_ZeroStoredSizeKnownRecordIsNotReusableAndPackedLocationWins",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/PackBufferRegressionTests.swift",
+    "purpose": "零大小索引占位不得复用；Pack 位置优先",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "无假成功占位"
+  },
+  {
+    "id": "CT-211",
+    "test": "testCT211_UploadingObjectIsWaitedForNotOverwritten",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "uploading 状态交由底层等待，不写第二份密文",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "统一上传事务"
+  },
+  {
+    "id": "CT-212",
+    "test": "testCT212_UploadingIsNotReportedAsReusable",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "uploading 不得被 hasObject 当作可复用",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "生命周期状态"
+  },
+  {
+    "id": "CT-213",
+    "test": "testCT213_UploadLockFilesRemainBounded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "上传锁文件固定为分片数量",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "锁文件不随对象增长"
+  },
+  {
+    "id": "CT-214",
+    "test": "testCT214_RetryExhaustionKeepsSpoolAndJournal",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "重试耗尽仍保留 spool 与 journal",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "不删除唯一加密副本"
+  },
+  {
+    "id": "CT-215",
+    "test": "testCT215_SameObjectIDWithDifferentRandomNonceIsReusedByEncryptedIdentity",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
+    "purpose": "随机 nonce 导致密文不同但 Object ID 相同仍可复用；损坏对象不覆盖",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "按身份与解密校验复用"
+  },
+  {
+    "id": "CT-216",
+    "test": "testCT216_ReadersAndPinsPreventEviction",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "读者与 pin 阻止本地副本驱逐",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "读取期间不得驱逐"
+  },
+  {
+    "id": "CT-217",
+    "test": "testCT217_ConcurrentReadersKeepCopyUntilLastRelease",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "最后一个读者释放后才可驱逐",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "引用计数"
+  },
+  {
+    "id": "CT-218",
+    "test": "testCT218_WriterExcludesReadersAndEviction",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "写租约排除读者与驱逐",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "上传确认期间不驱逐"
+  },
+  {
+    "id": "CT-219",
+    "test": "testCT219_CoordinatedReadEvictsOnlyAfterLastReader",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/LocalCopyLeaseManagerTests.swift",
+    "purpose": "协调读取结束后安全驱逐",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "读取租约与驱逐联动"
+  },
+  {
+    "id": "CT-220",
+    "test": "testCT220_PackIDMismatchRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "Pack ID 哈希不匹配拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "内容寻址校验"
+  },
+  {
+    "id": "CT-221",
+    "test": "testCT221_DuplicateObjectIDRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "重复 Object ID 拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "索引完整性"
+  },
+  {
+    "id": "CT-222",
+    "test": "testCT222_OverlappingRangesRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "重叠数据区拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "边界校验"
+  },
+  {
+    "id": "CT-223",
+    "test": "testCT223_IntegerOverflowIsRejectedWithoutCrashing",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "恶意 UInt64 偏移不得导致 Int 溢出/崩溃",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "安全整数转换"
+  },
+  {
+    "id": "CT-224",
+    "test": "testCT224_TruncatedIndexRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "截断索引拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "长度校验"
+  },
+  {
+    "id": "CT-225",
+    "test": "testCT225_CorruptedEncryptedMemberRejectedByObjectValidator",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "Pack 内损坏密文被对象校验拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "AEAD/身份校验"
+  },
+  {
+    "id": "CT-226",
+    "test": "testCT226_InvalidOriginalSizeAndDecompressionLimitRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ObjectPackValidationTests.swift",
+    "purpose": "非法原大小与解压上限拒绝",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "解码内存预算"
+  },
+  {
+    "id": "CT-227",
+    "test": "testGCBarrierCreatedWithPreparedAckAndReleasedOnlyAfterCompletion",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "GC Prepared ACK 建立持久 Barrier，完成后才释放",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "设备 Barrier 生命周期"
+  },
+  {
+    "id": "CT-228",
+    "test": "testGCLegacyEpochWithoutBarrierCannotDelete",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "旧 Epoch 无 Barrier 不得删除",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "旧协议重新规划"
+  },
+  {
+    "id": "CT-229",
+    "test": "testGCAckRefusedWhileLocalWorkIsActive",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudGarbageCollectorTests.swift",
+    "purpose": "本机有活动任务时拒绝写 ACK/Barrier",
+    "required": true,
+    "manualAcceptance": false,
+    "acceptanceReason": "",
+    "invariant": "恢复入口与 ACK 屏障"
   }
 ]

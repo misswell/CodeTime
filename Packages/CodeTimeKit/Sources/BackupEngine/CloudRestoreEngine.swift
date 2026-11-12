@@ -82,6 +82,10 @@ public struct CloudRestoreReport: Sendable, Equatable {
     public var chunksFromCache: Int
     public var packsDownloaded: Int
     public var commited: Bool
+    /// Content is complete but one or more POSIX mode/mtime restores failed.
+    /// This is reported, never silently treated as fully successful.
+    public var metadataIncompleteCount: Int
+    public var metadataWarnings: [String]
 
     public init(
         snapshotID: String,
@@ -93,7 +97,9 @@ public struct CloudRestoreReport: Sendable, Equatable {
         chunksDownloaded: Int = 0,
         chunksFromCache: Int = 0,
         packsDownloaded: Int = 0,
-        commited: Bool = false
+        commited: Bool = false,
+        metadataIncompleteCount: Int = 0,
+        metadataWarnings: [String] = []
     ) {
         self.snapshotID = snapshotID
         self.filesRestored = filesRestored
@@ -105,6 +111,8 @@ public struct CloudRestoreReport: Sendable, Equatable {
         self.chunksFromCache = chunksFromCache
         self.packsDownloaded = packsDownloaded
         self.commited = commited
+        self.metadataIncompleteCount = metadataIncompleteCount
+        self.metadataWarnings = metadataWarnings
     }
 }
 
@@ -337,12 +345,13 @@ public struct CloudRestoreEngine: Sendable {
         }
         // Directory metadata is applied after children exist, otherwise writing a
         // child would change the timestamps again.
-        if let mode = node.mode {
-            try? fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: target.path)
-        }
-        if let modified = node.modifiedAt {
-            try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
-        }
+        applyDirectoryMetadata(
+            path: node.path,
+            mode: node.mode,
+            modifiedAt: node.modifiedAt,
+            to: target,
+            report: &report
+        )
     }
 
     private func restoreFile(
@@ -364,12 +373,13 @@ public struct CloudRestoreEngine: Sendable {
                 try fm.createDirectory(at: target, withIntermediateDirectories: true)
                 report.directoriesCreated += 1
             }
-            if let mode = file.mode {
-                try? fm.setAttributes([.posixPermissions: NSNumber(value: mode)], ofItemAtPath: target.path)
-            }
-            if let modified = file.modifiedAt {
-                try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: target.path)
-            }
+            applyDirectoryMetadata(
+                path: file.path,
+                mode: file.mode,
+                modifiedAt: file.modifiedAt,
+                to: target,
+                report: &report
+            )
             return
         case .symlink:
             try await restoreSymlink(file, into: staging, report: &report, journal: journal)
@@ -410,40 +420,16 @@ public struct CloudRestoreEngine: Sendable {
                     try? fm.removeItem(at: partial)
                     throw CloudRestoreError.cancelled
                 }
-                let data: Data
-                if options.readPolicy == .cachePreferred,
-                   let cache = options.cache,
-                   let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
-                    data = cached
+                let result = try await readVerifiedChunk(chunk, packCache: packCache)
+                if result.fromCache {
                     report.chunksFromCache += 1
                 } else {
-                    let payload: Data
-                    if let packID = chunk.packID {
-                        let pack: Data
-                        if let cached = packCache.get(packID) {
-                            pack = cached
-                        } else {
-                            pack = try await source.readPack(packID)
-                            packCache.put(packID, pack)
-                            report.packsDownloaded += 1
-                        }
-                        payload = try ObjectPackReader().object(chunk.objectID, in: pack)
-                    } else {
-                        payload = try await source.readObject(chunk.objectID)
-                    }
-                    data = try ObjectEncoder(masterKey: masterKey).decode(
-                        payload,
-                        objectID: chunk.objectID,
-                        expectingSize: Int(chunk.plaintextSize)
-                    )
-                    if options.readPolicy != .verifyRemote, let cache = options.cache {
-                        try await cache.storeChunk(objectID: chunk.objectID, data: data)
-                    }
                     report.chunksDownloaded += 1
+                    report.packsDownloaded += result.packsDownloaded
                 }
-                hasher.update(data: data)
-                try handle.write(contentsOf: data)
-                written += Int64(data.count)
+                hasher.update(data: result.data)
+                try handle.write(contentsOf: result.data)
+                written += Int64(result.data.count)
             }
             try handle.synchronize()
             try handle.close()
@@ -472,7 +458,12 @@ public struct CloudRestoreEngine: Sendable {
             if let modified = file.modifiedAt {
                 attributes[.modificationDate] = modified
             }
-            try? fm.setAttributes(attributes, ofItemAtPath: partial.path)
+            do {
+                try fm.setAttributes(attributes, ofItemAtPath: partial.path)
+            } catch {
+                report.metadataIncompleteCount += 1
+                report.metadataWarnings.append("\(relative)：权限/时间恢复失败：\(error.localizedDescription)")
+            }
         }
         if fm.fileExists(atPath: target.path) {
             try fm.removeItem(at: target)
@@ -626,14 +617,22 @@ public struct CloudRestoreEngine: Sendable {
         }
     }
 
-    /// One chunk: cache → pack → standalone object, then decrypt and check the
-    /// plaintext size. Never trusts the local index over the actual bytes.
-    func decodedChunk(_ chunk: ChunkRef, packCache: PackCache) async throws -> Data {
+    struct VerifiedChunk {
+        var data: Data
+        var fromCache: Bool
+        var packsDownloaded: Int
+    }
+
+    /// The one verified read path used by both full restore and previews.
+    /// Cache → pack → standalone; AEAD, object identity and plaintext size are
+    /// always checked, and only a verified plaintext is written to the cache.
+    func readVerifiedChunk(_ chunk: ChunkRef, packCache: PackCache) async throws -> VerifiedChunk {
         if options.readPolicy == .cachePreferred,
            let cache = options.cache,
            let cached = try await cache.cachedChunk(objectID: chunk.objectID) {
-            return cached
+            return VerifiedChunk(data: cached, fromCache: true, packsDownloaded: 0)
         }
+        var packsDownloaded = 0
         let payload: Data
         if let packID = chunk.packID {
             let pack: Data
@@ -642,6 +641,7 @@ public struct CloudRestoreEngine: Sendable {
             } else {
                 pack = try await source.readPack(packID)
                 packCache.put(packID, pack)
+                packsDownloaded = 1
             }
             payload = try ObjectPackReader().object(chunk.objectID, in: pack)
         } else {
@@ -655,7 +655,47 @@ public struct CloudRestoreEngine: Sendable {
         if options.readPolicy != .verifyRemote, let cache = options.cache {
             try await cache.storeChunk(objectID: chunk.objectID, data: data)
         }
-        return data
+        return VerifiedChunk(data: data, fromCache: false, packsDownloaded: packsDownloaded)
+    }
+
+    func decodedChunk(_ chunk: ChunkRef, packCache: PackCache) async throws -> Data {
+        try await readVerifiedChunk(chunk, packCache: packCache).data
+    }
+
+    private func applyDirectoryMetadata(
+        path: String,
+        mode: UInt16?,
+        modifiedAt: Date?,
+        to target: URL,
+        report: inout CloudRestoreReport
+    ) {
+        let fm = FileManager.default
+        if let mode {
+            do {
+                try fm.setAttributes(
+                    [.posixPermissions: NSNumber(value: mode)],
+                    ofItemAtPath: target.path
+                )
+            } catch {
+                report.metadataIncompleteCount += 1
+                report.metadataWarnings.append(
+                    "\(path)：目录权限恢复失败：\(error.localizedDescription)"
+                )
+            }
+        }
+        if let modified = modifiedAt {
+            do {
+                try fm.setAttributes(
+                    [.modificationDate: modified],
+                    ofItemAtPath: target.path
+                )
+            } catch {
+                report.metadataIncompleteCount += 1
+                report.metadataWarnings.append(
+                    "\(path)：目录时间恢复失败：\(error.localizedDescription)"
+                )
+            }
+        }
     }
 
     static func stagingURL(for destination: URL, snapshotID: String) -> URL {

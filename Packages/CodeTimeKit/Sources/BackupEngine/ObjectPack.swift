@@ -191,8 +191,16 @@ public struct ObjectPackReader: Sendable {
             throw ObjectPackError.unsupportedVersion(version)
         }
         let count = Int(Self.readUInt32(payload, at: base + 6))
-        let indexEnd = ObjectPackFormat.headerSize + count * ObjectPackFormat.entrySize
-        guard payload.count >= indexEnd else { throw ObjectPackError.truncatedEntry }
+        // Every entry needs `entrySize` bytes. Check the division before the
+        // multiplication so a hostile count cannot overflow Int.
+        let available = payload.count - ObjectPackFormat.headerSize
+        guard count <= available / ObjectPackFormat.entrySize else {
+            throw ObjectPackError.truncatedEntry
+        }
+        let (indexEnd, overflow) = ObjectPackFormat.headerSize.addingReportingOverflow(
+            count * ObjectPackFormat.entrySize
+        )
+        guard !overflow, payload.count >= indexEnd else { throw ObjectPackError.truncatedEntry }
 
         var result: [ObjectPackFormat.Entry] = []
         result.reserveCapacity(count)
@@ -200,8 +208,12 @@ public struct ObjectPackReader: Sendable {
             let start = base + ObjectPackFormat.headerSize + position * ObjectPackFormat.entrySize
             let rawID = payload.subdata(in: start..<(start + 32))
             let objectID = rawID.map { String(format: "%02x", $0) }.joined()
-            let offset = Int(Self.readUInt64(payload, at: start + 32))
-            let length = Int(Self.readUInt32(payload, at: start + 40))
+            let rawOffset = Self.readUInt64(payload, at: start + 32)
+            let rawLength = Self.readUInt32(payload, at: start + 40)
+            guard let offset = Int(exactly: rawOffset),
+                  let length = Int(exactly: rawLength) else {
+                throw ObjectPackError.invalidRange(objectID: objectID)
+            }
             result.append(ObjectPackFormat.Entry(objectID: objectID, offset: offset, length: length))
         }
         return result
@@ -214,12 +226,14 @@ public struct ObjectPackReader: Sendable {
             throw ObjectPackError.objectNotFound(objectID)
         }
         let base = payload.startIndex
-        guard entry.offset >= ObjectPackFormat.headerSize,
+        let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+        guard !overflow,
+              entry.offset >= ObjectPackFormat.headerSize,
               entry.length > 0,
-              base + entry.offset + entry.length <= payload.endIndex else {
+              end <= payload.count else {
             throw ObjectPackError.invalidRange(objectID: objectID)
         }
-        return payload.subdata(in: (base + entry.offset)..<(base + entry.offset + entry.length))
+        return payload.subdata(in: (base + entry.offset)..<(base + end))
     }
 
     static func readUInt32(_ data: Data, at index: Data.Index) -> UInt32 {
