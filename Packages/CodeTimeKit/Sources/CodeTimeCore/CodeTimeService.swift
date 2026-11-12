@@ -729,6 +729,36 @@ public actor CodeTimeService {
                     }
                 }
                 return (try? encoder.decode(payload, objectID: id)) != nil
+            },
+            reuseValidator: { objectID, isPack in
+                if isPack {
+                    let payload = try await store.readPack(objectID)
+                    let entries = try ObjectPackValidator.validate(payload: payload, packID: objectID)
+                    for entry in entries {
+                        let (end, overflow) = entry.offset.addingReportingOverflow(entry.length)
+                        guard !overflow, end <= payload.count else {
+                            throw CloudObjectLifecycleError.corruptExistingObject(
+                                objectID: entry.objectID,
+                                detail: "pack member range invalid"
+                            )
+                        }
+                        let encoded = payload.subdata(in: entry.offset..<end)
+                        guard (try? encoder.decode(encoded, objectID: entry.objectID)) != nil else {
+                            throw CloudObjectLifecycleError.corruptExistingObject(
+                                objectID: entry.objectID,
+                                detail: "pack member decrypt failed"
+                            )
+                        }
+                    }
+                } else {
+                    let payload = try await store.readObject(objectID)
+                    guard (try? encoder.decode(payload, objectID: objectID)) != nil else {
+                        throw CloudObjectLifecycleError.corruptExistingObject(
+                            objectID: objectID,
+                            detail: "object decrypt failed"
+                        )
+                    }
+                }
             }
         )
         v3QueueCache = queue

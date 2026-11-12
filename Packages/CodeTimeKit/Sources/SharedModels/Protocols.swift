@@ -147,6 +147,13 @@ public protocol CloudObjectSink: Sendable {
     func putCommit(_ commit: SnapshotCommit) async throws
 }
 
+/// Optional strict content validation for objects/packs being reused by a new
+/// snapshot. State probes alone prove existence, not that the bytes are intact.
+public protocol RemoteReuseValidating: Sendable {
+    func validateReusableObject(_ objectID: String) async throws
+    func validateReusablePack(_ packID: String) async throws
+}
+
 /// The rebuildable local index the engine consults before doing work.
 public protocol CloudSnapshotIndex: Sendable {
     func fileNodes(projectID: UUID) async throws -> [FileNode]

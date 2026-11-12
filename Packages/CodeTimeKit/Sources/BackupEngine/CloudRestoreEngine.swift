@@ -46,6 +46,27 @@ public enum RestoreTarget: Sendable, Equatable {
     case file(path: String)
 }
 
+/// Complete boundary for a restore. Normal restores carry every registered
+/// source root; recovery carries the app/data/cloud roots even when no local
+/// source exists. `validate` is bidirectional and component-wise.
+public struct RestoreProtectedRoots: Sendable, Equatable {
+    public var sourceRoots: [URL]
+    public var protectedRoots: [URL]
+
+    public init(sourceRoots: [URL], protectedRoots: [URL] = []) {
+        self.sourceRoots = sourceRoots
+        self.protectedRoots = protectedRoots
+    }
+
+    public func validate(_ destination: URL) throws {
+        for root in sourceRoots + protectedRoots where CloudRestoreEngine.pathsOverlap(destination, root) {
+            throw CloudRestoreError.invalidPath(
+                "恢复目标与受保护目录重叠：\(destination.path) ↔ \(root.path)"
+            )
+        }
+    }
+}
+
 public struct RestoreOptions: Sendable {
     /// Replace an existing destination. Default false: restore never clobbers a
     /// directory the user already has.
@@ -58,18 +79,27 @@ public struct RestoreOptions: Sendable {
     /// Original project roots this restore must never write into. The service
     /// and adapter always supply every registered project.
     public var sourceRoots: [URL]
+    /// App data, lifecycle, repository and cloud roots that must never receive
+    /// restore writes even during disaster recovery.
+    public var protectedRoots: [URL]
     public init(
         overwriteDestination: Bool = false,
         verifyHashes: Bool = true,
         cache: RestoreObjectCache? = nil,
         readPolicy: ObjectReadPolicy = .cachePreferred,
-        sourceRoots: [URL] = []
+        sourceRoots: [URL] = [],
+        protectedRoots: [URL] = []
     ) {
         self.overwriteDestination = overwriteDestination
         self.verifyHashes = verifyHashes
         self.cache = cache
         self.readPolicy = readPolicy
         self.sourceRoots = sourceRoots
+        self.protectedRoots = protectedRoots
+    }
+
+    public var boundary: RestoreProtectedRoots {
+        RestoreProtectedRoots(sourceRoots: sourceRoots, protectedRoots: protectedRoots)
     }
 
     public static let `default` = RestoreOptions()
@@ -203,11 +233,7 @@ public struct CloudRestoreEngine: Sendable {
         }
         // Refuse before reading the manifest: a destination that equals, lives
         // inside, or contains an original project can never be written to.
-        if options.sourceRoots.contains(where: { Self.pathsOverlap(destination, $0) }) {
-            throw CloudRestoreError.invalidPath(
-                "恢复目标与原始项目重叠，已拒绝写入：\(destination.path)"
-            )
-        }
+        try options.boundary.validate(destination)
         let manifest = try await loadManifest(projectID: projectID, snapshotID: snapshotID)
         var report = CloudRestoreReport(snapshotID: snapshotID)
 
@@ -228,11 +254,16 @@ public struct CloudRestoreEngine: Sendable {
         try Self.ensureSafeStagingDirectory(
             staging,
             destination: destination,
-            sourceRoots: options.sourceRoots
+            sourceRoots: options.sourceRoots + options.protectedRoots
         )
-        let journalURL = staging.deletingLastPathComponent()
-            .appendingPathComponent(".\(staging.lastPathComponent)-journal.jsonl")
-        let journal = try RestoreJournal(url: journalURL)
+        let fs = try RestoreDirectoryFS(rootURL: staging)
+        let journalFS = try RestoreDirectoryFS(rootURL: staging.deletingLastPathComponent())
+        let journalName = ".\(staging.lastPathComponent)-journal.jsonl"
+        let journal = try RestoreJournal(
+            directory: journalFS,
+            name: journalName,
+            identity: staging.lastPathComponent
+        )
         defer { journal.close() }
 
         // Resolve target → the directory node to walk and an optional single file.
@@ -263,6 +294,7 @@ public struct CloudRestoreEngine: Sendable {
                 singleFile,
                 writingTo: MerkleTreeBuilder.lastComponent(of: singleFile.path),
                 into: staging,
+                fs: fs,
                 report: &report,
                 packCache: packCache,
                 journal: journal,
@@ -274,6 +306,7 @@ public struct CloudRestoreEngine: Sendable {
                 startNode,
                 basePath: startNode.path,
                 into: staging,
+                fs: fs,
                 report: &report,
                 packCache: packCache,
                 journal: journal,
@@ -284,13 +317,13 @@ public struct CloudRestoreEngine: Sendable {
             // a symlink planted by the version being restored.
             for link in symlinks {
                 if isCancelled() { throw CloudRestoreError.cancelled }
-                try await restoreSymlink(link, into: staging, report: &report, journal: journal)
+                try await restoreSymlink(link, into: staging, fs: fs, report: &report, journal: journal)
             }
         }
 
         journal.flush()
         journal.close()
-        try? fm.removeItem(at: journalURL)
+        try? journalFS.remove(journalName)
 
         // The destination was proven absent before staging began. Re-check right
         // before the commit so a concurrently created path is never replaced.
@@ -322,16 +355,17 @@ public struct CloudRestoreEngine: Sendable {
         _ node: DirectoryNode,
         basePath: String,
         into staging: URL,
+        fs: RestoreDirectoryFS,
         report: inout CloudRestoreReport,
         packCache: PackCache,
         journal: RestoreJournal,
         symlinks: inout [FileNode],
         isCancelled: @Sendable () -> Bool
     ) async throws {
-        let fm = FileManager.default
-        let target = try safeURL(for: node.path.isEmpty ? basePath : node.path, in: staging)
-        if !fm.fileExists(atPath: target.path) {
-            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        let relative = node.path.isEmpty ? basePath : node.path
+        _ = try safeURL(for: relative, in: staging)
+        if !relative.isEmpty, !fs.exists(relative) {
+            try fs.ensureDirectory(relative)
             report.directoriesCreated += 1
         }
 
@@ -340,7 +374,7 @@ public struct CloudRestoreEngine: Sendable {
         for file in node.files where file.kind != .symlink {
             if isCancelled() { throw CloudRestoreError.cancelled }
             try await restoreFile(
-                file, writingTo: file.path, into: staging,
+                file, writingTo: file.path, into: staging, fs: fs,
                 report: &report, packCache: packCache, journal: journal,
                 isCancelled: isCancelled
             )
@@ -352,6 +386,7 @@ public struct CloudRestoreEngine: Sendable {
                 child,
                 basePath: basePath,
                 into: staging,
+                fs: fs,
                 report: &report,
                 packCache: packCache,
                 journal: journal,
@@ -365,10 +400,10 @@ public struct CloudRestoreEngine: Sendable {
         // Directory metadata is applied after children exist, otherwise writing a
         // child would change the timestamps again.
         applyDirectoryMetadata(
-            path: node.path,
+            path: relative,
             mode: node.mode,
             modifiedAt: node.modifiedAt,
-            to: target,
+            fs: fs,
             report: &report
         )
     }
@@ -377,41 +412,39 @@ public struct CloudRestoreEngine: Sendable {
         _ file: FileNode,
         writingTo relative: String,
         into staging: URL,
+        fs: RestoreDirectoryFS,
         report: inout CloudRestoreReport,
         packCache: PackCache,
         journal: RestoreJournal,
         isCancelled: @Sendable () -> Bool
     ) async throws {
-        let fm = FileManager.default
-        let target = try safeURL(for: relative, in: staging)
-        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        _ = try safeURL(for: relative, in: staging)
 
         switch file.kind {
         case .directory:
-            if !fm.fileExists(atPath: target.path) {
-                try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            if !fs.exists(relative) {
+                try fs.ensureDirectory(relative)
                 report.directoriesCreated += 1
             }
             applyDirectoryMetadata(
                 path: file.path,
                 mode: file.mode,
                 modifiedAt: file.modifiedAt,
-                to: target,
+                fs: fs,
                 report: &report
             )
             return
         case .symlink:
-            try await restoreSymlink(file, into: staging, report: &report, journal: journal)
+            try await restoreSymlink(file, into: staging, fs: fs, report: &report, journal: journal)
             return
         case .file:
             break
         }
 
         // Resume only a file that proves it is complete: size and hash must match.
-        if let existingSize = (try? target.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil,
-           Int64(existingSize) == file.size,
+        if let existing = try fs.readFile(relative),
+           Int64(existing.count) == file.size,
            let expected = file.contentHash,
-           let existing = try? Data(contentsOf: target),
            CanonicalHashing.sha256Hex(existing) == expected {
             report.filesSkippedExisting += 1
             try journal.append(RestoreJournalEntry(
@@ -425,18 +458,22 @@ public struct CloudRestoreEngine: Sendable {
             return
         }
 
-        let partial = target.appendingPathExtension("partial")
-        try? fm.removeItem(at: partial)
-        guard let handle = openNoFollow(partial) else {
-            throw CloudRestoreError.fileHashMismatch(path: relative)
-        }
+        let partial = relative + ".partial"
+        try? fs.remove(partial)
+        let handle = FileHandle(
+            fileDescriptor: try fs.openFile(
+                partial,
+                flags: O_WRONLY | O_CREAT | O_TRUNC
+            ),
+            closeOnDealloc: true
+        )
         var hasher = SHA256()
         var written: Int64 = 0
         do {
             for chunk in file.chunks {
                 if isCancelled() {
                     try? handle.close()
-                    try? fm.removeItem(at: partial)
+                    try? fs.remove(partial)
                     throw CloudRestoreError.cancelled
                 }
                 let result = try await readVerifiedChunk(chunk, packCache: packCache)
@@ -454,40 +491,33 @@ public struct CloudRestoreEngine: Sendable {
             try handle.close()
         } catch {
             try? handle.close()
-            try? fm.removeItem(at: partial)
+            try? fs.remove(partial)
             throw error
         }
 
         // Basic correctness cannot be disabled: length and full-file SHA-256 are
         // always checked before the file becomes visible.
         guard written == file.size else {
-            try? fm.removeItem(at: partial)
+            try? fs.remove(partial)
             throw CloudRestoreError.fileHashMismatch(path: relative)
         }
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         if let expected = file.contentHash, digest != expected {
-            try? fm.removeItem(at: partial)
+            try? fs.remove(partial)
             throw CloudRestoreError.fileHashMismatch(path: relative)
         }
         if file.mode != nil || file.modifiedAt != nil {
-            var attributes: [FileAttributeKey: Any] = [:]
-            if let mode = file.mode {
-                attributes[.posixPermissions] = NSNumber(value: mode)
-            }
-            if let modified = file.modifiedAt {
-                attributes[.modificationDate] = modified
-            }
             do {
-                try fm.setAttributes(attributes, ofItemAtPath: partial.path)
+                try fs.applyMetadata(partial, mode: file.mode, modifiedAt: file.modifiedAt)
             } catch {
                 report.metadataIncompleteCount += 1
                 report.metadataWarnings.append("\(relative)：权限/时间恢复失败：\(error.localizedDescription)")
             }
         }
-        if fm.fileExists(atPath: target.path) {
-            try fm.removeItem(at: target)
+        if fs.exists(relative) {
+            try fs.remove(relative)
         }
-        try fm.moveItem(at: partial, to: target)
+        try fs.rename(partial, to: relative)
         try journal.append(RestoreJournalEntry(
             snapshotID: report.snapshotID,
             path: relative,
@@ -503,25 +533,26 @@ public struct CloudRestoreEngine: Sendable {
     private func restoreSymlink(
         _ file: FileNode,
         into staging: URL,
+        fs: RestoreDirectoryFS,
         report: inout CloudRestoreReport,
         journal: RestoreJournal
     ) async throws {
-        let fm = FileManager.default
-        let target = try safeURL(for: file.path, in: staging)
-        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        _ = try safeURL(for: file.path, in: staging)
         let linkTarget = file.linkTarget ?? ""
         guard !linkTarget.isEmpty else { throw CloudRestoreError.fileHashMismatch(path: file.path) }
-        if fm.fileExists(atPath: target.path) {
+        if let existing = try fs.readSymlink(file.path) {
             // Resume is only safe if the existing link points at the same target;
             // an unrelated symlink must never be silently accepted.
-            if let existing = try? fm.destinationOfSymbolicLink(atPath: target.path),
-               existing == linkTarget {
+            if existing == linkTarget {
                 report.filesSkippedExisting += 1
                 return
             }
             throw CloudRestoreError.invalidPath(file.path)
         }
-        try fm.createSymbolicLink(atPath: target.path, withDestinationPath: linkTarget)
+        if fs.exists(file.path) {
+            throw CloudRestoreError.invalidPath(file.path)
+        }
+        try fs.createSymlink(target: linkTarget, at: file.path)
         try journal.append(RestoreJournalEntry(
             snapshotID: report.snapshotID,
             path: file.path,
@@ -685,35 +716,16 @@ public struct CloudRestoreEngine: Sendable {
         path: String,
         mode: UInt16?,
         modifiedAt: Date?,
-        to target: URL,
+        fs: RestoreDirectoryFS,
         report: inout CloudRestoreReport
     ) {
-        let fm = FileManager.default
-        if let mode {
-            do {
-                try fm.setAttributes(
-                    [.posixPermissions: NSNumber(value: mode)],
-                    ofItemAtPath: target.path
-                )
-            } catch {
-                report.metadataIncompleteCount += 1
-                report.metadataWarnings.append(
-                    "\(path)：目录权限恢复失败：\(error.localizedDescription)"
-                )
-            }
-        }
-        if let modified = modifiedAt {
-            do {
-                try fm.setAttributes(
-                    [.modificationDate: modified],
-                    ofItemAtPath: target.path
-                )
-            } catch {
-                report.metadataIncompleteCount += 1
-                report.metadataWarnings.append(
-                    "\(path)：目录时间恢复失败：\(error.localizedDescription)"
-                )
-            }
+        do {
+            try fs.applyMetadata(path, mode: mode, modifiedAt: modifiedAt)
+        } catch {
+            report.metadataIncompleteCount += 1
+            report.metadataWarnings.append(
+                "\(path)：目录权限/时间恢复失败：\(error.localizedDescription)"
+            )
         }
     }
 
@@ -732,7 +744,8 @@ public struct CloudRestoreEngine: Sendable {
     static func stagingURL(
         for destination: URL,
         snapshotID: String,
-        target: RestoreTarget
+        target: RestoreTarget,
+        caseSensitive: Bool? = nil
     ) -> URL {
         let targetKey: String
         switch target {
@@ -745,13 +758,20 @@ public struct CloudRestoreEngine: Sendable {
         }
         let resolvedDestination = destination.standardizedFileURL
             .resolvingSymlinksInPath().path
-        let volume = destination.deletingLastPathComponent()
-        let caseSensitive = (try? volume.resourceValues(
-            forKeys: [.volumeSupportsCaseSensitiveNamesKey]
-        ))?.volumeSupportsCaseSensitiveNames ?? true
+        let detectedCaseSensitivity: Bool
+        if let caseSensitive {
+            detectedCaseSensitivity = caseSensitive
+        } else {
+            let volume = destination.deletingLastPathComponent()
+            detectedCaseSensitivity = (try? volume.resourceValues(
+                forKeys: [.volumeSupportsCaseSensitiveNamesKey]
+            ))?.volumeSupportsCaseSensitiveNames ?? true
+        }
         // On case-sensitive volumes /Export and /export are different targets;
         // only fold case when the volume actually ignores it.
-        let destinationPath = caseSensitive ? resolvedDestination : resolvedDestination.lowercased()
+        let destinationPath = detectedCaseSensitivity
+            ? resolvedDestination
+            : resolvedDestination.lowercased()
         let material = "\(snapshotID)\u{0}\(targetKey)\u{0}\(destinationPath)"
         let digest = SHA256.hash(data: Data(material.utf8))
             .map { String(format: "%02x", $0) }
@@ -824,16 +844,6 @@ public struct CloudRestoreEngine: Sendable {
         }
     }
 
-    private func openNoFollow(_ url: URL) -> FileHandle? {
-        let descriptor = open(
-            url.path,
-            O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC,
-            0o600
-        )
-        guard descriptor >= 0 else { return nil }
-        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-    }
-
     // MARK: - Path safety
 
     /// Rejects absolute paths, `..` and anything that resolves outside staging.
@@ -873,19 +883,32 @@ final class RestoreJournal: @unchecked Sendable {
     private let handle: FileHandle?
     private let lock = NSLock()
 
-    init(url: URL) throws {
-        // A pre-planted journal symlink must not redirect writes into a source or
-        // any other file. O_NOFOLLOW rejects the final component being a link.
-        let fd = open(
-            url.path,
-            O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC,
-            0o600
+    struct Header: Codable, Sendable {
+        var version: Int
+        var identity: String
+        var createdAt: Date
+    }
+
+    init(directory: RestoreDirectoryFS, name: String, identity: String) throws {
+        // The journal is opened relative to the staging parent directory FD, so a
+        // pre-planted symlink at any path component cannot redirect the write.
+        let fd = try directory.openFile(
+            name,
+            flags: O_WRONLY | O_CREAT | O_APPEND
         )
-        guard fd >= 0 else {
-            throw CloudRestoreError.invalidPath("无法安全写入恢复日志：\(url.lastPathComponent)")
-        }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         handle.seekToEndOfFile()
+        var info = stat()
+        if fstat(fd, &info) == 0, info.st_size == 0 {
+            var header = try JSONEncoder().encode(Header(
+                version: 2,
+                identity: identity,
+                createdAt: Date()
+            ))
+            header.append(0x0A)
+            try handle.write(contentsOf: header)
+            try handle.synchronize()
+        }
         self.handle = handle
     }
 

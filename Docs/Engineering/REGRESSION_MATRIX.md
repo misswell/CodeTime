@@ -1,9 +1,10 @@
-# 回归测试矩阵（CT-001 … CT-267）
+# 回归测试矩阵（CT-001 … CT-316）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
 | 编号 | 测试 | 目的 | 必需 | 人工验收 |
 |---|---|---|---|---|
+
 | CT-001 | `testCT001_UnreadableManifestAbortsCleanup` | 云端镜像可靠性回归（CT-001…CT-012） | 是 | 否 |
 | CT-002 | `testCT002_InterruptedGarbageCollectionResumes` | 云端镜像可靠性回归（CT-001…CT-012） | 是 | 否 |
 | CT-003 | `testCT003_ManifestDeletionWaitsForGrace` | 云端镜像可靠性回归（CT-001…CT-012） | 是 | 否 |
@@ -40,14 +41,14 @@
 | CT-034 | `testCT034_FreshSandboxBootstrap` | 第一/二轮可靠性回归 | 是 | 否 |
 | CT-035 | `testCT035_MissingRepositoryIsNotAutoCreated` | 第二轮可靠性回归 | 是 | 否 |
 | CT-036 | `testCT036_HundredThousandFilesPreview` | 环境相关回归（允许真机跳过） | 是 | 否 |
-| CT-037 | `testCT037_MillionFilesBoundedByLimit` | 环境相关回归（允许真机跳过）（百万文件规模测试（Stress），由 Scripts/benchmark.sh stress 或夜间任务执行；不在 CI 常规门禁内） | 否 | 是 |
+| CT-037 | `testCT037_MillionFilesBoundedByLimit` | 环境相关回归（允许真机跳过） | 否 | 是 |
 | CT-038 | `testCT038_LargeFileHashStreamsInChunks` | 第二轮可靠性回归 | 是 | 否 |
 | CT-039 | `testCT039_SearchTruncationIsExplicit` | 第二轮可靠性回归 | 是 | 否 |
 | CT-040 | `testCT040_LargeFilePreviewDegradesExplicitly` | 第二轮可靠性回归 | 是 | 否 |
 | CT-041 | `testCT041_RetryBackoffAndClassification` | 第二轮可靠性回归 | 是 | 否 |
 | CT-042 | `testCT042_LogRotationIsBounded` | 第二轮可靠性回归 | 是 | 否 |
 | CT-043 | `testCT043_CacheAndActivityTablesArePruned` | 第二轮可靠性回归 | 是 | 否 |
-| CT-044 | `testCT044_DiskFullLeavesRepositoryUntouched` | 环境相关回归（允许真机跳过）（需要可控小容量卷注入 ENOSPC，由真机验收清单覆盖） | 否 | 是 |
+| CT-044 | `testCT044_DiskFullLeavesRepositoryUntouched` | 环境相关回归（允许真机跳过） | 否 | 是 |
 | CT-045 | `testCT045_InitializedReleaseCanRequestMigration` | 第三轮可靠性回归 | 是 | 否 |
 | CT-046 | `testCT046_EmptyTargetDirectoriesDoNotBlockMigration` | 第三轮可靠性回归 | 是 | 否 |
 | CT-047 | `testCT047_HiddenRepositoryFilesAreMigrated` | 第三轮可靠性回归 | 是 | 否 |
@@ -268,6 +269,55 @@
 | CT-262 | `testCT262_SpoolQuotaIsSharedAcrossQueueInstances` | spool 额度必须跨 UploadQueue 实例共享 | 是 | 否 |
 | CT-263 | `testCT263_UploadRecoveryCursorPagesPastOneBatch` | 上传恢复必须用游标跨页处理积压任务 | 是 | 否 |
 | CT-264 | `testCT264_MissingSourceBoundaryIsRejectedByDefault` | 未提供源边界的普通恢复必须默认拒绝 | 是 | 否 |
-| CT-265 | `testCT265_ConcurrentSpoolWritesDoNotDeadlockQuotaLock` | 同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁 | 是 | 否 |
-| CT-266 | `testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject` | UploadQueue 终态 journal 不得掩盖已删除的云端对象 | 是 | 否 |
-| CT-267 | `testCT267_FailedObjectUploadIsRewrittenAndConfirmed` | iCloud 失败上传必须可重写并重新确认 | 是 | 否 |
+| CT-265 | `testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded` | 任务书 CT-265 回归：testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded | 是 | 否 |
+| CT-266 | `testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack` | 任务书 CT-266 回归：testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack | 是 | 否 |
+| CT-267 | `testCT267_RemoteMetadataInaccessibleThroughUploadQueue` | 任务书 CT-267 回归：testCT267_RemoteMetadataInaccessibleThroughUploadQueue | 是 | 否 |
+| CT-268 | `testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation` | 任务书 CT-268 回归：testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation | 是 | 否 |
+| CT-269 | `testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject` | 任务书 CT-269 回归：testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject | 是 | 否 |
+| CT-270 | `testCT270_LocalDurableIsNotTreatedAsUploaded` | 任务书 CT-270 回归：testCT270_LocalDurableIsNotTreatedAsUploaded | 是 | 否 |
+| CT-271 | `testCT271_CorruptOrLostRemoteObjectBlocksCommit` | 任务书 CT-271 回归：testCT271_CorruptOrLostRemoteObjectBlocksCommit | 是 | 否 |
+| CT-272 | `testCT272_ManifestUploadFailureBlocksCommit` | 任务书 CT-272 回归：testCT272_ManifestUploadFailureBlocksCommit | 是 | 否 |
+| CT-273 | `testCT273_CommitReferencesOnlyDurableObjects` | 任务书 CT-273 回归：testCT273_CommitReferencesOnlyDurableObjects | 是 | 否 |
+| CT-274 | `testCT274_SameQueueConcurrentStageDoesNotDeadlock` | 任务书 CT-274 回归：testCT274_SameQueueConcurrentStageDoesNotDeadlock | 是 | 否 |
+| CT-275 | `testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock` | 任务书 CT-275 回归：testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock | 是 | 否 |
+| CT-276 | `testCT276_SeparateInstancesShareOneQuota` | 任务书 CT-276 回归：testCT276_SeparateInstancesShareOneQuota | 是 | 否 |
+| CT-277 | `testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter` | 任务书 CT-277 回归：testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter | 是 | 否 |
+| CT-278 | `testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue` | 任务书 CT-278 回归：testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue | 是 | 否 |
+| CT-279 | `testCT279_ReconcilerRecognizesAlreadyUploadedOrphan` | 任务书 CT-279 回归：testCT279_ReconcilerRecognizesAlreadyUploadedOrphan | 是 | 否 |
+| CT-280 | `testCT280_SQLiteEnqueueFailureKeepsSpoolBytes` | 任务书 CT-280 回归：testCT280_SQLiteEnqueueFailureKeepsSpoolBytes | 是 | 否 |
+| CT-281 | `testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota` | 任务书 CT-281 回归：testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota | 是 | 否 |
+| CT-282 | `testCT282_ConcurrentQueueTasksHaveBoundedCompletion` | 任务书 CT-282 回归：testCT282_ConcurrentQueueTasksHaveBoundedCompletion | 是 | 否 |
+| CT-283 | `testCT283_FailedUploadResubmitsSuccessfully` | 任务书 CT-283 回归：testCT283_FailedUploadResubmitsSuccessfully | 是 | 否 |
+| CT-284 | `testCT284_RestartResumesAnUploadingTask` | 任务书 CT-284 回归：testCT284_RestartResumesAnUploadingTask | 是 | 否 |
+| CT-285 | `testCT285_RestartHonorsPersistedBackoff` | 任务书 CT-285 回归：testCT285_RestartHonorsPersistedBackoff | 是 | 否 |
+| CT-286 | `testCT286_UnknownUploadStateKeepsSpool` | 任务书 CT-286 回归：testCT286_UnknownUploadStateKeepsSpool | 是 | 否 |
+| CT-287 | `testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload` | 任务书 CT-287 回归：testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload | 是 | 否 |
+| CT-288 | `testCT288_RetryDoesNotDamageAlreadyUploadedObject` | 任务书 CT-288 回归：testCT288_RetryDoesNotDamageAlreadyUploadedObject | 是 | 否 |
+| CT-289 | `testCT289_FailedStateTransitionsToUploadedAndContinues` | 任务书 CT-289 回归：testCT289_FailedStateTransitionsToUploadedAndContinues | 是 | 否 |
+| CT-290 | `testCT290_NoPublicDisasterBooleanCanBypassProtection` | 任务书 CT-290 回归：testCT290_NoPublicDisasterBooleanCanBypassProtection | 是 | 否 |
+| CT-291 | `testCT291_RecoveryRejectsDestinationInsideAppData` | 任务书 CT-291 回归：testCT291_RecoveryRejectsDestinationInsideAppData | 是 | 否 |
+| CT-292 | `testCT292_DatabaseFailureIsNotAnEmptyProjectList` | 任务书 CT-292 回归：testCT292_DatabaseFailureIsNotAnEmptyProjectList | 是 | 否 |
+| CT-293 | `testCT293_UnresolvableBookmarkRejectsRestore` | 任务书 CT-293 回归：testCT293_UnresolvableBookmarkRejectsRestore | 是 | 否 |
+| CT-294 | `testCT294_OldRootPathDoesNotReplaceFailedBookmark` | 任务书 CT-294 回归：testCT294_OldRootPathDoesNotReplaceFailedBookmark | 是 | 否 |
+| CT-295 | `testCT295_TargetEqualProjectIsRejected` | 任务书 CT-295 回归：testCT295_TargetEqualProjectIsRejected | 是 | 否 |
+| CT-296 | `testCT296_TargetChildOfProjectIsRejected` | 任务书 CT-296 回归：testCT296_TargetChildOfProjectIsRejected | 是 | 否 |
+| CT-297 | `testCT297_TargetAncestorOfProjectIsRejected` | 任务书 CT-297 回归：testCT297_TargetAncestorOfProjectIsRejected | 是 | 否 |
+| CT-298 | `testCT298_TargetOverlappingAppDataIsRejected` | 任务书 CT-298 回归：testCT298_TargetOverlappingAppDataIsRejected | 是 | 否 |
+| CT-299 | `testCT299_TargetOverlappingCloudRepositoryIsRejected` | 任务书 CT-299 回归：testCT299_TargetOverlappingCloudRepositoryIsRejected | 是 | 否 |
+| CT-300 | `testCT300_StagingRootSymlinkIsRejected` | 任务书 CT-300 回归：testCT300_StagingRootSymlinkIsRejected | 是 | 否 |
+| CT-301 | `testCT301_StagingMiddleDirectorySymlinkIsRejected` | 任务书 CT-301 回归：testCT301_StagingMiddleDirectorySymlinkIsRejected | 是 | 否 |
+| CT-302 | `testCT302_JournalSymlinkIsRejected` | 任务书 CT-302 回归：testCT302_JournalSymlinkIsRejected | 是 | 否 |
+| CT-303 | `testCT303_ParentDirectoryReplacementBeforeWriteIsRejected` | 任务书 CT-303 回归：testCT303_ParentDirectoryReplacementBeforeWriteIsRejected | 是 | 否 |
+| CT-304 | `testCT304_ChildDirectoryReplacementBeforeWriteIsRejected` | 任务书 CT-304 回归：testCT304_ChildDirectoryReplacementBeforeWriteIsRejected | 是 | 否 |
+| CT-305 | `testCT305_DirectoryFDCannotEscapeStaging` | 任务书 CT-305 回归：testCT305_DirectoryFDCannotEscapeStaging | 是 | 否 |
+| CT-306 | `testCT306_CaseSensitiveVolumeDoesNotCollideStaging` | 任务书 CT-306 回归：testCT306_CaseSensitiveVolumeDoesNotCollideStaging | 是 | 否 |
+| CT-307 | `testCT307_CaseInsensitiveVolumeMapsCaseVariantsToSameStaging` | 任务书 CT-307 回归：testCT307_CaseInsensitiveVolumeMapsCaseVariantsToSameStaging | 是 | 否 |
+| CT-308 | `testCT308_DifferentSnapshotsDoNotShareStaging` | 任务书 CT-308 回归：testCT308_DifferentSnapshotsDoNotShareStaging | 是 | 否 |
+| CT-309 | `testCT309_DifferentTargetsDoNotShareStaging` | 任务书 CT-309 回归：testCT309_DifferentTargetsDoNotShareStaging | 是 | 否 |
+| CT-310 | `testCT310_NormalFileRestore` | 任务书 CT-310 回归：testCT310_NormalFileRestore | 是 | 否 |
+| CT-311 | `testCT311_NormalDirectoryRestore` | 任务书 CT-311 回归：testCT311_NormalDirectoryRestore | 是 | 否 |
+| CT-312 | `testCT312_PathNotFoundIsExplicit` | 任务书 CT-312 回归：testCT312_PathNotFoundIsExplicit | 是 | 否 |
+| CT-313 | `testCT313_CloudReadErrorIsNotMisclassifiedAsFile` | 任务书 CT-313 回归：testCT313_CloudReadErrorIsNotMisclassifiedAsFile | 是 | 否 |
+| CT-314 | `testCT314_CorruptManifestIsNotMisclassifiedAsFile` | 任务书 CT-314 回归：testCT314_CorruptManifestIsNotMisclassifiedAsFile | 是 | 否 |
+| CT-315 | `testCT315_CancelledRestoreDoesNotCommit` | 任务书 CT-315 回归：testCT315_CancelledRestoreDoesNotCommit | 是 | 否 |
+| CT-316 | `testCT316_RestoreFailureLeavesSourceUnchanged` | 任务书 CT-316 回归：testCT316_RestoreFailureLeavesSourceUnchanged | 是 | 否 |

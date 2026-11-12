@@ -74,7 +74,7 @@ public struct UploadJournalReconciler: Sendable {
             switch state {
             case .uploaded, .verified, .packed:
                 return true
-            case .absent, .staged:
+            case .absent, .staged, .localDurable:
                 return false
             case .uploading:
                 if Date() >= deadline { return false }

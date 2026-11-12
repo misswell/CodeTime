@@ -121,6 +121,75 @@ final class ServiceV3IntegrationTests: XCTestCase {
 
     /// A fresh install with a working cloud target starts on v3, while an install
     /// that already has snapshots keeps the legacy engine until migration.
+    func testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack() async throws {
+        let (project, mirror) = try await configureV3()
+        let first = try await service.createSnapshot(projectID: project.id, trigger: .manual)
+        XCTAssertNil(first.cloudError)
+
+        let devices = mirror.appendingPathComponent("v3/devices", isDirectory: true)
+        let enumerator = FileManager.default.enumerator(
+            at: devices,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [],
+            errorHandler: { _, _ in true }
+        )
+        var victim: URL?
+        while let url = enumerator?.nextObject() as? URL {
+            if url.path.contains("/packs/"),
+               (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                victim = url
+                break
+            }
+        }
+        let packURL = try XCTUnwrap(victim, "云端应至少有一个 Pack")
+        try FileManager.default.removeItem(at: packURL)
+
+        let second = try await service.createSnapshot(projectID: project.id, trigger: .manual)
+        XCTAssertNil(second.cloudError)
+        let verified = try await service.verifySnapshot(
+            projectID: project.id,
+            snapshotID: second.snapshot.id
+        )
+        XCTAssertEqual(verified.outcome, .passed, verified.details)
+    }
+
+    func testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject() async throws {
+        let (project, mirror) = try await configureV3()
+        // Force at least one standalone object: small files are packed below the
+        // default pack threshold.
+        let big = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+            .appendingPathComponent("big.bin")
+        try Data((0..<(1024 * 1024)).map { _ in UInt8.random(in: 0...255) }).write(to: big)
+        let first = try await service.createSnapshot(projectID: project.id, trigger: .manual)
+        XCTAssertNil(first.cloudError)
+
+        let devices = mirror.appendingPathComponent("v3/devices", isDirectory: true)
+        let enumerator = FileManager.default.enumerator(
+            at: devices,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [],
+            errorHandler: { _, _ in true }
+        )
+        var victim: URL?
+        while let url = enumerator?.nextObject() as? URL {
+            if url.path.contains("/objects/"),
+               (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                victim = url
+                break
+            }
+        }
+        let objectURL = try XCTUnwrap(victim, "云端应至少有一个 standalone object")
+        try FileManager.default.removeItem(at: objectURL)
+
+        let second = try await service.createSnapshot(projectID: project.id, trigger: .manual)
+        XCTAssertNil(second.cloudError)
+        let verified = try await service.verifySnapshot(
+            projectID: project.id,
+            snapshotID: second.snapshot.id
+        )
+        XCTAssertEqual(verified.outcome, .passed, verified.details)
+    }
+
     func testCT165_OnboardingStartsFreshInstallOnV3() async throws {
         _ = try await service.bootstrap()
         let mirror = workspace.appendingPathComponent("mirror", isDirectory: true)

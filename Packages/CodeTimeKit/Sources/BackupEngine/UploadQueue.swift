@@ -40,6 +40,9 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
     /// Fixed lock stripes. Per-object lock files grow without bound on a large
     /// backup; a stable hash maps every object into this fixed set.
     public var lockStripeCount: Int
+    /// How long a successful remote content validation may be reused. This is a
+    /// cache of verified bytes, never a substitute for remote existence.
+    public var reuseVerificationTTL: TimeInterval
 
     public init(
         spoolRoot: URL,
@@ -50,7 +53,8 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
         retryBaseDelay: TimeInterval = 2,
         retryMaxDelay: TimeInterval = 300,
         retryJitterFraction: Double = 0.2,
-        lockStripeCount: Int = 1024
+        lockStripeCount: Int = 1024,
+        reuseVerificationTTL: TimeInterval = 0
     ) {
         self.spoolRoot = spoolRoot
         self.softLimitBytes = max(0, softLimitBytes)
@@ -61,6 +65,7 @@ public struct UploadQueueConfiguration: Sendable, Equatable {
         self.retryMaxDelay = max(0, retryMaxDelay)
         self.retryJitterFraction = min(1, max(0, retryJitterFraction))
         self.lockStripeCount = min(65_536, max(1, lockStripeCount))
+        self.reuseVerificationTTL = max(0, reuseVerificationTTL)
     }
 }
 
@@ -161,6 +166,8 @@ public actor UploadQueue: CloudObjectSink {
     /// never become a published object; it stays failed for the next backup run
     /// (which re-reads the source file) instead.
     private let validate: (@Sendable (Data, String, Bool) -> Bool)?
+    private let reuseValidator: (@Sendable (String, Bool) async throws -> Void)?
+    private var verifiedReuseAt: [String: Date] = [:]
     private var spoolBytes: Int64?
 
     public init(
@@ -168,13 +175,15 @@ public actor UploadQueue: CloudObjectSink {
         index: CloudSnapshotIndex,
         configuration: UploadQueueConfiguration,
         fileManager: FileManager = .default,
-        validate: (@Sendable (Data, String, Bool) -> Bool)? = nil
+        validate: (@Sendable (Data, String, Bool) -> Bool)? = nil,
+        reuseValidator: (@Sendable (String, Bool) async throws -> Void)? = nil
     ) {
         self.base = base
         self.index = index
         self.configuration = configuration
         self.fileManager = fileManager
         self.validate = validate
+        self.reuseValidator = reuseValidator
     }
 
     public var spoolRoot: URL { configuration.spoolRoot }
@@ -186,7 +195,7 @@ public actor UploadQueue: CloudObjectSink {
         switch try await objectState(objectID) {
         case .uploaded, .verified, .packed:
             return true
-        case .absent, .staged, .uploading, .failed, .inaccessible:
+        case .absent, .staged, .localDurable, .uploading, .failed, .inaccessible:
             return false
         }
     }
@@ -200,7 +209,10 @@ public actor UploadQueue: CloudObjectSink {
     /// Durable state, with the journal taking priority over a bare file name.
     public func objectState(_ objectID: String) async throws -> CloudObjectState {
         let taskID = Self.taskID(kind: Self.objectKind, id: objectID)
-        if let task = try? await index.uploadTask(taskID) {
+        let task: PendingUploadV3?
+        do { task = try await index.uploadTask(taskID) }
+        catch { return .inaccessible("上传日志不可读：\(error.localizedDescription)") }
+        if let task {
             switch task.state {
             case .pending, .uploading:
                 return .staged
@@ -251,7 +263,10 @@ public actor UploadQueue: CloudObjectSink {
     /// unsafe for incremental reuse.
     public func packState(_ packID: String) async throws -> CloudObjectState {
         let taskID = Self.taskID(kind: Self.packKind, id: packID)
-        if let task = try? await index.uploadTask(taskID) {
+        let task: PendingUploadV3?
+        do { task = try await index.uploadTask(taskID) }
+        catch { return .inaccessible("上传日志不可读：\(error.localizedDescription)") }
+        if let task {
             switch task.state {
             case .pending, .uploading:
                 return .staged
@@ -266,6 +281,19 @@ public actor UploadQueue: CloudObjectSink {
             return .staged
         }
         return try await remoteState(kind: Self.packKind, id: packID, localSize: 0)
+    }
+
+    // MARK: - Remote reuse validation
+
+    private func validateReuse(kind: String, id: String) async throws {
+        let key = "\(kind):\(id)"
+        if let verifiedAt = verifiedReuseAt[key],
+           Date().timeIntervalSince(verifiedAt) < configuration.reuseVerificationTTL {
+            return
+        }
+        guard let reuseValidator else { return }
+        try await reuseValidator(id, kind == Self.packKind)
+        verifiedReuseAt[key] = Date()
     }
 
     /// The single write transaction for an object: lock → state → spool →
@@ -311,6 +339,11 @@ public actor UploadQueue: CloudObjectSink {
                 objectID,
                 payload: payload,
                 storedSize: storedSize
+            )
+        case .localDurable:
+            throw CloudObjectLifecycleError.uploadNotConfirmed(
+                objectID: objectID,
+                detail: "本地已持久化但未确认云端上传"
             )
         case .absent, .staged:
             break
@@ -467,6 +500,7 @@ public actor UploadQueue: CloudObjectSink {
             default:
                 throw UploadQueueError.invalidTask(taskID)
             }
+            verifiedReuseAt.removeValue(forKey: "\(kind):\(id)")
             try await finish(taskID: taskID, kind: kind, id: id)
             return uploaded
         } catch {
@@ -698,7 +732,7 @@ public actor UploadQueue: CloudObjectSink {
             switch state {
             case .uploaded, .verified, .packed:
                 return true
-            case .absent, .staged:
+            case .absent, .staged, .localDurable:
                 return false
             case .uploading:
                 if Date() >= deadline {
@@ -840,6 +874,16 @@ public actor UploadQueue: CloudObjectSink {
         }
         spoolBytes = total
         return total
+    }
+}
+
+extension UploadQueue: RemoteReuseValidating {
+    public func validateReusableObject(_ objectID: String) async throws {
+        try await validateReuse(kind: Self.objectKind, id: objectID)
+    }
+
+    public func validateReusablePack(_ packID: String) async throws {
+        try await validateReuse(kind: Self.packKind, id: packID)
     }
 }
 

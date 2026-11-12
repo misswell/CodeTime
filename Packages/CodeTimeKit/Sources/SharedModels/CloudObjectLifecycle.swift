@@ -7,6 +7,9 @@ public enum CloudObjectState: Sendable, Equatable {
     case absent
     /// Present only in the local spool/journal; not yet durable in the cloud.
     case staged
+    /// A local mirror file is durable on disk but has not been confirmed as an
+    /// iCloud upload. It is never reusable for a cloud snapshot.
+    case localDurable
     /// A writer owns the object (upload or pack) and other callers must wait.
     case uploading
     case uploaded(storedSize: Int)
@@ -72,7 +75,7 @@ public extension CloudObjectSink {
         case .absent:
             _ = try await putObject(payload, objectID: objectID)
             return StoredObjectLocation(storedSize: storedSize)
-        case .staged, .uploading:
+        case .staged, .localDurable, .uploading:
             throw CloudObjectLifecycleError.uploadNotConfirmed(
                 objectID: objectID,
                 detail: "对象仍在上传，不能发布引用"
@@ -91,7 +94,7 @@ public extension CloudObjectState {
         switch self {
         case .uploaded, .verified, .packed:
             return true
-        case .absent, .staged, .uploading, .failed, .inaccessible:
+        case .absent, .staged, .localDurable, .uploading, .failed, .inaccessible:
             return false
         }
     }

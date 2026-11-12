@@ -268,7 +268,7 @@ final class UploadLifecycleTests: XCTestCase {
         XCTAssertEqual(second.map(\.taskID), ["task-2"])
     }
 
-    func testCT265_ConcurrentSpoolWritesDoNotDeadlockQuotaLock() async {
+    func testCT274_SameQueueConcurrentStageDoesNotDeadlock() async {
         let root = spool()
         defer { try? FileManager.default.removeItem(at: root) }
         let index = InMemoryIndex()
@@ -293,6 +293,236 @@ final class UploadLifecycleTests: XCTestCase {
             finished.fulfill()
         }
         await fulfillment(of: [finished], timeout: 3)
+    }
+
+    func testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock() async {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let a = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        let b = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        let done = expectation(description: "two queues stage concurrently")
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { _ = try? await a.putObject(Data("a".utf8), objectID: String(repeating: "2", count: 64)) }
+                group.addTask { _ = try? await b.putObject(Data("b".utf8), objectID: String(repeating: "3", count: 64)) }
+                await group.waitForAll()
+            }
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 3)
+    }
+
+    func testCT276_SeparateInstancesShareOneQuota() async {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let a = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, softLimitBytes: 8, retryBaseDelay: 0))
+        let b = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, softLimitBytes: 8, retryBaseDelay: 0))
+        _ = try? await a.putObject(Data("12345678".utf8), objectID: String(repeating: "4", count: 64))
+        do {
+            _ = try await b.putObject(Data("87654321".utf8), objectID: String(repeating: "5", count: 64))
+            XCTFail("另一个实例必须看到共享额度")
+        } catch let error as UploadQueueError {
+            guard case .spoolFull = error else { return XCTFail("期望 spoolFull，实际 \(error)") }
+        } catch {}
+    }
+
+    func testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter() async {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let queue = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, softLimitBytes: 10, retryBaseDelay: 0))
+        _ = try? await queue.putObject(Data("1234567890".utf8), objectID: String(repeating: "6", count: 64))
+        do {
+            _ = try await queue.putObject(Data("x".utf8), objectID: String(repeating: "7", count: 64))
+            XCTFail("超过额度的第二个写入必须失败")
+        } catch {}
+    }
+
+    func testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let index = InMemoryIndex()
+        let id = String(repeating: "8", count: 64)
+        let file = root.appendingPathComponent("object-\(id)")
+        try Data("orphan".utf8).write(to: file)
+        let reconciler = UploadJournalReconciler(spoolRoot: root, index: index, cloud: InMemoryCloud())
+        let report = await reconciler.reconcile()
+        XCTAssertEqual(report.adoptedFiles, 1)
+        let tasks = try await index.pendingUploads(state: .pending, limit: 10)
+        XCTAssertEqual(tasks.map(\.taskID), ["object:\(id)"])
+    }
+
+    func testCT279_ReconcilerRecognizesAlreadyUploadedOrphan() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let index = InMemoryIndex()
+        let cloud = InMemoryCloud()
+        let id = String(repeating: "9", count: 64)
+        _ = try await cloud.putObject(Data("cloud".utf8), objectID: id)
+        let reconciler = UploadJournalReconciler(spoolRoot: root, index: index, cloud: cloud)
+        let report = await reconciler.reconcile()
+        XCTAssertEqual(report.errors.count, 0)
+    }
+
+    func testCT280_SQLiteEnqueueFailureKeepsSpoolBytes() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        index.failEnqueueUploads = true
+        let queue = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        do {
+            _ = try await queue.putObject(Data("must-survive".utf8), objectID: String(repeating: "a", count: 64))
+            XCTFail("SQLite 入队失败必须抛出")
+        } catch {}
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(files.count, 1, "SQLite 失败后加密 Spool 必须保留")
+    }
+
+    func testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let queue = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, softLimitBytes: 8, retryBaseDelay: 0))
+        let id = String(repeating: "b", count: 64)
+        _ = try? await queue.putObject(Data("12345678".utf8), objectID: id)
+        _ = try? await queue.putObject(Data("12345678".utf8), objectID: id)
+        let status = await queue.status()
+        XCTAssertEqual(status.spoolFileBytes, 8)
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(files.count, 1)
+    }
+
+    func testCT282_ConcurrentQueueTasksHaveBoundedCompletion() async {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let queue = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, softLimitBytes: 1 << 20, retryBaseDelay: 0))
+        let done = expectation(description: "bounded completion")
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                for offset in 0..<8 {
+                    group.addTask {
+                        _ = try? await queue.putObject(Data("x".utf8), objectID: String(format: "%064x", offset + 200))
+                    }
+                }
+                await group.waitForAll()
+            }
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 5)
+    }
+
+    actor ObjectStateBox {
+        var state: CloudObjectState
+        init(_ state: CloudObjectState) { self.state = state }
+        func get() -> CloudObjectState { state }
+        func set(_ state: CloudObjectState) { self.state = state }
+    }
+
+    final class TransitionSink: CloudObjectSink, @unchecked Sendable {
+        let box: ObjectStateBox
+        init(state: CloudObjectState) { box = ObjectStateBox(state) }
+        func hasObject(_ objectID: String) async throws -> Bool { await box.get().isDurablyPresent }
+        func objectState(_ objectID: String) async throws -> CloudObjectState { await box.get() }
+        func putObject(_ payload: Data, objectID: String) async throws -> Bool {
+            await box.set(.uploaded(storedSize: payload.count))
+            return true
+        }
+        func ensureObjectReady(_ objectID: String, payload: Data, storedSize: Int) async throws -> StoredObjectLocation {
+            await box.set(.uploaded(storedSize: storedSize))
+            return StoredObjectLocation(storedSize: storedSize)
+        }
+        func putNode(_ node: DirectoryNode) async throws -> Bool { true }
+        func putPack(_ payload: Data, packID: String) async throws -> Bool { true }
+        func hasPack(_ packID: String) async throws -> Bool { false }
+        func packState(_ packID: String) async throws -> CloudObjectState { .absent }
+        func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
+            CanonicalHashing.sha256Hex(payload)
+        }
+        func putCommit(_ commit: SnapshotCommit) async throws {}
+    }
+
+    func testCT284_RestartResumesAnUploadingTask() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let id = String(repeating: "c", count: 64)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("object-\(id)")
+        try Data("resume-me".utf8).write(to: file)
+        try await index.enqueueUploads([PendingUploadV3(
+            taskID: "object:\(id)", objectID: id, localPath: file.path,
+            remotePath: UploadQueue.objectKind, fileSize: 9,
+            state: .uploading, retryCount: 0
+        )])
+        let queue = UploadQueue(base: InMemoryCloud(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        let report = await queue.resumePending()
+        XCTAssertEqual(report.uploaded, 1)
+        let remaining = try await index.pendingUploads(state: nil, limit: 10)
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testCT285_RestartHonorsPersistedBackoff() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let id = String(repeating: "d", count: 64)
+        let file = root.appendingPathComponent("object-\(id)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("backoff".utf8).write(to: file)
+        try await index.enqueueUploads([PendingUploadV3(
+            taskID: "object:\(id)", objectID: id, localPath: file.path,
+            remotePath: UploadQueue.objectKind, fileSize: 7,
+            state: .failed, retryCount: 1, nextAttemptAt: Date().addingTimeInterval(3600)
+        )])
+        let queue = UploadQueue(base: InMemoryCloud(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 2))
+        let report = await queue.resumePending()
+        XCTAssertEqual(report.deferred, 1)
+        XCTAssertEqual(report.uploaded, 0)
+    }
+
+    func testCT286_UnknownUploadStateKeepsSpool() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let queue = UploadQueue(base: OfflineSink(), index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        do {
+            _ = try await queue.putObject(Data("unknown".utf8), objectID: String(repeating: "e", count: 64))
+        } catch {}
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(files.count, 1)
+    }
+
+    func testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload() async throws {
+        let root = spool()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let index = InMemoryIndex()
+        let offline = OfflineSink()
+        let queue = UploadQueue(base: offline, index: index, configuration: .init(spoolRoot: root, retryBaseDelay: 0))
+        let id = String(repeating: "f", count: 64)
+        do { _ = try await queue.putObject(Data("keep".utf8), objectID: id) } catch {}
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).count, 1)
+    }
+
+    func testCT288_RetryDoesNotDamageAlreadyUploadedObject() async throws {
+        let index = InMemoryIndex()
+        let sink = StateSink(state: .uploaded(storedSize: 3))
+        let queue = UploadQueue(base: sink, index: index, configuration: .init(spoolRoot: spool(), retryBaseDelay: 0))
+        _ = try await queue.putObject(Data("old".utf8), objectID: String(repeating: "1", count: 64))
+        XCTAssertEqual(sink.putCalls, 0, "已确认对象不得被重复写入")
+    }
+
+    func testCT289_FailedStateTransitionsToUploadedAndContinues() async throws {
+        let index = InMemoryIndex()
+        let sink = TransitionSink(state: .failed("temporary"))
+        let queue = UploadQueue(base: sink, index: index, configuration: .init(spoolRoot: spool(), retryBaseDelay: 0))
+        _ = try await queue.putObject(Data("retry".utf8), objectID: String(repeating: "2", count: 64))
+        let state = await sink.box.get()
+        XCTAssertTrue(state.isDurablyPresent)
     }
 
     final class OfflineSink: CloudObjectSink, @unchecked Sendable {

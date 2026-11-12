@@ -9,6 +9,7 @@ public enum CloudFirstEngineError: Error, Sendable, Equatable {
     case fileReadFailed(path: String, detail: String)
     case uploadFailed(path: String, detail: String)
     case spoolFull(pendingBytes: Int64, limitBytes: Int64)
+    case referenceNotDurable(objectID: String, detail: String)
     case cancelled
 
     public var diagnosticCode: String {
@@ -17,6 +18,7 @@ public enum CloudFirstEngineError: Error, Sendable, Equatable {
         case .unstableFile, .fileReadFailed: return "ICLOUD_RESTORE_FAILED"
         case .uploadFailed: return "ICLOUD_UPLOAD_FAILED"
         case .spoolFull: return "ICLOUD_UPLOAD_TIMEOUT"
+        case .referenceNotDurable: return "ICLOUD_UPLOAD_FAILED"
         case .cancelled: return "ICLOUD_UPLOAD_TIMEOUT"
         }
     }
@@ -390,6 +392,12 @@ public struct CloudFirstBackupEngine: Sendable {
         report.nodeCount = tree.nodeCount
         report.totalBytes = tree.totalBytes
 
+        // Final barrier before publishing metadata: every chunk the tree will
+        // reference must be durably present and, where the production sink
+        // supports it, content-validated. A deletion/corruption between upload
+        // and commit must not produce an unrecoverable snapshot.
+        try await assertAllReferencesDurable(tree.files)
+
         if isCancelled() { throw CloudFirstEngineError.cancelled }
         let manifest = SnapshotManifest(
             snapshotID: snapshotID,
@@ -736,6 +744,29 @@ public struct CloudFirstBackupEngine: Sendable {
         }
     }
 
+    private func assertAllReferencesDurable(_ files: [FileNode]) async throws {
+        var records: [String: ChunkRecordV3] = [:]
+        for file in files {
+            for chunk in file.chunks where records[chunk.objectID] == nil {
+                records[chunk.objectID] = ChunkRecordV3(
+                    objectID: chunk.objectID,
+                    plaintextSize: Int(chunk.plaintextSize),
+                    storedSize: Int(chunk.storedSize),
+                    keyVersion: ObjectEncoder(masterKey: masterKey).keyVersion,
+                    packID: chunk.packID,
+                    packOffset: chunk.packOffset
+                )
+            }
+        }
+        let ready = try await verifiedRemoteObjectIDs(in: records)
+        if let missing = records.keys.first(where: { !ready.contains($0) }) {
+            throw CloudFirstEngineError.referenceNotDurable(
+                objectID: missing,
+                detail: "Commit 前最终一致性检查失败"
+            )
+        }
+    }
+
     // MARK: - Remote reuse verification
 
     /// Probes cloud metadata for every chunk the local index claims is reusable.
@@ -803,8 +834,17 @@ public struct CloudFirstBackupEngine: Sendable {
             }
             switch state {
             case .uploaded, .verified, .packed:
+                // State proves presence, not intact bytes. The production
+                // UploadQueue validates content before a new snapshot reuses it.
+                if let validator = sink as? any RemoteReuseValidating {
+                    if kind == "pack" {
+                        try await validator.validateReusablePack(id)
+                    } else {
+                        try await validator.validateReusableObject(id)
+                    }
+                }
                 return true
-            case .absent, .staged, .failed:
+            case .absent, .staged, .localDurable, .failed:
                 return false
             case .uploading:
                 if Date() >= deadline {

@@ -160,6 +160,9 @@ public struct CloudObjectStoreV3: Sendable {
     /// Nodes are plaintext file trees, so they are sealed like manifests: an
     /// iCloud file name alone must never reveal project structure.
     private let masterKey: Data
+    /// Local mirrors have no iCloud confirmation step; their localDurable state is
+    /// the durable state. iCloud-backed stores leave this false.
+    private let localDurableIsUploaded: Bool
 
     public init(
         root: URL,
@@ -172,11 +175,13 @@ public struct CloudObjectStoreV3: Sendable {
         evictionObserver: (@Sendable (EvictionOutcome) -> Void)? = nil,
         objectValidator: (@Sendable (Data, String) -> Bool)? = nil,
         leaseManager: LocalCopyLeaseManager = LocalCopyLeaseManager(),
-        uploadDispositionOverride: (@Sendable (URL) async -> CloudAccessCoordinator.UploadDisposition)? = nil
+        uploadDispositionOverride: (@Sendable (URL) async -> CloudAccessCoordinator.UploadDisposition)? = nil,
+        localDurableIsUploaded: Bool = true
     ) {
         self.layout = Layout(root: root, deviceID: deviceID)
         self.masterKey = masterKey
         self.objectValidator = objectValidator
+        self.localDurableIsUploaded = localDurableIsUploaded
         self.cloudAccess = CloudAccessCoordinator(
             access: access,
             tracker: tracker,
@@ -431,9 +436,8 @@ public struct CloudObjectStoreV3: Sendable {
     /// a snapshot that died before its commit does not exist.
     public func commits(projectID: UUID) async throws -> [SnapshotCommit] {
         let directory = layout.projectDir(projectID).appendingPathComponent("snapshots", isDirectory: true)
-        guard let entries = try? await cloudAccess.list(directory, keys: [.isRegularFileKey]) else {
-            return []
-        }
+        let listing = try await listStrict(directory, keys: [.isRegularFileKey])
+        guard case .exists(let entries) = listing else { return [] }
         var result: [SnapshotCommit] = []
         for entry in entries where entry.pathExtension == "commit" {
             let data = try await readStrict(entry)
@@ -486,7 +490,7 @@ public struct CloudObjectStoreV3: Sendable {
                 throw CloudObjectStoreV3Error.objectMissing(packID)
             }
             return false
-        case .failed:
+        case .failed, .localDurable:
             try await rewriteAndConfirm(payload, to: destination, objectID: packID)
             return true
         case .inaccessible(let detail):
@@ -885,7 +889,11 @@ extension CloudObjectStoreV3 {
         switch await cloudAccess.uploadDisposition(url) {
         case .missing:
             return .absent
-        case .localDurable, .uploaded:
+        case .localDurable:
+            return localDurableIsUploaded
+                ? .uploaded(storedSize: fileSize(url))
+                : .localDurable
+        case .uploaded:
             return .uploaded(storedSize: fileSize(url))
         case .uploading:
             return .uploading
@@ -979,7 +987,11 @@ extension CloudObjectStoreV3 {
         switch await cloudAccess.uploadDisposition(url) {
         case .missing:
             return .absent
-        case .localDurable, .uploaded:
+        case .localDurable:
+            return localDurableIsUploaded
+                ? .uploaded(storedSize: fileSize(url))
+                : .localDurable
+        case .uploaded:
             return .uploaded(storedSize: fileSize(url))
         case .uploading:
             return .uploading

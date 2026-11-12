@@ -45,17 +45,32 @@
 | staging 身份无条件 lowercased | 仅在卷不支持大小写敏感名称时折叠大小写 | CT-250 |
 | Adapter 把目录读取错误吞成“文件” | `directoryNodeForTarget` 错误直接传播，只有明确 `false` 才按文件恢复 | Adapter 测试 |
 
-仍未完成：staging 内部父目录的完整 `openat`/目录 FD 链重构（P2-01）。当前已有
-staging 根目录 `O_NOFOLLOW` 校验、每次写入前源目录/暂存目录隔离检查，以及 journal
-`O_NOFOLLOW`；但检查与写入之间仍存在理论上的路径替换竞态。该项不能宣称已经完全消除。
+P2-01 已完成目录 FD 重构：`RestoreDirectoryFS` 用 `openat/mkdirat/symlinkat/
+renameat/unlinkat/fstatat` 从 staging 根 FD 逐级无跟随访问，文件、目录、符号链接和
+journal 都改为目录相对操作。CT-300…CT-309 覆盖根/中间目录符号链接、父/子目录替换、
+FD 逃逸和大小写 staging 身份。
+
+## 2.2 任务书全量修复（CT-265…CT-316）
+
+| 任务书要求 | 实现 | 回归 |
+|---|---|---|
+| 云端真实状态贯穿生产链路 | UploadQueue 终态再查 Store；生产队列注入内容校验；引擎 Commit 前最终一致性检查 | CT-265–CT-273、CT-283、CT-289 |
+| 失败上传真正恢复 | `.failed` 用精确 payload 重写并重新确认；UploadQueue `.failed` 进入重试；持久化退避 | CT-260、CT-283、CT-285、CT-289 |
+| Spool 锁不得跨 await | quota flock 仅同步临界区；崩溃孤儿由 Reconciler 收养；跨实例/游标测试 | CT-274–CT-282 |
+| 原始项目只读架构边界 | 删除公开 Boolean；`RestoreProtectedRoots`；Service/Engine 双重校验；书签失败拒绝 | CT-290–CT-299 |
+| 文件系统安全 | `RestoreDirectoryFS` 目录 FD；Journal 版本/身份头；staging 大小写按卷判断 | CT-300–CT-309 |
+| Adapter 错误分类 | 目录/文件/路径不存在/云端错误/Manifest 损坏显式区分 | CT-310–CT-314 |
+| 取消与失败只读 | 取消不提交；失败后原始项目快照一致 | CT-315、CT-316 |
+| 性能 | 10 万文件实测；百万/100 GB 记录 NOT RUN | `PERFORMANCE_REPORT_20261112.md` |
 
 ## 3. 门禁与证据
 
 - 全量门禁：`Scripts/regression_gate.sh`，`CODETIME_SCALE_TESTS=1`
-- 结果：**366 tests / 0 failures / 3 skipped**
-- 索引：`REGRESSION_INDEX.json`，CT-001 … CT-267
+- 结果：**416 tests / 0 failures / 3 skipped**
+- 索引：`REGRESSION_INDEX.json`，CT-001 … CT-316（314 required）
 - App Debug 构建：**BUILD SUCCEEDED**
-- 原始日志：`Docs/Engineering/TestArtifacts/review2-remediation-gate-20261112.log`
+- 原始日志：`Docs/Engineering/TestArtifacts/taskbook-final-gate-20261112.log`
+- 10 万文件基准：`Docs/Engineering/TestArtifacts/taskbook-100k-benchmark-20261112.log`
 
 3 个跳过项仍是人工/规模验收，不代表通过：
 
@@ -67,4 +82,6 @@ staging 根目录 `O_NOFOLLOW` 校验、每次写入前源目录/暂存目录隔
 
 - 真实 iCloud 单 Mac 上传/重启/驱逐/重下载/恢复证据尚未生成；`fixture` 证据不能通过发布门禁。
 - 多设备 GC/恢复能力保留代码，但未在本轮验收中宣称已通过。
-- 10 万/100 万文件与 100 GB 规模性能未在本次提交上重新测量；历史数据不能当作当前结果。
+- 10 万文件已在本次提交实测：峰值 RSS 50.4 MB，内容校验 0 差异；恢复耗时 652,871 ms 是明确瓶颈。
+- 100 万文件与 10/100 GB 大文件本次 **NOT RUN**；历史数据不能当作当前结果。
+- 真实单 Mac iCloud 仍受 4355 阻塞，必须保持 NOT RUN。

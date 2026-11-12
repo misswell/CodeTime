@@ -60,7 +60,22 @@ final class CloudEngineV3StoreTests: XCTestCase {
         XCTAssertEqual(read?.format, CloudFormatV3.version)
     }
 
-    func testCT267_FailedObjectUploadIsRewrittenAndConfirmed() async throws {
+    func testCT270_LocalDurableIsNotTreatedAsUploaded() async throws {
+        let objectID = String(repeating: "aa", count: 32)
+        let localOnly = CloudObjectStoreV3(
+            root: root,
+            deviceID: deviceID,
+            masterKey: Data("store-test-key".utf8),
+            uploadDispositionOverride: { _ in .localDurable },
+            localDurableIsUploaded: false
+        )
+        _ = try await localOnly.putObject(Data("local-only".utf8), objectID: objectID)
+        let state = try await localOnly.objectState(objectID)
+        XCTAssertEqual(state, .localDurable)
+        XCTAssertFalse(state.isDurablyPresent, "localDurable 不能被当作已上传")
+    }
+
+    func testCT283_FailedUploadResubmitsSuccessfully() async throws {
         let objectID = String(repeating: "ef", count: 32)
         let payload = Data("retry-after-provider-failure".utf8)
         let failedStore = CloudObjectStoreV3(

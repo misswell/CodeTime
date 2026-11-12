@@ -1,0 +1,18 @@
+benchmark: 100000 files (scale large, content-verified)
+PERF_METRICS:
+  files: 100000
+  totalBytes: 102400015
+  snapshotFiles: 100003
+  backupDurationMs: 7463
+  incrementalBackupDurationMs: 1484
+  restoreDurationMs: 652871
+  totalDurationMs: 660335
+  cpuUserSec: 4.57
+  cpuSysSec: 4.13
+  kopiaChildCpuUserSec: 33.20
+  kopiaChildCpuSysSec: 216.91
+  peakMemoryMB: 50.4
+  verifiedFiles: 100003
+  contentMismatches: 0
+  verifyMode: size+sha256+structure+hidden+symlink
+  contentCheck: PASS

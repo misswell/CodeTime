@@ -6,7 +6,7 @@ import SharedModels
 /// seam so a backup can be produced and then restored without any filesystem
 /// pretending to be iCloud.
 final class InMemoryCloud: CloudObjectSink, CloudObjectSource, @unchecked Sendable {
-    enum Failure: Error { case manifestHashMismatch, objectMissing(String), nodeMissing(String), commitMissing(String) }
+    enum Failure: Error { case manifestHashMismatch, objectMissing(String), nodeMissing(String), commitMissing(String), uploadJournalUnavailable }
 
     private let lock = NSLock()
     private(set) var objects: [String: Data] = [:]
@@ -378,6 +378,7 @@ extension InMemoryCloud: CloudGarbageCollectible {
 /// In-memory index with the same semantics as the SQLite one for the fields the
 /// engine reads.
 final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
+    enum Failure: Error { case uploadJournalUnavailable }
     private let lock = NSLock()
     private var files: [UUID: [FileNode]] = [:]
     private(set) var chunks: [String: ChunkRecordV3] = [:]
@@ -453,8 +454,11 @@ final class InMemoryIndex: CloudSnapshotIndex, @unchecked Sendable {
         )
     }
 
+    var failEnqueueUploads = false
+
     func enqueueUploads(_ uploads: [PendingUploadV3]) async throws {
         lock.lock(); defer { lock.unlock() }
+        if failEnqueueUploads { throw Failure.uploadJournalUnavailable }
         self.uploads.append(contentsOf: uploads)
     }
 

@@ -2641,31 +2641,521 @@
   },
   {
     "id": "CT-265",
-    "test": "testCT265_ConcurrentSpoolWritesDoNotDeadlockQuotaLock",
-    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
-    "purpose": "同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁",
+    "test": "testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-265 回归：testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded",
     "required": true,
-    "invariant": "同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁",
+    "invariant": "任务书 CT-265 回归：testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded",
     "manualAcceptance": false,
     "acceptanceReason": ""
   },
   {
     "id": "CT-266",
-    "test": "testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject",
-    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
-    "purpose": "UploadQueue 终态 journal 不得掩盖已删除的云端对象",
+    "test": "testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3IntegrationTests.swift",
+    "purpose": "任务书 CT-266 回归：testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack",
     "required": true,
-    "invariant": "UploadQueue 终态 journal 不得掩盖已删除的云端对象",
+    "invariant": "任务书 CT-266 回归：testCT266_ServiceAdapterQueueStoreDetectsDeletedCloudPack",
     "manualAcceptance": false,
     "acceptanceReason": ""
   },
   {
     "id": "CT-267",
-    "test": "testCT267_FailedObjectUploadIsRewrittenAndConfirmed",
-    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
-    "purpose": "iCloud 失败上传必须可重写并重新确认",
+    "test": "testCT267_RemoteMetadataInaccessibleThroughUploadQueue",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-267 回归：testCT267_RemoteMetadataInaccessibleThroughUploadQueue",
     "required": true,
-    "invariant": "iCloud 失败上传必须可重写并重新确认",
+    "invariant": "任务书 CT-267 回归：testCT267_RemoteMetadataInaccessibleThroughUploadQueue",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-268",
+    "test": "testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-268 回归：testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation",
+    "required": true,
+    "invariant": "任务书 CT-268 回归：testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-269",
+    "test": "testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3IntegrationTests.swift",
+    "purpose": "任务书 CT-269 回归：testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject",
+    "required": true,
+    "invariant": "任务书 CT-269 回归：testCT269_ServiceAdapterQueueStoreDetectsDeletedCloudObject",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-270",
+    "test": "testCT270_LocalDurableIsNotTreatedAsUploaded",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
+    "purpose": "任务书 CT-270 回归：testCT270_LocalDurableIsNotTreatedAsUploaded",
+    "required": true,
+    "invariant": "任务书 CT-270 回归：testCT270_LocalDurableIsNotTreatedAsUploaded",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-271",
+    "test": "testCT271_CorruptOrLostRemoteObjectBlocksCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-271 回归：testCT271_CorruptOrLostRemoteObjectBlocksCommit",
+    "required": true,
+    "invariant": "任务书 CT-271 回归：testCT271_CorruptOrLostRemoteObjectBlocksCommit",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-272",
+    "test": "testCT272_ManifestUploadFailureBlocksCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-272 回归：testCT272_ManifestUploadFailureBlocksCommit",
+    "required": true,
+    "invariant": "任务书 CT-272 回归：testCT272_ManifestUploadFailureBlocksCommit",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-273",
+    "test": "testCT273_CommitReferencesOnlyDurableObjects",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "任务书 CT-273 回归：testCT273_CommitReferencesOnlyDurableObjects",
+    "required": true,
+    "invariant": "任务书 CT-273 回归：testCT273_CommitReferencesOnlyDurableObjects",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-274",
+    "test": "testCT274_SameQueueConcurrentStageDoesNotDeadlock",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-274 回归：testCT274_SameQueueConcurrentStageDoesNotDeadlock",
+    "required": true,
+    "invariant": "任务书 CT-274 回归：testCT274_SameQueueConcurrentStageDoesNotDeadlock",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-275",
+    "test": "testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-275 回归：testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock",
+    "required": true,
+    "invariant": "任务书 CT-275 回归：testCT275_DifferentQueueInstancesConcurrentStageDoNotDeadlock",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-276",
+    "test": "testCT276_SeparateInstancesShareOneQuota",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-276 回归：testCT276_SeparateInstancesShareOneQuota",
+    "required": true,
+    "invariant": "任务书 CT-276 回归：testCT276_SeparateInstancesShareOneQuota",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-277",
+    "test": "testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-277 回归：testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter",
+    "required": true,
+    "invariant": "任务书 CT-277 回归：testCT277_QuotaBoundaryRejectsOnlyTheSecondWriter",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-278",
+    "test": "testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-278 回归：testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue",
+    "required": true,
+    "invariant": "任务书 CT-278 回归：testCT278_OrphanSpoolFileIsAdoptedAfterCrashBeforeEnqueue",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-279",
+    "test": "testCT279_ReconcilerRecognizesAlreadyUploadedOrphan",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-279 回归：testCT279_ReconcilerRecognizesAlreadyUploadedOrphan",
+    "required": true,
+    "invariant": "任务书 CT-279 回归：testCT279_ReconcilerRecognizesAlreadyUploadedOrphan",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-280",
+    "test": "testCT280_SQLiteEnqueueFailureKeepsSpoolBytes",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-280 回归：testCT280_SQLiteEnqueueFailureKeepsSpoolBytes",
+    "required": true,
+    "invariant": "任务书 CT-280 回归：testCT280_SQLiteEnqueueFailureKeepsSpoolBytes",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-281",
+    "test": "testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-281 回归：testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota",
+    "required": true,
+    "invariant": "任务书 CT-281 回归：testCT281_RepeatedStageOfSameObjectDoesNotDoubleQuota",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-282",
+    "test": "testCT282_ConcurrentQueueTasksHaveBoundedCompletion",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-282 回归：testCT282_ConcurrentQueueTasksHaveBoundedCompletion",
+    "required": true,
+    "invariant": "任务书 CT-282 回归：testCT282_ConcurrentQueueTasksHaveBoundedCompletion",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-283",
+    "test": "testCT283_FailedUploadResubmitsSuccessfully",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
+    "purpose": "任务书 CT-283 回归：testCT283_FailedUploadResubmitsSuccessfully",
+    "required": true,
+    "invariant": "任务书 CT-283 回归：testCT283_FailedUploadResubmitsSuccessfully",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-284",
+    "test": "testCT284_RestartResumesAnUploadingTask",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-284 回归：testCT284_RestartResumesAnUploadingTask",
+    "required": true,
+    "invariant": "任务书 CT-284 回归：testCT284_RestartResumesAnUploadingTask",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-285",
+    "test": "testCT285_RestartHonorsPersistedBackoff",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-285 回归：testCT285_RestartHonorsPersistedBackoff",
+    "required": true,
+    "invariant": "任务书 CT-285 回归：testCT285_RestartHonorsPersistedBackoff",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-286",
+    "test": "testCT286_UnknownUploadStateKeepsSpool",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-286 回归：testCT286_UnknownUploadStateKeepsSpool",
+    "required": true,
+    "invariant": "任务书 CT-286 回归：testCT286_UnknownUploadStateKeepsSpool",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-287",
+    "test": "testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-287 回归：testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload",
+    "required": true,
+    "invariant": "任务书 CT-287 回归：testCT287_SpoolIsRemovedOnlyAfterConfirmedUpload",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-288",
+    "test": "testCT288_RetryDoesNotDamageAlreadyUploadedObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-288 回归：testCT288_RetryDoesNotDamageAlreadyUploadedObject",
+    "required": true,
+    "invariant": "任务书 CT-288 回归：testCT288_RetryDoesNotDamageAlreadyUploadedObject",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-289",
+    "test": "testCT289_FailedStateTransitionsToUploadedAndContinues",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "任务书 CT-289 回归：testCT289_FailedStateTransitionsToUploadedAndContinues",
+    "required": true,
+    "invariant": "任务书 CT-289 回归：testCT289_FailedStateTransitionsToUploadedAndContinues",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-290",
+    "test": "testCT290_NoPublicDisasterBooleanCanBypassProtection",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-290 回归：testCT290_NoPublicDisasterBooleanCanBypassProtection",
+    "required": true,
+    "invariant": "任务书 CT-290 回归：testCT290_NoPublicDisasterBooleanCanBypassProtection",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-291",
+    "test": "testCT291_RecoveryRejectsDestinationInsideAppData",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/ServiceV3RecoveryTests.swift",
+    "purpose": "任务书 CT-291 回归：testCT291_RecoveryRejectsDestinationInsideAppData",
+    "required": true,
+    "invariant": "任务书 CT-291 回归：testCT291_RecoveryRejectsDestinationInsideAppData",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-292",
+    "test": "testCT292_DatabaseFailureIsNotAnEmptyProjectList",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-292 回归：testCT292_DatabaseFailureIsNotAnEmptyProjectList",
+    "required": true,
+    "invariant": "任务书 CT-292 回归：testCT292_DatabaseFailureIsNotAnEmptyProjectList",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-293",
+    "test": "testCT293_UnresolvableBookmarkRejectsRestore",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-293 回归：testCT293_UnresolvableBookmarkRejectsRestore",
+    "required": true,
+    "invariant": "任务书 CT-293 回归：testCT293_UnresolvableBookmarkRejectsRestore",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-294",
+    "test": "testCT294_OldRootPathDoesNotReplaceFailedBookmark",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-294 回归：testCT294_OldRootPathDoesNotReplaceFailedBookmark",
+    "required": true,
+    "invariant": "任务书 CT-294 回归：testCT294_OldRootPathDoesNotReplaceFailedBookmark",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-295",
+    "test": "testCT295_TargetEqualProjectIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-295 回归：testCT295_TargetEqualProjectIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-295 回归：testCT295_TargetEqualProjectIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-296",
+    "test": "testCT296_TargetChildOfProjectIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-296 回归：testCT296_TargetChildOfProjectIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-296 回归：testCT296_TargetChildOfProjectIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-297",
+    "test": "testCT297_TargetAncestorOfProjectIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-297 回归：testCT297_TargetAncestorOfProjectIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-297 回归：testCT297_TargetAncestorOfProjectIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-298",
+    "test": "testCT298_TargetOverlappingAppDataIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-298 回归：testCT298_TargetOverlappingAppDataIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-298 回归：testCT298_TargetOverlappingAppDataIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-299",
+    "test": "testCT299_TargetOverlappingCloudRepositoryIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookRestoreSecurityTests.swift",
+    "purpose": "任务书 CT-299 回归：testCT299_TargetOverlappingCloudRepositoryIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-299 回归：testCT299_TargetOverlappingCloudRepositoryIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-300",
+    "test": "testCT300_StagingRootSymlinkIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-300 回归：testCT300_StagingRootSymlinkIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-300 回归：testCT300_StagingRootSymlinkIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-301",
+    "test": "testCT301_StagingMiddleDirectorySymlinkIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-301 回归：testCT301_StagingMiddleDirectorySymlinkIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-301 回归：testCT301_StagingMiddleDirectorySymlinkIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-302",
+    "test": "testCT302_JournalSymlinkIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-302 回归：testCT302_JournalSymlinkIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-302 回归：testCT302_JournalSymlinkIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-303",
+    "test": "testCT303_ParentDirectoryReplacementBeforeWriteIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-303 回归：testCT303_ParentDirectoryReplacementBeforeWriteIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-303 回归：testCT303_ParentDirectoryReplacementBeforeWriteIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-304",
+    "test": "testCT304_ChildDirectoryReplacementBeforeWriteIsRejected",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-304 回归：testCT304_ChildDirectoryReplacementBeforeWriteIsRejected",
+    "required": true,
+    "invariant": "任务书 CT-304 回归：testCT304_ChildDirectoryReplacementBeforeWriteIsRejected",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-305",
+    "test": "testCT305_DirectoryFDCannotEscapeStaging",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-305 回归：testCT305_DirectoryFDCannotEscapeStaging",
+    "required": true,
+    "invariant": "任务书 CT-305 回归：testCT305_DirectoryFDCannotEscapeStaging",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-306",
+    "test": "testCT306_CaseSensitiveVolumeDoesNotCollideStaging",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-306 回归：testCT306_CaseSensitiveVolumeDoesNotCollideStaging",
+    "required": true,
+    "invariant": "任务书 CT-306 回归：testCT306_CaseSensitiveVolumeDoesNotCollideStaging",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-307",
+    "test": "testCT307_CaseInsensitiveVolumeMapsCaseVariantsToSameStaging",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-307 回归：testCT307_CaseInsensitiveVolumeMapsCaseVariantsToSameStaging",
+    "required": true,
+    "invariant": "任务书 CT-307 回归：testCT307_CaseInsensitiveVolumeMapsCaseVariantsToSameStaging",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-308",
+    "test": "testCT308_DifferentSnapshotsDoNotShareStaging",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-308 回归：testCT308_DifferentSnapshotsDoNotShareStaging",
+    "required": true,
+    "invariant": "任务书 CT-308 回归：testCT308_DifferentSnapshotsDoNotShareStaging",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-309",
+    "test": "testCT309_DifferentTargetsDoNotShareStaging",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/TaskBookFileSystemTests.swift",
+    "purpose": "任务书 CT-309 回归：testCT309_DifferentTargetsDoNotShareStaging",
+    "required": true,
+    "invariant": "任务书 CT-309 回归：testCT309_DifferentTargetsDoNotShareStaging",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-310",
+    "test": "testCT310_NormalFileRestore",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "任务书 CT-310 回归：testCT310_NormalFileRestore",
+    "required": true,
+    "invariant": "任务书 CT-310 回归：testCT310_NormalFileRestore",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-311",
+    "test": "testCT311_NormalDirectoryRestore",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "任务书 CT-311 回归：testCT311_NormalDirectoryRestore",
+    "required": true,
+    "invariant": "任务书 CT-311 回归：testCT311_NormalDirectoryRestore",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-312",
+    "test": "testCT312_PathNotFoundIsExplicit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "任务书 CT-312 回归：testCT312_PathNotFoundIsExplicit",
+    "required": true,
+    "invariant": "任务书 CT-312 回归：testCT312_PathNotFoundIsExplicit",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-313",
+    "test": "testCT313_CloudReadErrorIsNotMisclassifiedAsFile",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "任务书 CT-313 回归：testCT313_CloudReadErrorIsNotMisclassifiedAsFile",
+    "required": true,
+    "invariant": "任务书 CT-313 回归：testCT313_CloudReadErrorIsNotMisclassifiedAsFile",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-314",
+    "test": "testCT314_CorruptManifestIsNotMisclassifiedAsFile",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudFirstEngineAdapterTests.swift",
+    "purpose": "任务书 CT-314 回归：testCT314_CorruptManifestIsNotMisclassifiedAsFile",
+    "required": true,
+    "invariant": "任务书 CT-314 回归：testCT314_CorruptManifestIsNotMisclassifiedAsFile",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-315",
+    "test": "testCT315_CancelledRestoreDoesNotCommit",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "任务书 CT-315 回归：testCT315_CancelledRestoreDoesNotCommit",
+    "required": true,
+    "invariant": "任务书 CT-315 回归：testCT315_CancelledRestoreDoesNotCommit",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-316",
+    "test": "testCT316_RestoreFailureLeavesSourceUnchanged",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "任务书 CT-316 回归：testCT316_RestoreFailureLeavesSourceUnchanged",
+    "required": true,
+    "invariant": "任务书 CT-316 回归：testCT316_RestoreFailureLeavesSourceUnchanged",
     "manualAcceptance": false,
     "acceptanceReason": ""
   }

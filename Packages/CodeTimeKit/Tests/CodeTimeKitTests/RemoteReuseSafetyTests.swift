@@ -154,7 +154,7 @@ final class RemoteReuseSafetyTests: XCTestCase {
         )
     }
 
-    func testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject() async throws {
+    func testCT265_UploadedLocalButDeletedRemoteObjectIsReuploaded() async throws {
         let project = try makeProject()
         let cloud = InMemoryCloud()
         let index = InMemoryIndex()
@@ -205,6 +205,216 @@ final class RemoteReuseSafetyTests: XCTestCase {
         XCTAssertTrue(second.committed)
         let reuploaded = try await cloud.hasObject(objectID)
         XCTAssertTrue(reuploaded, "终态 journal 不得掩盖已删除的云端对象")
+    }
+
+    func testCT267_RemoteMetadataInaccessibleThroughUploadQueue() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        _ = try await engine(sink: cloud, index: index).run(
+            projectID: projectID,
+            root: project,
+            matcher: ExclusionMatcher(rules: []),
+            snapshotID: "first"
+        )
+        let known = try await index.fileNodes(projectID: projectID)
+        let objectID = try XCTUnwrap(known.first?.chunks.first?.objectID)
+        let broken = InaccessibleSink(base: cloud, inaccessibleID: objectID)
+        let spool = workspace.appendingPathComponent("spool-ct267/pending", isDirectory: true)
+        let queue = UploadQueue(
+            base: broken,
+            index: index,
+            configuration: .init(spoolRoot: spool, retryBaseDelay: 0)
+        )
+        let engine = CloudFirstBackupEngine(
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            sink: queue,
+            options: BackupRunOptions(
+                chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 16 * 1024),
+                packObjectsUpTo: nil
+            )
+        )
+        do {
+            _ = try await engine.run(
+                projectID: projectID,
+                root: project,
+                matcher: ExclusionMatcher(rules: []),
+                snapshotID: "second"
+            )
+            XCTFail("远端元数据不可访问时必须中止")
+        } catch {
+            // expected
+        }
+        XCTAssertNil(cloud.commits["second"])
+    }
+
+    class ForwardingSink: CloudObjectSink, @unchecked Sendable {
+        let base: InMemoryCloud
+        init(base: InMemoryCloud) { self.base = base }
+        func hasObject(_ objectID: String) async throws -> Bool { try await base.hasObject(objectID) }
+        @discardableResult func putObject(_ payload: Data, objectID: String) async throws -> Bool {
+            try await base.putObject(payload, objectID: objectID)
+        }
+        @discardableResult func putNode(_ node: DirectoryNode) async throws -> Bool {
+            try await base.putNode(node)
+        }
+        @discardableResult func putPack(_ payload: Data, packID: String) async throws -> Bool {
+            try await base.putPack(payload, packID: packID)
+        }
+        func hasPack(_ packID: String) async throws -> Bool { try await base.hasPack(packID) }
+        func objectState(_ objectID: String) async throws -> CloudObjectState {
+            try await base.objectState(objectID)
+        }
+        func ensureObjectReady(
+            _ objectID: String,
+            payload: Data,
+            storedSize: Int
+        ) async throws -> StoredObjectLocation {
+            try await base.ensureObjectReady(objectID, payload: payload, storedSize: storedSize)
+        }
+        func packState(_ packID: String) async throws -> CloudObjectState {
+            try await base.packState(packID)
+        }
+        func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
+            try await base.putManifest(payload, projectID: projectID, snapshotID: snapshotID)
+        }
+        func putCommit(_ commit: SnapshotCommit) async throws {
+            try await base.putCommit(commit)
+        }
+    }
+
+    final class MissingDurabilitySink: ForwardingSink {
+        override func objectState(_ objectID: String) async throws -> CloudObjectState { .failed("lost") }
+        override func packState(_ packID: String) async throws -> CloudObjectState { .failed("lost") }
+    }
+
+    final class ManifestFailSink: ForwardingSink {
+        enum Failure: Error { case manifest }
+        override func putManifest(_ payload: Data, projectID: UUID, snapshotID: String) async throws -> String {
+            throw Failure.manifest
+        }
+    }
+
+    func testCT271_CorruptOrLostRemoteObjectBlocksCommit() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let sink = MissingDurabilitySink(base: cloud)
+        do {
+            _ = try await engine(sink: sink, index: index).run(
+                projectID: projectID,
+                root: project,
+                matcher: ExclusionMatcher(rules: []),
+                snapshotID: "lost"
+            )
+            XCTFail("最终一致性检查必须阻止 Commit")
+        } catch {
+            // expected
+        }
+        XCTAssertNil(cloud.commits["lost"])
+    }
+
+    func testCT272_ManifestUploadFailureBlocksCommit() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let sink = ManifestFailSink(base: cloud)
+        do {
+            _ = try await engine(sink: sink, index: index).run(
+                projectID: projectID,
+                root: project,
+                matcher: ExclusionMatcher(rules: []),
+                snapshotID: "manifest-fail"
+            )
+            XCTFail("Manifest 上传失败必须阻止 Commit")
+        } catch {
+            // expected
+        }
+        XCTAssertNil(cloud.commits["manifest-fail"])
+    }
+
+    func testCT273_CommitReferencesOnlyDurableObjects() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await engine(sink: cloud, index: index).run(
+            projectID: projectID,
+            root: project,
+            matcher: ExclusionMatcher(rules: []),
+            snapshotID: "durable"
+        )
+        XCTAssertTrue(report.committed)
+        let files = try await index.fileNodes(projectID: projectID)
+        for chunk in files.flatMap(\.chunks) {
+            if let packID = chunk.packID {
+                let present = try await cloud.hasPack(packID)
+                XCTAssertTrue(present)
+            } else {
+                let present = try await cloud.hasObject(chunk.objectID)
+                XCTAssertTrue(present)
+            }
+        }
+    }
+
+    func testCT268_SameSizeDifferentContentRemoteObjectFailsReuseValidation() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let spool = workspace.appendingPathComponent("spool-ct268/pending", isDirectory: true)
+        let encoder = ObjectEncoder(masterKey: masterKey)
+        let queue = UploadQueue(
+            base: cloud,
+            index: index,
+            configuration: .init(spoolRoot: spool, retryBaseDelay: 0),
+            reuseValidator: { objectID, isPack in
+                guard !isPack else { return }
+                let payload = try await cloud.readObject(objectID)
+                guard (try? encoder.decode(payload, objectID: objectID)) != nil else {
+                    throw CloudObjectLifecycleError.corruptExistingObject(
+                        objectID: objectID,
+                        detail: "same-size corrupt bytes"
+                    )
+                }
+            }
+        )
+        let engine = CloudFirstBackupEngine(
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            sink: queue,
+            options: BackupRunOptions(
+                chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 16 * 1024),
+                packObjectsUpTo: nil
+            )
+        )
+        _ = try await engine.run(
+            projectID: projectID,
+            root: project,
+            matcher: ExclusionMatcher(rules: []),
+            snapshotID: "first"
+        )
+        let known = try await index.fileNodes(projectID: projectID)
+        let objectID = try XCTUnwrap(known.first?.chunks.first?.objectID)
+        let original = try await cloud.readObject(objectID)
+        cloud.corruptObjects[objectID] = Data(repeating: 0, count: original.count)
+        do {
+            try await queue.validateReusableObject(objectID)
+            XCTFail("validator should have rejected corrupt bytes")
+        } catch {}
+        do {
+            _ = try await engine.run(
+                projectID: projectID,
+                root: project,
+                matcher: ExclusionMatcher(rules: []),
+                snapshotID: "second"
+            )
+            XCTFail("同大小但内容损坏的远端对象不能通过复用验证")
+        } catch {
+            // expected: fail closed
+        }
+        XCTAssertNil(cloud.commits["second"])
     }
 
     func testCT254_InaccessibleRemoteStateAbortsBeforeCommit() async throws {

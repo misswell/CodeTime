@@ -45,6 +45,44 @@ final class ServiceV3RecoveryTests: XCTestCase {
         return (try await service.addProject(url: projectRoot, name: "source"), projectRoot)
     }
 
+    func testCT291_RecoveryRejectsDestinationInsideAppData() async throws {
+        let keychain = KeychainStore(service: "com.codetime.test.ct291.\(UUID().uuidString)")
+        defer { keychain.deleteAllSecrets() }
+        let macA = try makeService("mac-a-291", keychain: keychain)
+        let (project, _) = try await configureV3(macA)
+        _ = try await macA.createSnapshot(projectID: project.id, trigger: .manual)
+        let recoveryKey = try keychain.recoveryKeyText()
+
+        let macB = try makeService("mac-b-291", keychain: keychain)
+        _ = try await macB.bootstrap()
+        var settingsB = try await macB.currentSettings()
+        settingsB.localMirrorPath = mirror.path
+        settingsB.iCloudEnabled = false
+        _ = try await macB.saveSettings(settingsB)
+        let candidates = try await macB.v3RecoveryCandidates(
+            storageRoot: mirror,
+            recoveryKeyText: recoveryKey
+        )
+        let candidate = try XCTUnwrap(candidates.first { $0.projectID == project.id })
+        let appData = workspace.appendingPathComponent("mac-b-291", isDirectory: true)
+        do {
+            _ = try await macB.recoverV3Project(
+                storageRoot: mirror,
+                recoveryKeyText: recoveryKey,
+                candidate: candidate,
+                destination: appData.appendingPathComponent("export")
+            )
+            XCTFail("灾难恢复目标与 CodeTime 数据目录重叠时必须拒绝")
+        } catch let error as CodeTimeError {
+            switch error {
+            case .pathOutsideProject, .pathOverlap:
+                break
+            default:
+                XCTFail("实际 \(error)")
+            }
+        }
+    }
+
     func testCT164_NewMacDiscoversAndRestoresV3Project() async throws {
         let keychain = KeychainStore(service: "com.codetime.test.ct164.\(UUID().uuidString)")
         defer { keychain.deleteAllSecrets() }

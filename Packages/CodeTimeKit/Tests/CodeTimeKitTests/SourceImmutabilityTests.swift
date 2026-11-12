@@ -779,6 +779,63 @@ final class SourceImmutabilityTests: XCTestCase {
         XCTAssertEqual(try snapshot(project), before)
     }
 
+    func testCT315_CancelledRestoreDoesNotCommit() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let destination = workspace.appendingPathComponent("cancelled", isDirectory: true)
+        let reader = CloudRestoreEngine(
+            masterKey: masterKey,
+            source: cloud,
+            options: RestoreOptions(sourceRoots: [project])
+        )
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination,
+                isCancelled: { true }
+            )
+            XCTFail("取消的恢复不得完成")
+        } catch {
+            // expected
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testCT316_RestoreFailureLeavesSourceUnchanged() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let before = try snapshot(project)
+        let nodes = try await index.fileNodes(projectID: projectID)
+        let failingID = try XCTUnwrap(nodes.first?.chunks.first?.objectID)
+        let source = FlakySource(base: cloud)
+        source.fail(on: failingID)
+        let destination = workspace.appendingPathComponent("failed-restore", isDirectory: true)
+        let reader = CloudRestoreEngine(
+            masterKey: masterKey,
+            source: source,
+            options: RestoreOptions(sourceRoots: [project])
+        )
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination
+            )
+            XCTFail("注入失败后恢复应中断")
+        } catch {
+            // expected
+        }
+        XCTAssertEqual(try snapshot(project), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testCT264_MissingSourceBoundaryIsRejectedByDefault() async throws {
         let project = try makeProject()
         let cloud = InMemoryCloud()
