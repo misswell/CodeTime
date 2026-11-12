@@ -10,6 +10,7 @@
 | `3ab6bde-reliability-gate.log` | 可靠性加固后全量门禁输出（295 tests / 0 failures / 3 skips，scale=1） | `3ab6bde` |
 | `46805da-reliability-p0p1-gate.log` | 第一轮 P0/P1 修复门禁（328 tests / 0 failures / 3 skips，scale=1） | `46805da` |
 | `e6e8090-reliability-final-gate.log` | 最终 P0/P1（含恢复屏障）全量门禁（328 tests / 0 failures / 3 skips，scale=1） | `e6e8090` |
+| `single-mac-gate-20261112.log` | 单 Mac 验收范围修订后的全量门禁（332 tests / 0 failures / 3 skips，scale=1） | `01bf82b` |
 | `icloud-preflight-blocked-20261111.log` | 真实 iCloud 预检：PLA 未同意、iCloud Drive 上传报 4355 | 本机 macOS 27.2.1 |
 | `icloud-preflight-recheck-20261111T1348Z.log` | 复检：PLA、Xcode 账号、iCloud 4355、第二台 Mac 均未变化 | 本机 macOS 27.2.1 |
 | `icloud-preflight-after-bird-restart-20261111.log` | 重启 bird 后仍报 iCloud 4355，排除同步进程卡死 | 本机 macOS 27.2.1 |

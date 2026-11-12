@@ -5,20 +5,20 @@ KNOWN_LIMITATIONS）的统计以下方机器可读块为唯一事实源，由
 `Scripts/check_test_report.py` 强制校验；跳过项不计入通过。
 
 <!-- test-report
-{"commit":"e6e80906d8cbc55705f05ecf7e9b4da8cc74a15b","run":"202611120900","executed":332,"failures":0,"skipped":3,"passed":329,"gate":"PASS","notRun":["单 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
+{"commit":"01bf82bf36e80b6556b107d4f4a9d73bda76c25f","run":"202611120900","executed":332,"failures":0,"skipped":3,"passed":329,"gate":"PASS","notRun":["单 Mac iCloud 真机验收","真实 Keychain 跨签名迁移","CT-044 磁盘写满","CT-037 百万文件压力测试","v3 100 万文件全量备份","100 GB 全随机数据"]}
 -->
 
 ## 1. 绑定信息
 
 | 项 | 值 |
 |---|---|
-| 交付 Commit SHA | `e6e8090`（P0/P1 对象生命周期、GC Barrier、验收证据修复） |
+| 交付 Commit SHA | `01bf82b`（P0/P1 + 单 Mac 验收范围修订） |
 | CI Run | `202611120900`（本次为本地门禁；CI 运行需在 CI 环境重新生成） |
 | 门禁 | `Scripts/regression_gate.sh`（本地全量，`CODETIME_SCALE_TESTS=1`） |
 | 门禁结果 | `PASS`，332 tests / 0 failures / 3 skipped |
 | 回归索引 | `REGRESSION_INDEX.json`，CT-001 … CT-233（231 required） |
 | 运行标识 | `202611120900`（本地门禁，非 CI；CI 运行需在 CI 环境重新生成） |
-| 门禁日志 | `Docs/Engineering/TestArtifacts/e6e8090-reliability-final-gate.log`（原始输出归档） |
+| 门禁日志 | `Docs/Engineering/TestArtifacts/single-mac-gate-20261112.log`（原始输出归档） |
 
 ## 2. 环境
 
