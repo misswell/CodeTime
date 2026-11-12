@@ -649,6 +649,16 @@ public struct RetryPolicy: Codable, Hashable, Sendable {
     }
 
     public static func classify(_ error: Error) -> RetryErrorClass {
+        if let lifecycle = error as? CloudObjectLifecycleError {
+            switch lifecycle {
+            case .uploadNotConfirmed, .writerFailed:
+                return .transientNetwork
+            case .corruptExistingObject:
+                return .repositoryCorrupted
+            case .stateUnavailable:
+                return .iCloudNotDownloaded
+            }
+        }
         if let code = error as? CodeTimeError {
             if code.isPermanent {
                 switch code {

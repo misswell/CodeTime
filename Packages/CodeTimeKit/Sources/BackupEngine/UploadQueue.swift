@@ -486,7 +486,7 @@ public actor UploadQueue: CloudObjectSink {
 
     private func upload(taskID: String, kind: String, id: String, payload: Data) async throws -> Bool {
         if let validate, !validate(payload, id, kind == Self.packKind) {
-            await markFailure(taskID: taskID, retryCount: 0)
+            await markFailure(taskID: taskID, retryCount: 0, error: UploadQueueError.spoolReadFailed("校验失败"))
             throw UploadQueueError.spoolReadFailed("待上传数据校验失败：\(id)")
         }
         try await index.updateUploadState(taskID, state: .uploading, bumpRetry: false)
@@ -504,14 +504,15 @@ public actor UploadQueue: CloudObjectSink {
             try await finish(taskID: taskID, kind: kind, id: id)
             return uploaded
         } catch {
-            await markFailure(taskID: taskID, retryCount: 0)
+            await markFailure(taskID: taskID, retryCount: 0, error: error)
             throw error
         }
     }
 
     /// Exponential backoff with jitter, persisted in the journal. A task is kept
     /// forever; only the automatic retry is delayed.
-    private func retryDelay(attempt: Int) -> TimeInterval {
+    private func retryDelay(attempt: Int, error: Error) -> TimeInterval? {
+        guard !RetryPolicy.classify(error).isPermanent else { return nil }
         guard configuration.retryBaseDelay > 0 else { return 0 }
         let exponent = pow(2.0, Double(max(0, attempt - 1)))
         let raw = min(configuration.retryMaxDelay, configuration.retryBaseDelay * exponent)
@@ -519,14 +520,18 @@ public actor UploadQueue: CloudObjectSink {
         return max(0, raw + jitter)
     }
 
-    private func markFailure(taskID: String, retryCount: Int) async {
-        let next = Date().addingTimeInterval(retryDelay(attempt: retryCount + 1))
+    private func markFailure(taskID: String, retryCount: Int, error: Error) async {
+        let next = retryDelay(attempt: retryCount + 1, error: error)
+            .map { Date().addingTimeInterval($0) }
         if let backoff = index as? UploadBackoffIndexing {
+            // Permanent errors get a far-future backoff: the encrypted data is
+            // retained, but automatic resume will not hammer the same failure.
+            let effectiveNext = next ?? Date().addingTimeInterval(365 * 86_400)
             try? await backoff.updateUploadBackoff(
                 taskID,
                 state: .failed,
                 bumpRetry: true,
-                nextAttemptAt: next
+                nextAttemptAt: effectiveNext
             )
         } else {
             try? await index.updateUploadState(taskID, state: .failed, bumpRetry: true)
@@ -767,7 +772,7 @@ public actor UploadQueue: CloudObjectSink {
             // confirms the object is durable (crash between upload and journal
             // clean). A local name or a still-uploading file is not enough.
             guard try await waitForConfirmedRemote(kind: kind, id: task.objectID) else {
-                await markFailure(taskID: task.taskID, retryCount: task.retryCount)
+                await markFailure(taskID: task.taskID, retryCount: task.retryCount, error: UploadQueueError.spoolReadFailed("待上传任务失败"))
                 throw UploadQueueError.spoolReadFailed("待上传文件缺失：\(task.localPath)")
             }
             try await finish(taskID: task.taskID, kind: kind, id: task.objectID)
@@ -776,7 +781,7 @@ public actor UploadQueue: CloudObjectSink {
 
         try await index.updateUploadState(task.taskID, state: .uploading, bumpRetry: false)
         if let validate, !validate(payload, task.objectID, kind == Self.packKind) {
-            await markFailure(taskID: task.taskID, retryCount: task.retryCount)
+            await markFailure(taskID: task.taskID, retryCount: task.retryCount, error: UploadQueueError.spoolReadFailed("待上传任务失败"))
             throw UploadQueueError.spoolReadFailed("待上传数据校验失败：\(task.objectID)")
         }
         do {
@@ -794,7 +799,7 @@ public actor UploadQueue: CloudObjectSink {
             try await finish(taskID: task.taskID, kind: kind, id: task.objectID)
             return uploaded ? .uploaded(Int64(payload.count)) : .alreadyPresent
         } catch {
-            await markFailure(taskID: task.taskID, retryCount: task.retryCount)
+            await markFailure(taskID: task.taskID, retryCount: task.retryCount, error: error)
             throw error
         }
     }
