@@ -1,6 +1,6 @@
 # 2026-11-12 Code Review 修复记录
 
-审查基线：`f02b99e`。本轮仍以两个最高约束为准：
+审查基线：`f02b99e`；第二轮基线：`81ebe15`。本轮仍以两个最高约束为准：
 
 1. **原始项目永久只读、单向备份**：备份/扫描只读，恢复只能写入独立目录。
 2. **单 Mac + iCloud 验收**：不要求第二台 Mac，多设备能力不作为本次发布已通过项。
@@ -33,13 +33,29 @@
 | Diff 同时驻留两棵完整文件树 | 左侧保留一份 map，右侧流式比较并从左侧删除匹配项，剩余即删除集 | 现有 Adapter Diff 测试 |
 | 大任务状态更新只扫描前 5000 条 | `setUploadTaskState`/`setUploadBackoff` 改为按 task_id 精确读取 | CT-263 |
 
+## 2.1 第二轮 Review 追加修复
+
+| 发现 | 修复 | 回归 |
+|---|---|---|
+| UploadQueue 的终态 journal 被直接当作远端存在 | `objectState`/`packState` 的终态必须再次查询底层 Store；对象已删除则返回 `.absent`，不可访问则停止 | CT-266 |
+| Spool 配额 flock 跨 `await`，Actor 重入可能死锁 | flock 临界区只包围同步额度检查 + 文件写入，释放后才 `enqueueUploads`；崩溃孤儿由 Reconciler 收养 | CT-265 |
+| `.failed` 上传永久不可恢复 | `CloudObjectStoreV3.ensureObjectReady`/`putPack` 在 `.failed` 时用调用方 payload 原子重写并重新确认；UploadQueue 的 `.failed` 进入重试路径 | CT-260、CT-267 |
+| `isDisasterRecovery` 是公开绕过开关 | 已移除该字段；普通恢复必须提供非空 `sourceRoots`，Service 的换机恢复显式传入数据目录/仓库边界 | CT-264 |
+| 书签存在但解析失败时回退旧路径 | 解析失败且旧路径存在则拒绝；只有项目已从本机消失（旧路径不存在）时才跳过该源目录 | 服务调用链 |
+| staging 身份无条件 lowercased | 仅在卷不支持大小写敏感名称时折叠大小写 | CT-250 |
+| Adapter 把目录读取错误吞成“文件” | `directoryNodeForTarget` 错误直接传播，只有明确 `false` 才按文件恢复 | Adapter 测试 |
+
+仍未完成：staging 内部父目录的完整 `openat`/目录 FD 链重构（P2-01）。当前已有
+staging 根目录 `O_NOFOLLOW` 校验、每次写入前源目录/暂存目录隔离检查，以及 journal
+`O_NOFOLLOW`；但检查与写入之间仍存在理论上的路径替换竞态。该项不能宣称已经完全消除。
+
 ## 3. 门禁与证据
 
 - 全量门禁：`Scripts/regression_gate.sh`，`CODETIME_SCALE_TESTS=1`
-- 结果：**363 tests / 0 failures / 3 skipped**
-- 索引：`REGRESSION_INDEX.json`，CT-001 … CT-264
+- 结果：**366 tests / 0 failures / 3 skipped**
+- 索引：`REGRESSION_INDEX.json`，CT-001 … CT-267
 - App Debug 构建：**BUILD SUCCEEDED**
-- 原始日志：`Docs/Engineering/TestArtifacts/review-remediation-gate-20261112.log`
+- 原始日志：`Docs/Engineering/TestArtifacts/review2-remediation-gate-20261112.log`
 
 3 个跳过项仍是人工/规模验收，不代表通过：
 

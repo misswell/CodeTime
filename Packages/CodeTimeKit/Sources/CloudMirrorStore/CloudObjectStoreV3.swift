@@ -171,7 +171,8 @@ public struct CloudObjectStoreV3: Sendable {
         eviction: ICloudEvictionManager? = nil,
         evictionObserver: (@Sendable (EvictionOutcome) -> Void)? = nil,
         objectValidator: (@Sendable (Data, String) -> Bool)? = nil,
-        leaseManager: LocalCopyLeaseManager = LocalCopyLeaseManager()
+        leaseManager: LocalCopyLeaseManager = LocalCopyLeaseManager(),
+        uploadDispositionOverride: (@Sendable (URL) async -> CloudAccessCoordinator.UploadDisposition)? = nil
     ) {
         self.layout = Layout(root: root, deviceID: deviceID)
         self.masterKey = masterKey
@@ -183,7 +184,8 @@ public struct CloudObjectStoreV3: Sendable {
             uploadTimeout: uploadTimeout,
             evictionObserver: evictionObserver,
             leaseManager: leaseManager,
-            expectsUbiquitous: eviction != nil
+            expectsUbiquitous: eviction != nil,
+            uploadDispositionOverride: uploadDispositionOverride
         )
     }
 
@@ -484,8 +486,9 @@ public struct CloudObjectStoreV3: Sendable {
                 throw CloudObjectStoreV3Error.objectMissing(packID)
             }
             return false
-        case .failed(let detail):
-            throw CloudObjectLifecycleError.uploadNotConfirmed(objectID: packID, detail: detail)
+        case .failed:
+            try await rewriteAndConfirm(payload, to: destination, objectID: packID)
+            return true
         case .inaccessible(let detail):
             throw CloudObjectLifecycleError.stateUnavailable(objectID: packID, detail: detail)
         }
@@ -924,8 +927,13 @@ extension CloudObjectStoreV3 {
                     detail: error.localizedDescription
                 )
             }
-        case .failed(let detail):
-            throw CloudObjectLifecycleError.uploadNotConfirmed(objectID: objectID, detail: detail)
+        case .failed:
+            // A provider upload error is not permanently fatal: the local
+            // encrypted bytes are still available from the spool. Rewriting the
+            // content-addressed file is a safe retry and resets the provider's
+            // failed upload state.
+            try await rewriteAndConfirm(payload, to: url, objectID: objectID)
+            return StoredObjectLocation(storedSize: payload.count)
         case .metadataUnavailable(let detail):
             throw CloudObjectLifecycleError.stateUnavailable(objectID: objectID, detail: detail)
         case .localDurable, .uploaded:
@@ -937,6 +945,25 @@ extension CloudObjectStoreV3 {
             throw CloudObjectStoreV3Error.objectCorrupted(objectID)
         }
         return StoredObjectLocation(storedSize: existing.count)
+    }
+
+    /// Rewrites a failed upload atomically and waits for fresh confirmation.
+    /// Used only when the caller still has the exact payload (spool/source).
+    private func rewriteAndConfirm(
+        _ payload: Data,
+        to url: URL,
+        objectID: String
+    ) async throws {
+        do {
+            try await cloudAccess.ensureDirectory(url.deletingLastPathComponent())
+            try await cloudAccess.writeAtomically(payload, to: url)
+            try await confirmAndRelease(url)
+        } catch {
+            throw CloudObjectLifecycleError.uploadNotConfirmed(
+                objectID: objectID,
+                detail: error.localizedDescription
+            )
+        }
     }
 
     private func fileSize(_ url: URL) -> Int {

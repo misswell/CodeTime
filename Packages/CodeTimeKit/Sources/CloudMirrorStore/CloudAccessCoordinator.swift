@@ -31,6 +31,9 @@ public struct CloudAccessCoordinator: Sendable {
     /// ubiquitous metadata before the provider adopts it. In that window it is
     /// still uploading, not a durable local mirror.
     private let expectsUbiquitous: Bool
+    /// Test seam for exercising provider upload-state transitions without a real
+    /// iCloud account. Production leaves this nil.
+    private let uploadDispositionOverride: (@Sendable (URL) async -> UploadDisposition)?
 
     public init(
         access: CloudFileAccess,
@@ -39,7 +42,8 @@ public struct CloudAccessCoordinator: Sendable {
         uploadTimeout: TimeInterval = 120,
         evictionObserver: (@Sendable (EvictionOutcome) -> Void)? = nil,
         leaseManager: LocalCopyLeaseManager = LocalCopyLeaseManager(),
-        expectsUbiquitous: Bool = false
+        expectsUbiquitous: Bool = false,
+        uploadDispositionOverride: (@Sendable (URL) async -> UploadDisposition)? = nil
     ) {
         self.access = access
         self.leaseManager = leaseManager
@@ -48,6 +52,7 @@ public struct CloudAccessCoordinator: Sendable {
         self.uploadTimeout = uploadTimeout
         self.observer = evictionObserver
         self.expectsUbiquitous = expectsUbiquitous
+        self.uploadDispositionOverride = uploadDispositionOverride
     }
 
     // MARK: - Coordinated file operations
@@ -153,6 +158,9 @@ public struct CloudAccessCoordinator: Sendable {
     /// is the only cheap way to distinguish "file exists locally" from "iCloud
     /// accepted the bytes".
     public func uploadDisposition(_ url: URL) async -> UploadDisposition {
+        if let uploadDispositionOverride {
+            return await uploadDispositionOverride(url)
+        }
         let keys: Set<URLResourceKey> = [
             .isUbiquitousItemKey,
             .ubiquitousItemIsUploadedKey,

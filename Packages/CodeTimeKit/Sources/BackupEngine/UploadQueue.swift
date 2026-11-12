@@ -205,17 +205,42 @@ public actor UploadQueue: CloudObjectSink {
             case .pending, .uploading:
                 return .staged
             case .failed:
-                return .failed("上传任务失败：\(task.taskID)")
+                // A journal failure can be stale (or the cloud object may have
+                // landed despite a timeout). Report the real remote state first.
+                return try await remoteState(
+                    kind: Self.objectKind, id: objectID, localSize: Int(task.fileSize)
+                )
             case .uploadedPendingCleanup, .uploaded, .completed:
-                return .uploaded(storedSize: Int(task.fileSize))
+                // The journal says "uploaded", but the object may since have been
+                // deleted in iCloud. Never reuse it without a fresh remote check.
+                return try await remoteState(
+                    kind: Self.objectKind, id: objectID, localSize: Int(task.fileSize)
+                )
             }
         }
         let url = spoolURL(kind: Self.objectKind, id: objectID)
         if fileManager.fileExists(atPath: url.path) {
             return .staged
         }
+        return try await remoteState(kind: Self.objectKind, id: objectID, localSize: 0)
+    }
+
+    private func remoteState(
+        kind: String,
+        id: String,
+        localSize: Int
+    ) async throws -> CloudObjectState {
         do {
-            return try await base.objectState(objectID)
+            let state: CloudObjectState
+            if kind == Self.packKind {
+                state = try await base.packState(id)
+            } else {
+                state = try await base.objectState(id)
+            }
+            if case .uploaded(let size) = state {
+                return .uploaded(storedSize: size > 0 ? size : localSize)
+            }
+            return state
         } catch {
             return .inaccessible(error.localizedDescription)
         }
@@ -230,21 +255,17 @@ public actor UploadQueue: CloudObjectSink {
             switch task.state {
             case .pending, .uploading:
                 return .staged
-            case .failed:
-                return .failed("上传任务失败：\(task.taskID)")
-            case .uploadedPendingCleanup, .uploaded, .completed:
-                return .uploaded(storedSize: Int(task.fileSize))
+            case .failed, .uploadedPendingCleanup, .uploaded, .completed:
+                return try await remoteState(
+                    kind: Self.packKind, id: packID, localSize: Int(task.fileSize)
+                )
             }
         }
         let url = spoolURL(kind: Self.packKind, id: packID)
         if fileManager.fileExists(atPath: url.path) {
             return .staged
         }
-        do {
-            return try await base.packState(packID)
-        } catch {
-            return .inaccessible(error.localizedDescription)
-        }
+        return try await remoteState(kind: Self.packKind, id: packID, localSize: 0)
     }
 
     /// The single write transaction for an object: lock → state → spool →
@@ -329,14 +350,9 @@ public actor UploadQueue: CloudObjectSink {
             kind: Self.packKind, id: packID, timeout: configuration.leaseTimeout
         )
         defer { lease.release() }
-        if let task = try? await index.uploadTask(taskID) {
-            switch task.state {
-            case .uploadedPendingCleanup, .uploaded, .completed:
-                return false
-            case .pending, .uploading, .failed:
-                break
-            }
-        }
+        // A terminal journal row is only a hint. It does not prove the pack is
+        // still in the cloud (the user may have deleted it), so always verify
+        // the real remote state before reusing or re-uploading.
         if try await waitForConfirmedRemote(kind: Self.packKind, id: packID) {
             // Confirmed location is not enough: the existing pack must still
             // match the payload (same ID, same bytes). The base store performs
@@ -392,31 +408,36 @@ public actor UploadQueue: CloudObjectSink {
     private func stage(taskID: String, kind: String, id: String, payload: Data) async throws {
         try ensureDirectories()
         let url = spoolURL(kind: kind, id: id)
-        // Quota check + write must be one cross-process critical section. A
-        // per-actor cache would let UI and Agent each spend the full soft limit.
-        let quotaFD = try openSpoolQuotaLock()
-        defer { close(quotaFD) }
-        let current = try currentSpoolBytes(refresh: true)
-        // Re-staging the same object replaces its own bytes; do not count them
-        // twice (otherwise a retry could spuriously hit the soft limit).
-        let existing = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
-        let projected = current - existing + Int64(payload.count)
-        if projected > configuration.softLimitBytes {
-            throw UploadQueueError.spoolFull(
-                pendingBytes: current,
-                limitBytes: configuration.softLimitBytes
-            )
-        }
+        // Quota check + write must be one cross-process critical section. Keep
+        // the flock strictly synchronous: releasing it before the journal await
+        // avoids actor reentrancy deadlock (Task B blocks on flock while Task A
+        // waits for the actor after SQLite). A crash before the journal write is
+        // repaired by UploadJournalReconciler, which adopts the orphan file.
         do {
-            try fileManager.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try autoreleasepool { try payload.write(to: url, options: .atomic) }
-        } catch {
-            throw UploadQueueError.spoolWriteFailed(error.localizedDescription)
+            let quotaFD = try openSpoolQuotaLock()
+            defer { close(quotaFD) }
+            let current = try currentSpoolBytes(refresh: true)
+            // Re-staging the same object replaces its own bytes; do not count
+            // them twice (otherwise a retry could spuriously hit the limit).
+            let existing = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+            let projected = current - existing + Int64(payload.count)
+            if projected > configuration.softLimitBytes {
+                throw UploadQueueError.spoolFull(
+                    pendingBytes: current,
+                    limitBytes: configuration.softLimitBytes
+                )
+            }
+            do {
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try autoreleasepool { try payload.write(to: url, options: .atomic) }
+            } catch {
+                throw UploadQueueError.spoolWriteFailed(error.localizedDescription)
+            }
+            spoolBytes = projected
         }
-        spoolBytes = projected
         try await index.enqueueUploads([
             PendingUploadV3(
                 taskID: taskID,
@@ -687,8 +708,10 @@ public actor UploadQueue: CloudObjectSink {
                     )
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
-            case .failed(let detail):
-                throw CloudObjectLifecycleError.writerFailed(objectID: id, detail: detail)
+            case .failed:
+                // Not reusable, but not terminal: the caller still has the
+                // exact payload and the base store will rewrite/re-submit it.
+                return false
             case .inaccessible(let detail):
                 throw CloudObjectLifecycleError.stateUnavailable(objectID: id, detail: detail)
             }

@@ -208,11 +208,12 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         }
         let target: RestoreTarget
         if let path, !path.isEmpty {
-            target = (try? await restorer().directoryNodeForTarget(
+            let isDirectory = try await restorer().directoryNodeForTarget(
                 projectID: projectID,
                 snapshotID: snapshotID,
                 path: path
-            )) == true ? .directory(path: path) : .file(path: path)
+            )
+            target = isDirectory ? .directory(path: path) : .file(path: path)
         } else {
             target = .project
         }

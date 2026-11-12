@@ -154,6 +154,59 @@ final class RemoteReuseSafetyTests: XCTestCase {
         )
     }
 
+    func testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let spool = workspace.appendingPathComponent("spool/pending", isDirectory: true)
+        let queue = UploadQueue(
+            base: cloud,
+            index: index,
+            configuration: .init(spoolRoot: spool, retryBaseDelay: 0)
+        )
+        let engine = CloudFirstBackupEngine(
+            masterKey: masterKey,
+            deviceID: "device-A",
+            index: index,
+            sink: queue,
+            options: BackupRunOptions(
+                chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 16 * 1024),
+                packObjectsUpTo: nil
+            )
+        )
+        _ = try await engine.run(
+            projectID: projectID,
+            root: project,
+            matcher: ExclusionMatcher(rules: []),
+            snapshotID: "first"
+        )
+        let known = try await index.fileNodes(projectID: projectID)
+        let objectID = try XCTUnwrap(known.first?.chunks.first?.objectID)
+        try await cloud.deleteObject(objectID)
+        // Simulate the dangerous production state: journal says uploaded, but
+        // the local spool was already cleaned and the cloud object is gone.
+        try await index.enqueueUploads([
+            PendingUploadV3(
+                taskID: "object:\(objectID)",
+                objectID: objectID,
+                localPath: spool.appendingPathComponent("object-\(objectID)").path,
+                remotePath: UploadQueue.objectKind,
+                fileSize: 1,
+                state: .uploadedPendingCleanup,
+                retryCount: 0
+            )
+        ])
+        let second = try await engine.run(
+            projectID: projectID,
+            root: project,
+            matcher: ExclusionMatcher(rules: []),
+            snapshotID: "second"
+        )
+        XCTAssertTrue(second.committed)
+        let reuploaded = try await cloud.hasObject(objectID)
+        XCTAssertTrue(reuploaded, "终态 journal 不得掩盖已删除的云端对象")
+    }
+
     func testCT254_InaccessibleRemoteStateAbortsBeforeCommit() async throws {
         let project = try makeProject()
         let cloud = InMemoryCloud()

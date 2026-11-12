@@ -2591,11 +2591,11 @@
   },
   {
     "id": "CT-260",
-    "test": "testCT260_FailedPackStateIsNotTreatedAsPresent",
+    "test": "testCT260_FailedPackStateIsRetriedNotTreatedAsPresent",
     "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
-    "purpose": "failed Pack 状态不得当作已上传",
+    "purpose": "failed Pack 状态必须进入重写/重试而不是当作已上传",
     "required": true,
-    "invariant": "failed Pack 状态不得当作已上传",
+    "invariant": "failed Pack 状态必须进入重写/重试而不是当作已上传",
     "manualAcceptance": false,
     "acceptanceReason": ""
   },
@@ -2636,6 +2636,36 @@
     "purpose": "未提供源边界的普通恢复必须默认拒绝",
     "required": true,
     "invariant": "未提供源边界的普通恢复必须默认拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-265",
+    "test": "testCT265_ConcurrentSpoolWritesDoNotDeadlockQuotaLock",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/UploadLifecycleTests.swift",
+    "purpose": "同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁",
+    "required": true,
+    "invariant": "同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-266",
+    "test": "testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/RemoteReuseSafetyTests.swift",
+    "purpose": "UploadQueue 终态 journal 不得掩盖已删除的云端对象",
+    "required": true,
+    "invariant": "UploadQueue 终态 journal 不得掩盖已删除的云端对象",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
+  },
+  {
+    "id": "CT-267",
+    "test": "testCT267_FailedObjectUploadIsRewrittenAndConfirmed",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/CloudEngineV3StoreTests.swift",
+    "purpose": "iCloud 失败上传必须可重写并重新确认",
+    "required": true,
+    "invariant": "iCloud 失败上传必须可重写并重新确认",
     "manualAcceptance": false,
     "acceptanceReason": ""
   }

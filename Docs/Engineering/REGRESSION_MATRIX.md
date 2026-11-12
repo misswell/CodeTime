@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-264）
+# 回归测试矩阵（CT-001 … CT-267）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -263,8 +263,11 @@
 | CT-257 | `testCT257_FixtureEvidenceCannotPassReleaseGate` | fixture 验收证据不得通过发布门禁 | 是 | 否 |
 | CT-258 | `testCT258_SearchStopsBeforeLoadingTheWholeTree` | Search 达到限制后不得继续加载整棵树 | 是 | 否 |
 | CT-259 | `testCT259_PrePlantedJournalSymlinkIsRejected` | 预置恢复 journal 符号链接必须拒绝 | 是 | 否 |
-| CT-260 | `testCT260_FailedPackStateIsNotTreatedAsPresent` | failed Pack 状态不得当作已上传 | 是 | 否 |
+| CT-260 | `testCT260_FailedPackStateIsRetriedNotTreatedAsPresent` | failed Pack 状态必须进入重写/重试而不是当作已上传 | 是 | 否 |
 | CT-261 | `testCT261_UploadingPackIsWaitedForBeforeReuse` | uploading Pack 必须等待确认并校验已有内容 | 是 | 否 |
 | CT-262 | `testCT262_SpoolQuotaIsSharedAcrossQueueInstances` | spool 额度必须跨 UploadQueue 实例共享 | 是 | 否 |
 | CT-263 | `testCT263_UploadRecoveryCursorPagesPastOneBatch` | 上传恢复必须用游标跨页处理积压任务 | 是 | 否 |
 | CT-264 | `testCT264_MissingSourceBoundaryIsRejectedByDefault` | 未提供源边界的普通恢复必须默认拒绝 | 是 | 否 |
+| CT-265 | `testCT265_ConcurrentSpoolWritesDoNotDeadlockQuotaLock` | 同一 UploadQueue 并发 spool 写入不得因配额锁跨 await 死锁 | 是 | 否 |
+| CT-266 | `testCT266_UploadQueueTerminalJournalDoesNotHideDeletedObject` | UploadQueue 终态 journal 不得掩盖已删除的云端对象 | 是 | 否 |
+| CT-267 | `testCT267_FailedObjectUploadIsRewrittenAndConfirmed` | iCloud 失败上传必须可重写并重新确认 | 是 | 否 |

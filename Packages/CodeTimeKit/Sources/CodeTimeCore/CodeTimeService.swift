@@ -783,7 +783,7 @@ public actor CodeTimeService {
             // job exists, and the adapter refuses source overlaps again so a
             // direct adapter caller cannot stage files inside a project.
             sourceRootsProvider: { [database] in
-                try (await database.projects()).map(Self.sourceRootURL(for:))
+                try (await database.projects()).compactMap(Self.availableSourceRootURL(for:))
             },
             prepareStore: { [store, logger] in
                 do {
@@ -2197,7 +2197,7 @@ public actor CodeTimeService {
         // project itself, a child of it, nor an ancestor of it can be a restore
         // destination.
         if request.mode != .preview {
-            let sourceRoots = try (await database.projects()).map(Self.sourceRootURL(for:))
+            let sourceRoots = try (await database.projects()).compactMap(Self.availableSourceRootURL(for:))
             do {
                 try SafePath.validateRestoreDestination(
                     request.destination,
@@ -3276,13 +3276,34 @@ public actor CodeTimeService {
     /// The real on-disk source root. A security-scoped bookmark is authoritative
     /// when the project was moved; a stored `rootPath` can otherwise be stale.
     private static func sourceRootURL(for project: Project) throws -> URL {
-        if let bookmark = project.bookmark,
-           let resolved = try? SecurityScopedBookmarks.resolve(bookmark) {
-            return resolved.url
+        if let bookmark = project.bookmark {
+            do {
+                return try SecurityScopedBookmarks.resolve(bookmark).url
+            } catch {
+                // A bookmark that exists but cannot be resolved means the real
+                // source location is unknown. Never silently downgrade to a
+                // possibly stale rootPath.
+                throw CodeTimeError.unauthorized("无法解析项目「\(project.name)」的书签")
+            }
         }
-        // A recovered project may have no local source at all. The stored path is
-        // still the only usable boundary for overlap checks; an actual backup
-        // will fail later in withProject if that directory is inaccessible.
+        return URL(fileURLWithPath: project.rootPath, isDirectory: true)
+    }
+
+    /// A recovered project may no longer exist locally. It is not a writable
+    /// source then, so overlap checks may skip it — but an existing stale path
+    /// plus an unresolvable bookmark is still an error.
+    private static func availableSourceRootURL(for project: Project) throws -> URL? {
+        if let bookmark = project.bookmark {
+            do {
+                return try SecurityScopedBookmarks.resolve(bookmark).url
+            } catch {
+                let fallback = URL(fileURLWithPath: project.rootPath, isDirectory: true)
+                guard !FileManager.default.fileExists(atPath: fallback.path) else {
+                    throw CodeTimeError.unauthorized("无法解析项目「\(project.name)」的书签")
+                }
+                return nil
+            }
+        }
         return URL(fileURLWithPath: project.rootPath, isDirectory: true)
     }
 
@@ -3319,7 +3340,7 @@ public actor CodeTimeService {
         // closed instead of skipping every overlap check.
         let projects = try await database.projects()
         for project in projects {
-            let source = try Self.sourceRootURL(for: project)
+            guard let source = try Self.availableSourceRootURL(for: project) else { continue }
             if SafePath.overlaps(root, source) {
                 throw CodeTimeError.pathOverlap(
                     path: root.path,
@@ -3485,7 +3506,7 @@ public actor CodeTimeService {
         }
         // Disaster recovery is still a restore: it must land in an independent
         // directory, never inside or above a project that already exists locally.
-        let recoverySourceRoots = try (await database.projects()).map(Self.sourceRootURL(for:))
+        let recoverySourceRoots = try (await database.projects()).compactMap(Self.availableSourceRootURL(for:))
         do {
             try SafePath.validateRestoreDestination(
                 destination,
@@ -3516,7 +3537,7 @@ public actor CodeTimeService {
         let reader = CloudRestoreEngine(
             masterKey: key,
             source: store,
-            options: RestoreOptions(isDisasterRecovery: true)
+            options: RestoreOptions(sourceRoots: [paths.root, paths.lifecycleDir, storageRoot, root])
         )
         _ = try await reader.restore(
             projectID: candidate.projectID,

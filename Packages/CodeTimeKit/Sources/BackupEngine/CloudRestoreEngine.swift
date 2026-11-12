@@ -58,24 +58,18 @@ public struct RestoreOptions: Sendable {
     /// Original project roots this restore must never write into. The service
     /// and adapter always supply every registered project.
     public var sourceRoots: [URL]
-    /// Only a true disaster-recovery export (new Mac, no local sources) may run
-    /// without a source boundary. This is explicit and defaults to false.
-    public var isDisasterRecovery: Bool
-
     public init(
         overwriteDestination: Bool = false,
         verifyHashes: Bool = true,
         cache: RestoreObjectCache? = nil,
         readPolicy: ObjectReadPolicy = .cachePreferred,
-        sourceRoots: [URL] = [],
-        isDisasterRecovery: Bool = false
+        sourceRoots: [URL] = []
     ) {
         self.overwriteDestination = overwriteDestination
         self.verifyHashes = verifyHashes
         self.cache = cache
         self.readPolicy = readPolicy
         self.sourceRoots = sourceRoots
-        self.isDisasterRecovery = isDisasterRecovery
     }
 
     public static let `default` = RestoreOptions()
@@ -194,9 +188,9 @@ public struct CloudRestoreEngine: Sendable {
         // A normal restore must name the source boundary. Without it the engine
         // cannot prove the destination is independent, so it fails closed. Only
         // an explicit disaster-recovery export (no local source) may omit it.
-        guard !options.sourceRoots.isEmpty || options.isDisasterRecovery else {
+        guard !options.sourceRoots.isEmpty else {
             throw CloudRestoreError.invalidPath(
-                "恢复必须提供原始项目边界；灾难恢复导出需显式标记 isDisasterRecovery"
+                "恢复必须提供原始项目边界；未提供边界的普通恢复已拒绝"
             )
         }
         // Overwriting is not a restore primitive anymore. Even a caller that
@@ -749,8 +743,15 @@ public struct CloudRestoreEngine: Sendable {
         case .file(let path):
             targetKey = "file:" + path
         }
-        let destinationPath = destination.standardizedFileURL
-            .resolvingSymlinksInPath().path.lowercased()
+        let resolvedDestination = destination.standardizedFileURL
+            .resolvingSymlinksInPath().path
+        let volume = destination.deletingLastPathComponent()
+        let caseSensitive = (try? volume.resourceValues(
+            forKeys: [.volumeSupportsCaseSensitiveNamesKey]
+        ))?.volumeSupportsCaseSensitiveNames ?? true
+        // On case-sensitive volumes /Export and /export are different targets;
+        // only fold case when the volume actually ignores it.
+        let destinationPath = caseSensitive ? resolvedDestination : resolvedDestination.lowercased()
         let material = "\(snapshotID)\u{0}\(targetKey)\u{0}\(destinationPath)"
         let digest = SHA256.hash(data: Data(material.utf8))
             .map { String(format: "%02x", $0) }

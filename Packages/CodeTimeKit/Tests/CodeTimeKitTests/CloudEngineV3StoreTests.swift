@@ -60,6 +60,25 @@ final class CloudEngineV3StoreTests: XCTestCase {
         XCTAssertEqual(read?.format, CloudFormatV3.version)
     }
 
+    func testCT267_FailedObjectUploadIsRewrittenAndConfirmed() async throws {
+        let objectID = String(repeating: "ef", count: 32)
+        let payload = Data("retry-after-provider-failure".utf8)
+        let failedStore = CloudObjectStoreV3(
+            root: root,
+            deviceID: deviceID,
+            masterKey: Data("store-test-key".utf8),
+            uploadDispositionOverride: { _ in .failed("provider upload error") }
+        )
+        let first = try await failedStore.putObject(payload, objectID: objectID)
+        XCTAssertTrue(first)
+        let location = try await failedStore.ensureObjectReady(
+            objectID, payload: payload, storedSize: payload.count
+        )
+        XCTAssertEqual(location.storedSize, payload.count)
+        let readBack = try await failedStore.readObject(objectID)
+        XCTAssertEqual(readBack, payload)
+    }
+
     func testCT151_ObjectsAreIdempotentAndReadable() async throws {
         let payload = Data("encrypted-object-bytes".utf8)
         let objectID = String(repeating: "ab", count: 32)

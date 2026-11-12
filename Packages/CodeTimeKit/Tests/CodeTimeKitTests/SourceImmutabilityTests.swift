@@ -810,7 +810,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let reader = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
-            options: RestoreOptions(overwriteDestination: true, isDisasterRecovery: true)
+            options: RestoreOptions(overwriteDestination: true, sourceRoots: [project])
         )
         do {
             _ = try await reader.restore(
