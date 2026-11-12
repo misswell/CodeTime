@@ -3513,7 +3513,11 @@ public actor CodeTimeService {
                 reason: "版本 \(target.snapshotID) 正在 GC 清理计划中，恢复已被安全阻止"
             )
         }
-        let reader = CloudRestoreEngine(masterKey: key, source: store)
+        let reader = CloudRestoreEngine(
+            masterKey: key,
+            source: store,
+            options: RestoreOptions(isDisasterRecovery: true)
+        )
         _ = try await reader.restore(
             projectID: candidate.projectID,
             snapshotID: target.snapshotID,

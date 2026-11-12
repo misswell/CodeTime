@@ -128,7 +128,7 @@ final class ObjectPackTests: XCTestCase {
         }
 
         // Restore must reassemble through the pack.
-        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [projectRoot]))
         let destination = work.appendingPathComponent("restored", isDirectory: true)
         let restoreReport = try await restore.restore(
             projectID: projectID,

@@ -199,14 +199,12 @@ public struct CloudFirstEngineAdapter: BackupEngine {
             )
         }
         let projectID = try await projectID(for: snapshotID)
-        if let sourceRootsProvider {
-            let sourceRoots = try await sourceRootsProvider()
-            if sourceRoots.contains(where: { CloudRestoreEngine.pathsOverlap(destination, $0) }) {
-                throw CodeTimeError.pathOverlap(
-                    path: destination.path,
-                    conflictsWith: "恢复目标与原始项目重叠；恢复只能写入独立目录"
-                )
-            }
+        let sourceRoots = try await sourceRootsProvider?() ?? []
+        if sourceRoots.contains(where: { CloudRestoreEngine.pathsOverlap(destination, $0) }) {
+            throw CodeTimeError.pathOverlap(
+                path: destination.path,
+                conflictsWith: "恢复目标与原始项目重叠；恢复只能写入独立目录"
+            )
         }
         let target: RestoreTarget
         if let path, !path.isEmpty {
@@ -218,7 +216,7 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         } else {
             target = .project
         }
-        _ = try await restorer(overwrite: overwrite).restore(
+        _ = try await restorer(sourceRoots: sourceRoots).restore(
             projectID: projectID,
             snapshotID: snapshotID,
             target: target,
@@ -404,14 +402,14 @@ public struct CloudFirstEngineAdapter: BackupEngine {
         return id
     }
 
-    private func restorer(overwrite: Bool = false) -> CloudRestoreEngine {
+    private func restorer(sourceRoots: [URL] = []) -> CloudRestoreEngine {
         CloudRestoreEngine(
             masterKey: masterKey,
             source: source,
             options: RestoreOptions(
-                overwriteDestination: overwrite,
                 verifyHashes: true,
-                cache: cache
+                cache: cache,
+                sourceRoots: sourceRoots
             )
         )
     }

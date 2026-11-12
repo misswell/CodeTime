@@ -2628,5 +2628,15 @@
     "invariant": "上传恢复必须用游标跨页处理积压任务",
     "manualAcceptance": false,
     "acceptanceReason": ""
+  },
+  {
+    "id": "CT-264",
+    "test": "testCT264_MissingSourceBoundaryIsRejectedByDefault",
+    "file": "Packages/CodeTimeKit/Tests/CodeTimeKitTests/SourceImmutabilityTests.swift",
+    "purpose": "未提供源边界的普通恢复必须默认拒绝",
+    "required": true,
+    "invariant": "未提供源边界的普通恢复必须默认拒绝",
+    "manualAcceptance": false,
+    "acceptanceReason": ""
   }
 ]

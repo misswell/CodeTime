@@ -130,7 +130,7 @@ final class CloudGarbageCollectorTests: XCTestCase {
         )
 
         // The newest snapshot must still restore bit-for-bit.
-        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [root]))
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("gc-restore-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: destination) }
@@ -332,7 +332,7 @@ extension CloudGarbageCollectorTests {
         _ = try await collector.sweep(policies: [projectID: policy], now: later)
 
         // The revived snapshot must still restore after GC.
-        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [root]))
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("gc-revive-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: destination) }

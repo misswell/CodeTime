@@ -135,7 +135,7 @@ final class RemoteIntegrityVerifierTests: XCTestCase {
         let engineCached = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
-            options: RestoreOptions(cache: cache, readPolicy: .cachePreferred)
+            options: RestoreOptions(cache: cache, readPolicy: .cachePreferred, sourceRoots: [root])
         )
         let destination1 = root.deletingLastPathComponent()
             .appendingPathComponent("restore-cache-\(UUID().uuidString)", isDirectory: true)
@@ -150,7 +150,7 @@ final class RemoteIntegrityVerifierTests: XCTestCase {
         let engineRemote = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
-            options: RestoreOptions(cache: cache, readPolicy: .verifyRemote)
+            options: RestoreOptions(cache: cache, readPolicy: .verifyRemote, sourceRoots: [root])
         )
         let destination2 = root.deletingLastPathComponent()
             .appendingPathComponent("restore-remote-\(UUID().uuidString)", isDirectory: true)

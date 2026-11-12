@@ -296,7 +296,7 @@ final class UploadQueueTests: XCTestCase {
         let report = try await engine.run(projectID: projectID, root: root, matcher: matcher)
         XCTAssertTrue(report.committed)
 
-        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud.base)
+        let restore = CloudRestoreEngine(masterKey: masterKey, source: cloud.base, options: RestoreOptions(sourceRoots: [root]))
         let destination = work.appendingPathComponent("restored", isDirectory: true)
         _ = try await restore.restore(
             projectID: projectID,

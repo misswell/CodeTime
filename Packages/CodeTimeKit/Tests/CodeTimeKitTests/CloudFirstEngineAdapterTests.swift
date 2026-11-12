@@ -48,7 +48,8 @@ final class CloudFirstEngineAdapterTests: XCTestCase {
             options: BackupRunOptions(
                 chunker: ChunkerConfig(minSize: 1024, avgSize: 4096, maxSize: 32 * 1024)
             ),
-            snapshotProjectProvider: { await projects.get($0) }
+            snapshotProjectProvider: { await projects.get($0) },
+            sourceRootsProvider: { [root] in root.map { [$0] } ?? [] }
         )
     }
 

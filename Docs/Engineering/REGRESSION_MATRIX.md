@@ -1,4 +1,4 @@
-# 回归测试矩阵（CT-001 … CT-263）
+# 回归测试矩阵（CT-001 … CT-264）
 
 由 `REGRESSION_INDEX.json` 驱动；`Scripts/regression_gate.sh` 在 PR、main、Beta、Stable Candidate/Publish 强制执行。
 
@@ -267,3 +267,4 @@
 | CT-261 | `testCT261_UploadingPackIsWaitedForBeforeReuse` | uploading Pack 必须等待确认并校验已有内容 | 是 | 否 |
 | CT-262 | `testCT262_SpoolQuotaIsSharedAcrossQueueInstances` | spool 额度必须跨 UploadQueue 实例共享 | 是 | 否 |
 | CT-263 | `testCT263_UploadRecoveryCursorPagesPastOneBatch` | 上传恢复必须用游标跨页处理积压任务 | 是 | 否 |
+| CT-264 | `testCT264_MissingSourceBoundaryIsRejectedByDefault` | 未提供源边界的普通恢复必须默认拒绝 | 是 | 否 |

@@ -56,22 +56,26 @@ public struct RestoreOptions: Sendable {
     public var cache: RestoreObjectCache?
     public var readPolicy: ObjectReadPolicy
     /// Original project roots this restore must never write into. The service
-    /// always supplies every registered project; direct engine callers can use
-    /// this to keep the same read-only-source invariant.
+    /// and adapter always supply every registered project.
     public var sourceRoots: [URL]
+    /// Only a true disaster-recovery export (new Mac, no local sources) may run
+    /// without a source boundary. This is explicit and defaults to false.
+    public var isDisasterRecovery: Bool
 
     public init(
         overwriteDestination: Bool = false,
         verifyHashes: Bool = true,
         cache: RestoreObjectCache? = nil,
         readPolicy: ObjectReadPolicy = .cachePreferred,
-        sourceRoots: [URL] = []
+        sourceRoots: [URL] = [],
+        isDisasterRecovery: Bool = false
     ) {
         self.overwriteDestination = overwriteDestination
         self.verifyHashes = verifyHashes
         self.cache = cache
         self.readPolicy = readPolicy
         self.sourceRoots = sourceRoots
+        self.isDisasterRecovery = isDisasterRecovery
     }
 
     public static let `default` = RestoreOptions()
@@ -187,6 +191,14 @@ public struct CloudRestoreEngine: Sendable {
         destination: URL,
         isCancelled: @Sendable () -> Bool = { false }
     ) async throws -> CloudRestoreReport {
+        // A normal restore must name the source boundary. Without it the engine
+        // cannot prove the destination is independent, so it fails closed. Only
+        // an explicit disaster-recovery export (no local source) may omit it.
+        guard !options.sourceRoots.isEmpty || options.isDisasterRecovery else {
+            throw CloudRestoreError.invalidPath(
+                "恢复必须提供原始项目边界；灾难恢复导出需显式标记 isDisasterRecovery"
+            )
+        }
         // Overwriting is not a restore primitive anymore. Even a caller that
         // bypasses the service must not be able to replace an existing tree,
         // including an original project. A fresh destination is mandatory.

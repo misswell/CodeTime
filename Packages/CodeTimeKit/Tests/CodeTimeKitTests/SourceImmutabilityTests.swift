@@ -398,7 +398,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let report = try await backup(project, cloud: cloud, index: index)
         let before = try snapshot(project)
         let destination = workspace.appendingPathComponent("restored", isDirectory: true)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
         let restored = try await reader.restore(
             projectID: projectID,
             snapshotID: report.snapshotID,
@@ -429,7 +429,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let index = InMemoryIndex()
         let report = try await backup(project, cloud: cloud, index: index)
         let before = try snapshot(project)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
 
         let projectLink = workspace.appendingPathComponent("project-link")
         try FileManager.default.createSymbolicLink(at: projectLink, withDestinationURL: project)
@@ -474,7 +474,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let report = try await backup(project, cloud: cloud, index: index)
         let before = try snapshot(project)
         let target = project.appendingPathComponent("a.txt")
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
         let overwriting = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
@@ -509,7 +509,7 @@ final class SourceImmutabilityTests: XCTestCase {
         XCTAssertNotNil(cloud.commits[report.snapshotID])
 
         let destination = workspace.appendingPathComponent("recovered", isDirectory: true)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
         _ = try await reader.restore(
             projectID: projectID,
             snapshotID: report.snapshotID,
@@ -642,7 +642,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let source = FlakySource(base: cloud)
         source.fail(on: failingID)
         let destination = workspace.appendingPathComponent("interrupted", isDirectory: true)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: source)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: source, options: RestoreOptions(sourceRoots: [project]))
         do {
             _ = try await reader.restore(
                 projectID: projectID,
@@ -779,6 +779,27 @@ final class SourceImmutabilityTests: XCTestCase {
         XCTAssertEqual(try snapshot(project), before)
     }
 
+    func testCT264_MissingSourceBoundaryIsRejectedByDefault() async throws {
+        let project = try makeProject()
+        let cloud = InMemoryCloud()
+        let index = InMemoryIndex()
+        let report = try await backup(project, cloud: cloud, index: index)
+        let destination = workspace.appendingPathComponent("no-boundary", isDirectory: true)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        do {
+            _ = try await reader.restore(
+                projectID: projectID,
+                snapshotID: report.snapshotID,
+                target: .project,
+                destination: destination
+            )
+            XCTFail("未提供源边界的普通恢复必须默认拒绝")
+        } catch {
+            // expected
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testCT252_OverwriteDestinationIsRejectedWithoutSourceRoots() async throws {
         let project = try makeProject()
         let cloud = InMemoryCloud()
@@ -789,7 +810,7 @@ final class SourceImmutabilityTests: XCTestCase {
         let reader = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
-            options: RestoreOptions(overwriteDestination: true)
+            options: RestoreOptions(overwriteDestination: true, isDisasterRecovery: true)
         )
         do {
             _ = try await reader.restore(

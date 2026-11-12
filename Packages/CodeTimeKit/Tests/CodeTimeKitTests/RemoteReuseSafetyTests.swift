@@ -141,7 +141,7 @@ final class RemoteReuseSafetyTests: XCTestCase {
         XCTAssertTrue(reuploaded, "缺失对象必须重新上传")
 
         let destination = workspace.appendingPathComponent("restored", isDirectory: true)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
         _ = try await reader.restore(
             projectID: projectID,
             snapshotID: "second",

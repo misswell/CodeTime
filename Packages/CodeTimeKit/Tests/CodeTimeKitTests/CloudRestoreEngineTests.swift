@@ -63,7 +63,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_FullProjectRestoreIsBitForBit() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         let target = destination("restored")
 
         let report: CloudRestoreReport = try await engine.restore(
@@ -98,7 +98,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_SingleFileRestoreDownloadsOnlyItsChunks() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         let target = destination("one-file")
         let before = cloud.readObjectCount + cloud.readPackCount
 
@@ -120,7 +120,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_DirectoryRestoreSkipsSiblings() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         let target = destination("subtree")
 
         let report: CloudRestoreReport = try await engine.restore(
@@ -140,7 +140,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_ExistingDestinationIsNeverClobbered() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         let target = destination("occupied")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         let marker = target.appendingPathComponent("user-file.txt")
@@ -160,7 +160,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_CorruptedObjectAbortsWithoutTouchingDestination() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         let target = destination("corrupt")
         // Corrupt whichever object backs data.txt.
         let fileNodes = try await index.fileNodes(projectID: projectID)
@@ -184,7 +184,7 @@ final class CloudRestoreEngineTests: XCTestCase {
             guard payload.count > 40 else { return }
             payload[30] ^= 0xFF
         }
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         do {
             _ = try await engine.restore(
                 projectID: projectID, snapshotID: snapshotID, target: .project,
@@ -199,7 +199,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     func testCT155_PathTraversalIsRejected() async throws {
         let staging = destination("staging-root")
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
 
         for bad in ["../escape.txt", "/etc/passwd", "a/../../escape.txt", "a//b", "./hidden"] {
             XCTAssertThrowsError(try engine.safeURL(for: bad, in: staging), "必须拒绝：\(bad)")
@@ -212,7 +212,7 @@ final class CloudRestoreEngineTests: XCTestCase {
     }
 
     func testCT155_MissingCommitMeansVersionDoesNotExist() async throws {
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [source]))
         do {
             _ = try await engine.loadManifest(projectID: projectID, snapshotID: "no-such-snapshot")
             XCTFail("未提交的版本必须不可读")

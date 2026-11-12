@@ -89,7 +89,7 @@ final class RestoreResumeTests: XCTestCase {
         let source = FlakySource(base: cloud)
         source.failingObjectID = failing
         let destination = work.appendingPathComponent("restored", isDirectory: true)
-        let reader = CloudRestoreEngine(masterKey: masterKey, source: source)
+        let reader = CloudRestoreEngine(masterKey: masterKey, source: source, options: RestoreOptions(sourceRoots: [projectRoot]))
         do {
             _ = try await reader.restore(
                 projectID: projectID, snapshotID: snapshotID,

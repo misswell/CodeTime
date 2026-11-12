@@ -418,7 +418,11 @@ private func commandICloud(_ arguments: [String]) async throws {
         tracker: UbiquitousUploadTracker(containerURL: container),
         uploadTimeout: 300
     )
-    let restore = CloudRestoreEngine(masterKey: masterKey, source: readerStore)
+    let restore = CloudRestoreEngine(
+        masterKey: masterKey,
+        source: readerStore,
+        options: RestoreOptions(sourceRoots: [source])
+    )
     let destination = workRoot.appendingPathComponent("restored", isDirectory: true)
     let restoreStarted = Date()
     let restoreReport = try await restore.restore(

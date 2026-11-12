@@ -64,7 +64,7 @@ final class RestoreSafetyTests: XCTestCase {
         let engine = CloudRestoreEngine(
             masterKey: masterKey,
             source: cloud,
-            options: RestoreOptions(verifyHashes: false)
+            options: RestoreOptions(verifyHashes: false, sourceRoots: [project])
         )
         _ = try await engine.restore(
             projectID: projectID, snapshotID: report.snapshotID,
@@ -80,7 +80,7 @@ final class RestoreSafetyTests: XCTestCase {
     func testCT187_DirectoryModeAndSymlinksAreRestoredWithoutEscaping() async throws {
         let (cloud, report) = try await backup()
         let destination = work.appendingPathComponent("restored", isDirectory: true)
-        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud)
+        let engine = CloudRestoreEngine(masterKey: masterKey, source: cloud, options: RestoreOptions(sourceRoots: [project]))
         _ = try await engine.restore(
             projectID: projectID, snapshotID: report.snapshotID,
             target: .project, destination: destination
